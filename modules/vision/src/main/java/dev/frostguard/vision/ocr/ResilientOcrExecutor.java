@@ -153,6 +153,18 @@ public class ResilientOcrExecutor<R> {
         }
     }
 
+    /** Convenience detailed overload for callers that already hold an OCR area. */
+    public RecognitionResult<R> attemptRecognitionDetailed(AreaData area,
+                                int maxAttempts,
+                                long pauseMillis,
+                                OcrSettingsData config,
+                                Predicate<String> acceptor,
+                                Function<String, R> transformer) {
+        Objects.requireNonNull(area, "area");
+        return attemptRecognitionDetailed(area.topLeft(), area.bottomRight(),
+                maxAttempts, pauseMillis, config, acceptor, transformer);
+    }
+
     /**
      * Convenience overload that unpacks a {@link AreaData} into its
      * corner coordinates before delegating.

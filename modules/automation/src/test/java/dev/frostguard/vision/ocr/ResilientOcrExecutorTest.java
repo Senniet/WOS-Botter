@@ -9,6 +9,7 @@ import java.util.concurrent.CancellationException;
 import org.junit.jupiter.api.Test;
 
 import dev.frostguard.api.domain.PointData;
+import dev.frostguard.api.domain.AreaData;
 
 class ResilientOcrExecutorTest {
 
@@ -46,6 +47,21 @@ class ResilientOcrExecutorTest {
         assertEquals(ResilientOcrExecutor.Status.FAILED, failedResult.status());
         assertNull(failedResult.value());
         assertEquals("OcrException: native engine unavailable", failedResult.failure());
+    }
+
+    @Test
+    void detailedRecognitionSupportsAreaDataOverload() {
+        ResilientOcrExecutor<Integer> executor = new ResilientOcrExecutor<>(
+                (config, topLeft, bottomRight) -> {
+                    assertEquals(new PointData(2, 3), topLeft);
+                    assertEquals(new PointData(12, 13), bottomRight);
+                    return "17";
+                });
+        var result = executor.attemptRecognitionDetailed(
+                new AreaData(new PointData(2, 3), new PointData(12, 13)),
+                1, 0, null, text -> text.matches("\\d+"), Integer::valueOf);
+        assertEquals(ResilientOcrExecutor.Status.ACCEPTED, result.status());
+        assertEquals(17, result.value());
     }
 
     @Test
