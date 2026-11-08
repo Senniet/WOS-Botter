@@ -926,7 +926,7 @@ private QueueSlot inspectForStateKeywords(
                 new ResilientOcrExecutor<>(provider.reusingLastFrame());
         for (OcrSettingsData ocrPreset : settingsToTry) {
             try {
-                String text = frameReader.attemptRecognition(
+                var recognition = frameReader.attemptRecognitionDetailed(
                         queueArea.topLeft(),
                         queueArea.bottomRight(),
                         1,
@@ -934,8 +934,9 @@ private QueueSlot inspectForStateKeywords(
                         ocrPreset,
                         s -> !s.isEmpty(),
                         s -> s);
+                String text = recognition.value();
 
-                if (text != null && !text.trim().isEmpty()) {
+                if (recognition.accepted() && text != null && !text.trim().isEmpty()) {
                     String lowerText = text.trim().toLowerCase();
 
                     if (lowerText.contains("idle")) {
@@ -958,6 +959,7 @@ private QueueSlot inspectForStateKeywords(
             }
         }
 
+        logDebug(routineLogTrainingLine("No queue-state keyword was accepted; trying timer evidence instead."));
         return null;
     }
 
@@ -1123,17 +1125,22 @@ private QueueSlot inspectForTrainingTime(
                 new ResilientOcrExecutor<>(provider.reusingLastFrame());
         for (OcrSettingsData ocrPreset : settingsToTry) {
             try {
-                LocalDateTime readyAt = frameReader.attemptRecognition(
+                var timerRead = frameReader.attemptRecognitionDetailed(
                         queueArea,
                         3,
                         10,
                         ocrPreset,
                         GameTimeUtils::isAcceptedFormat,
                         text -> LocalDateTime.now().plus(GameTimeUtils.parseDuration(text)));
+                LocalDateTime readyAt = timerRead.value();
 
-                if (readyAt != null) {
+                if (timerRead.accepted() && readyAt != null) {
                     logInfo(routineLogTrainingLine(troopType + " training ready at: " + readyAt.format(DATETIME_FORMATTER)));
                     return new QueueSlot(troopType, QueueMood.TRAINING, readyAt);
+                } else {
+                    logDebug(routineLogTrainingLine("Training timer OCR for " + troopType.name()
+                            + " status=" + timerRead.status() + " attempts=" + timerRead.attempts()
+                            + (timerRead.failure() == null ? "" : " failure=" + timerRead.failure())));
                 }
             } catch (Exception e) {
                 logWarning(routineLogTrainingLine("Error extracting training time: " + e.getMessage()));

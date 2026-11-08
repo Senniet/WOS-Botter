@@ -70,6 +70,14 @@ public class ResilientOcrExecutor<R> {
      * @param transformer  maps accepted text into the return type
      * @return the transformed value, or {@code null} if all attempts fail
      */
+    public enum Status { ACCEPTED, REJECTED, FAILED }
+
+    /** Explicit OCR outcome; callers can distinguish an unreadable frame from valid non-matching text. */
+    public record RecognitionResult<R>(Status status, R value, String rawText,
+            int attempts, String failure) {
+        public boolean accepted() { return status == Status.ACCEPTED; }
+    }
+
     public R attemptRecognition(PointData upperLeft,
                                 PointData lowerRight,
                                 int maxAttempts,
@@ -77,49 +85,84 @@ public class ResilientOcrExecutor<R> {
                                 OcrSettingsData config,
                                 Predicate<String> acceptor,
                                 Function<String, R> transformer) {
+        return attemptRecognitionDetailed(upperLeft, lowerRight, maxAttempts, pauseMillis,
+                config, acceptor, transformer).value();
+    }
 
+    /**
+     * Performs bounded recognition while retaining the reason it did not produce
+     * an accepted value. Predicate/transformer bugs are intentionally allowed to
+     * propagate rather than being misreported as an OCR miss.
+     */
+    public RecognitionResult<R> attemptRecognitionDetailed(PointData upperLeft,
+                                PointData lowerRight,
+                                int maxAttempts,
+                                long pauseMillis,
+                                OcrSettingsData config,
+                                Predicate<String> acceptor,
+                                Function<String, R> transformer) {
+        Objects.requireNonNull(upperLeft, "upperLeft");
+        Objects.requireNonNull(lowerRight, "lowerRight");
+        Objects.requireNonNull(acceptor, "acceptor");
+        Objects.requireNonNull(transformer, "transformer");
+        if (maxAttempts < 1) throw new IllegalArgumentException("maxAttempts must be at least 1");
+        if (pauseMillis < 0) throw new IllegalArgumentException("pauseMillis must not be negative");
+
+        String lastRaw = null;
+        String lastFailure = null;
+        boolean receivedText = false;
         for (int trial = 0; trial < maxAttempts; trial++) {
+            lastRaw = null;
             checkCancellation();
             log.debug("OCR trial {} / {}", trial + 1, maxAttempts);
             try {
-                String raw = textExtractor.extractText(config, upperLeft, lowerRight);
+                lastRaw = textExtractor.extractText(config, upperLeft, lowerRight);
                 checkCancellation();
-                if (raw != null) {
-                    if (acceptor.test(raw)) {
-                        log.info("=== OCR Completed === Text: '{}', Match: true, Position: ({},{}) to ({},{})",
-                                raw.trim().replace("\n", " "),
-                                upperLeft.getX(), upperLeft.getY(),
-                                lowerRight.getX(), lowerRight.getY());
-                        return transformer.apply(raw);
-                    } else if (trial == maxAttempts - 1) {
-                        log.info("=== OCR Completed === Text: '{}', Match: false, Position: ({},{}) to ({},{})",
-                                raw.trim().replace("\n", " "),
-                                upperLeft.getX(), upperLeft.getY(),
-                                lowerRight.getX(), lowerRight.getY());
-                    }
-                }
             } catch (CancellationException exception) {
                 throw exception;
-            } catch (IOException | OcrException | RuntimeException ex) {
-                log.warn("OCR trial {} failed: {}", trial + 1, ex.getMessage());
+            } catch (IOException | OcrException | RuntimeException exception) {
+                lastFailure = exception.getClass().getSimpleName() + ": " + exception.getMessage();
+                log.warn("OCR trial {} failed: {}", trial + 1, lastFailure);
+            }
+            if (lastRaw != null && !lastRaw.isBlank()) {
+                receivedText = true;
+                if (acceptor.test(lastRaw)) {
+                    R value = transformer.apply(lastRaw);
+                    log.info("=== OCR Completed === accepted text='{}' after {} attempt(s)",
+                            lastRaw.trim().replace("\n", " "), trial + 1);
+                    return new RecognitionResult<>(Status.ACCEPTED, value, lastRaw, trial + 1, null);
+                }
             }
 
             if (trial < maxAttempts - 1) {
                 try {
                     Thread.sleep(pauseMillis);
-                } catch (InterruptedException ie) {
+                } catch (InterruptedException interrupted) {
                     Thread.currentThread().interrupt();
                     throw new CancellationException("OCR retry interrupted");
                 }
             }
         }
-        return null;
+        Status status = receivedText ? Status.REJECTED : Status.FAILED;
+        return new RecognitionResult<>(status, null, lastRaw, maxAttempts, lastFailure);
     }
 
     private static void checkCancellation() {
         if (Thread.currentThread().isInterrupted()) {
             throw new CancellationException("OCR cancelled");
         }
+    }
+
+    /** Convenience detailed overload for callers that already hold an OCR area. */
+    public RecognitionResult<R> attemptRecognitionDetailed(AreaData area,
+                                int maxAttempts,
+                                long pauseMillis,
+                                OcrSettingsData config,
+                                Predicate<String> acceptor,
+                                Function<String, R> transformer) {
+        Objects.requireNonNull(area, "area");
+        return attemptRecognitionDetailed(area.topLeft(), area.bottomRight(),
+                maxAttempts, pauseMillis, config, acceptor, transformer);
     }
 
     /**

@@ -1,5 +1,7 @@
 package dev.frostguard.vision.ocr;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.util.concurrent.CancellationException;
@@ -7,6 +9,7 @@ import java.util.concurrent.CancellationException;
 import org.junit.jupiter.api.Test;
 
 import dev.frostguard.api.domain.PointData;
+import dev.frostguard.api.domain.AreaData;
 
 class ResilientOcrExecutorTest {
 
@@ -27,4 +30,53 @@ class ResilientOcrExecutorTest {
             Thread.interrupted();
         }
     }
+    @Test
+    void detailedResultDistinguishesRejectedTextFromOcrFailure() {
+        ResilientOcrExecutor<String> rejected = new ResilientOcrExecutor<>((config, topLeft, bottomRight) -> "??");
+        var rejectedResult = rejected.attemptRecognitionDetailed(new PointData(0, 0), new PointData(10, 10),
+                2, 0, null, text -> text.matches("\\d+"), text -> text);
+        assertEquals(ResilientOcrExecutor.Status.REJECTED, rejectedResult.status());
+        assertEquals("??", rejectedResult.rawText());
+        assertEquals(2, rejectedResult.attempts());
+
+        ResilientOcrExecutor<String> failed = new ResilientOcrExecutor<>((config, topLeft, bottomRight) -> {
+            throw new OcrException("native engine unavailable");
+        });
+        var failedResult = failed.attemptRecognitionDetailed(new PointData(0, 0), new PointData(10, 10),
+                1, 0, null, text -> true, text -> text);
+        assertEquals(ResilientOcrExecutor.Status.FAILED, failedResult.status());
+        assertNull(failedResult.value());
+        assertEquals("OcrException: native engine unavailable", failedResult.failure());
+    }
+
+    @Test
+    void detailedRecognitionSupportsAreaDataOverload() {
+        ResilientOcrExecutor<Integer> executor = new ResilientOcrExecutor<>(
+                (config, topLeft, bottomRight) -> {
+                    assertEquals(new PointData(2, 3), topLeft);
+                    assertEquals(new PointData(12, 13), bottomRight);
+                    return "17";
+                });
+        var result = executor.attemptRecognitionDetailed(
+                new AreaData(new PointData(2, 3), new PointData(12, 13)),
+                1, 0, null, text -> text.matches("\\d+"), Integer::valueOf);
+        assertEquals(ResilientOcrExecutor.Status.ACCEPTED, result.status());
+        assertEquals(17, result.value());
+    }
+
+    @Test
+    void doesNotSwallowCallerPredicateBugs() {
+        ResilientOcrExecutor<String> executor = new ResilientOcrExecutor<>((config, topLeft, bottomRight) -> "42");
+        assertThrows(IllegalStateException.class, () -> executor.attemptRecognitionDetailed(
+                new PointData(0, 0), new PointData(10, 10), 1, 0, null,
+                text -> { throw new IllegalStateException("predicate bug"); }, text -> text));
+    }
+
+    @Test
+    void rejectsInvalidRetryConfiguration() {
+        ResilientOcrExecutor<String> executor = new ResilientOcrExecutor<>((config, topLeft, bottomRight) -> "42");
+        assertThrows(IllegalArgumentException.class, () -> executor.attemptRecognitionDetailed(
+                new PointData(0, 0), new PointData(10, 10), 0, 0, null, text -> true, text -> text));
+    }
+
 }

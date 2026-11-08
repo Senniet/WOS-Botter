@@ -71,19 +71,22 @@ public class DeploymentHelper {
 
         long travelSeconds = readTravelTimeSeconds();
 
-        Integer readCost = integerReader.attemptRecognition(
+        var costRead = integerReader.attemptRecognitionDetailed(
                 CommonGameAreas.SPENT_STAMINA_OCR_AREA,
                 3, 100L,
                 CommonOCRSettings.SPENT_STAMINA_SETTINGS,
                 txt -> RegexNumberParser.conformsTo(txt, CommonOCRSettings.NUMBER_PATTERN),
                 txt -> RegexNumberParser.extractByPattern(txt, CommonOCRSettings.NUMBER_PATTERN));
-        boolean fallback = readCost == null || readCost < 1 || readCost > maxPlausibleStaminaCost;
+        Integer readCost = costRead.value();
+        boolean fallback = !costRead.accepted() || readCost == null
+                || readCost < 1 || readCost > maxPlausibleStaminaCost;
         int staminaCost = fallback ? maxPlausibleStaminaCost : readCost;
 
         if (fallback) {
-            log.warn("Deployment stamina cost "
-                    + (readCost == null ? "unreadable" : readCost)
-                    + " is out of range [1.." + maxPlausibleStaminaCost + "]; assuming "
+            log.warn("Deployment stamina cost unavailable or implausible: status=" + costRead.status()
+                    + " value=" + readCost + " attempts=" + costRead.attempts()
+                    + (costRead.failure() == null ? "" : " failure=" + costRead.failure())
+                    + "; valid range [1.." + maxPlausibleStaminaCost + "], conservatively assuming "
                     + maxPlausibleStaminaCost);
         }
         log.info("Deployment screen: travelSeconds=" + travelSeconds
@@ -93,15 +96,19 @@ public class DeploymentHelper {
     }
 
     public long readTravelTimeSeconds() {
-        Duration travel = durationReader.attemptRecognition(
+        var travelRead = durationReader.attemptRecognitionDetailed(
                 CommonGameAreas.TRAVEL_TIME_OCR_AREA,
                 3, 100L,
                 CommonOCRSettings.TRAVEL_TIME_SETTINGS,
                 GameTimeUtils::isAcceptedFormat,
                 GameTimeUtils::parseDuration);
+        Duration travel = travelRead.value();
         long travelSeconds = travel == null ? 0 : travel.getSeconds();
-        if (travel == null) {
-            log.warn("Deployment travel-time OCR failed");
+        if (!travelRead.accepted() || travel == null) {
+            log.warn("Deployment travel-time OCR unavailable: status=" + travelRead.status()
+                    + " attempts=" + travelRead.attempts()
+                    + (travelRead.failure() == null ? "" : " failure=" + travelRead.failure())
+                    + "; callers must use their conservative travel-time fallback");
         }
         return travelSeconds;
     }

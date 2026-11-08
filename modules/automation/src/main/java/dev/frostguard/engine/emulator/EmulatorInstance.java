@@ -255,18 +255,7 @@ public abstract class EmulatorInstance {
             d.executeShellCommand("screencap", new CollectingOutputReceiver() {
                 @Override public void addOutput(byte[] data, int off, int len) { buf.write(data, off, len); }
             }, 2000, TimeUnit.MILLISECONDS);
-            byte[] raw = buf.toByteArray();
-            if (raw.length < 12) throw new RuntimeException("screencap too small");
-            int w = le32(raw, 0), h = le32(raw, 4), fmt = le32(raw, 8);
-            int bitsPerPixel = (fmt == 1) ? 32 : 16;
-            int bytesPerPixel = bitsPerPixel / 8;
-            int headerLength = raw.length - (w * h * bytesPerPixel);
-            if (headerLength < 12 || headerLength > 64) {
-                headerLength = 12;
-            }
-            byte[] px = new byte[raw.length - headerLength];
-            System.arraycopy(raw, headerLength, px, 0, px.length);
-            RawImageData frame = RawImageData.capture(px, w, h, bitsPerPixel);
+            RawImageData frame = decodeScreenshotPayload(buf.toByteArray());
             lastFrame.put(idx, frame);
             return frame;
         } catch (Exception e) {
@@ -291,6 +280,35 @@ public abstract class EmulatorInstance {
                 + Objects.requireNonNullElse(failure.getMessage(), "no message");
     }
 
+    static RawImageData decodeScreenshotPayload(byte[] raw) {
+        if (raw == null || raw.length < 12) {
+            throw new IllegalArgumentException("screencap header is missing or truncated");
+        }
+        int width = le32(raw, 0), height = le32(raw, 4), format = le32(raw, 8);
+        if (width <= 0 || height <= 0 || width > 16_384 || height > 16_384) {
+            throw new IllegalArgumentException("invalid screencap dimensions: " + width + "x" + height);
+        }
+        // Android PIXEL_FORMAT_RGBA_8888 / RGBX_8888 and RGB_565.
+        // Reject unknown formats instead of silently interpreting them as RGB_565.
+        int bitsPerPixel = switch (format) {
+            case 1, 2 -> 32;
+            case 4 -> 16;
+            default -> throw new IllegalArgumentException("unsupported screencap pixel format: " + format);
+        };
+        long expectedPixelBytes = (long) width * height * (bitsPerPixel / 8);
+        long headerLength = raw.length - expectedPixelBytes;
+        if (headerLength < 12 || headerLength > 64 || expectedPixelBytes > Integer.MAX_VALUE
+                || headerLength + expectedPixelBytes != raw.length) {
+            throw new IllegalArgumentException("incomplete or malformed screencap payload: dimensions="
+                    + width + "x" + height + ", format=" + format + ", bytes=" + raw.length);
+        }
+        int offset = (int) headerLength;
+        byte[] pixels = Arrays.copyOfRange(raw, offset, raw.length);
+        RawImageData frame = RawImageData.capture(pixels, width, height, bitsPerPixel);
+        if (!frame.isValid()) throw new IllegalArgumentException("decoded screencap frame is invalid");
+        return frame;
+    }
+
     private static int le32(byte[] b, int o) {
         return (b[o]&0xFF) | ((b[o+1]&0xFF)<<8) | ((b[o+2]&0xFF)<<16) | ((b[o+3]&0xFF)<<24);
     }
@@ -304,18 +322,16 @@ public abstract class EmulatorInstance {
     boolean touchArea(String idx, PointData a, PointData b, int n, int delMs) { return tap(idx, a, b, n, delMs); }
 
     private boolean tap(String idx, PointData c1, PointData c2, int reps, int delMs) {
-        return withRetries(idx, dev -> {
-            Random rng = new Random();
-            int x0 = Math.min(c1.getX(), c2.getX()), x1 = Math.max(c1.getX(), c2.getX());
-            int y0 = Math.min(c1.getY(), c2.getY()), y1 = Math.max(c1.getY(), c2.getY());
-            for (int t = 0; t < reps; t++) {
-                int tx = x0 + rng.nextInt(Math.max(1, x1 - x0 + 1));
-                int ty = y0 + rng.nextInt(Math.max(1, y1 - y0 + 1));
-                try { dev.executeShellCommand("input tap " + tx + " " + ty, new NullOutputReceiver()); Thread.sleep(delMs); }
-                catch (Exception e) { throw new RuntimeException(e); }
-            }
-            return Boolean.TRUE;
-        }, "tap");
+        Random rng = new Random();
+        int x0 = Math.min(c1.getX(), c2.getX()), x1 = Math.max(c1.getX(), c2.getX());
+        int y0 = Math.min(c1.getY(), c2.getY()), y1 = Math.max(c1.getY(), c2.getY());
+        for (int t = 0; t < reps; t++) {
+            int tx = x0 + rng.nextInt(Math.max(1, x1 - x0 + 1));
+            int ty = y0 + rng.nextInt(Math.max(1, y1 - y0 + 1));
+            dispatchInputCommand(idx, "input tap " + tx + " " + ty, "tap");
+            sleep(delMs);
+        }
+        return true;
     }
 
     public void swipe(String idx, PointData from, PointData to) {
@@ -330,11 +346,7 @@ public abstract class EmulatorInstance {
     }
 
     private void swipe(String idx, PointData from, PointData to, Integer durationMs) {
-        withRetries(idx, dev -> {
-            try { dev.executeShellCommand(swipeCommand(from, to, durationMs), new NullOutputReceiver()); }
-            catch (Exception e) { throw new RuntimeException(e); }
-            return Boolean.TRUE;
-        }, "swipe");
+        dispatchInputCommand(idx, swipeCommand(from, to, durationMs), "swipe");
     }
 
     static String swipeCommand(PointData from, PointData to, Integer durationMs) {
@@ -344,27 +356,54 @@ public abstract class EmulatorInstance {
     }
 
     public void pressBackButton(String idx) {
-        withRetries(idx, dev -> {
-            try { dev.executeShellCommand("input keyevent KEYCODE_BACK", new NullOutputReceiver()); }
-            catch (Exception e) { throw new RuntimeException(e); }
-            return Boolean.TRUE;
-        }, "back");
+        dispatchInputCommand(idx, "input keyevent KEYCODE_BACK", "back");
     }
 
     public void writeText(String idx, String text) {
-        withRetries(idx, dev -> {
-            try { dev.executeShellCommand("input text \"" + esc(text) + "\"", new NullOutputReceiver()); }
-            catch (Exception e) { throw new RuntimeException(e); }
-            return Boolean.TRUE;
-        }, "text");
+        dispatchInputCommand(idx, "input text \"" + esc(text) + "\"", "text");
     }
 
     public void clearText(String idx, int n) {
-        withRetries(idx, dev -> {
-            try { for (int c = 0; c < n; c++) { dev.executeShellCommand("input keyevent KEYCODE_DEL", new NullOutputReceiver()); Thread.sleep(50); } }
-            catch (Exception e) { throw new RuntimeException(e); }
-            return Boolean.TRUE;
-        }, "clear");
+        for (int c = 0; c < n; c++) {
+            dispatchInputCommand(idx, "input keyevent KEYCODE_DEL", "clear-text");
+            sleep(50);
+        }
+    }
+
+    /**
+     * Dispatches a non-idempotent UI input exactly once. A transport error after
+     * sending the command leaves its outcome unknown, so automatic retry/reboot
+     * recovery is deliberately forbidden here; the caller must inspect the UI.
+     */
+    private void dispatchInputCommand(String idx, String command, String tag) {
+        if (Thread.currentThread().isInterrupted()) {
+            throw new ADBConnectionException("Interrupted before input dispatch: " + tag);
+        }
+        final IDevice device;
+        try {
+            device = getCachedDevice(idx);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            invalidateAllCaches(idx);
+            throw new ADBConnectionException("ADB lookup interrupted before input dispatch for "
+                    + tag + " on " + idx + "; command was not sent", interrupted);
+        } catch (Exception failure) {
+            invalidateAllCaches(idx);
+            throw new ADBConnectionException("ADB unavailable before input dispatch for "
+                    + tag + " on " + idx + "; command was not sent", failure);
+        }
+        if (device == null || !device.isOnline()) {
+            invalidateAllCaches(idx);
+            throw new ADBConnectionException("Device unavailable before input dispatch for "
+                    + tag + " on " + idx + "; command was not sent");
+        }
+        try {
+            device.executeShellCommand(command, new NullOutputReceiver(), 3, TimeUnit.SECONDS);
+        } catch (Exception failure) {
+            invalidateAllCaches(idx);
+            throw new ADBConnectionException("Input dispatch outcome unknown for " + tag
+                    + " on " + idx + "; command was not retried", failure);
+        }
     }
 
     private String esc(String s) {
