@@ -40,6 +40,7 @@ import dev.frostguard.api.runtime.WorkspacePaths;
 import dev.frostguard.engine.helper.MarchSlotAvailabilityEstimator;
 import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.schedule.GatherQueuePolicy;
+import dev.frostguard.engine.error.TaskOutcomeUnknownException;
 import dev.frostguard.engine.schedule.LaunchPoint;
 import dev.frostguard.engine.schedule.TaskQueue;
 import dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig;
@@ -127,6 +128,7 @@ public class GatherRoutine extends DelayedTask {
     private List<GatherType> rotationPool;
     private LocalDateTime earliestReschedule;
     private ResilientOcrExecutor<LocalDateTime> textHelper;
+    private boolean confirmedDailyMissionProgress;
     // pernerch/2026-07-02: stored per-profile task instance (one GatherRoutine per profile).
     // Records when gather troops were recalled by Intel or Bear Trap so we can wait for them
     // to return before re-deploying. Also persisted to profile config for crash recovery.
@@ -140,6 +142,7 @@ public class GatherRoutine extends DelayedTask {
 
     @Override
     protected void execute() {
+        confirmedDailyMissionProgress = false;
         loadConfig();
 
         if (enabledTypes.isEmpty()) {
@@ -249,6 +252,28 @@ public class GatherRoutine extends DelayedTask {
 
         // 2. Fill Queues (Persistent Rotation)
         GatherFillResult fillResult = fillQueues(activeGatherCount, idleSlotCount, activeMarches);
+
+        // A dispatch is not proof that a march actually left. Compare the March Queue before and after.
+        if (fillResult.deployed() > 0) {
+            GatherMarchSnapshot verifiedSnapshot = readGatherMarchSnapshot();
+            int confirmedDeployments = countConfirmedNewGatherMarches(
+                    marchSnapshot.slots(), verifiedSnapshot.slots());
+            confirmedDailyMissionProgress = confirmedDeployments > 0;
+            if (confirmedDeployments < fillResult.deployed()) {
+                LocalDateTime retryAt = LocalDateTime.now().plusMinutes(UNKNOWN_MARCH_RETRY_MINUTES);
+                logWarning(String.format(
+                        "Gather dispatch verification incomplete: dispatched=%d confirmed=%d. "
+                                + "No repeat tap; rechecking March Queue at %s.",
+                        fillResult.deployed(), confirmedDeployments, GameTimeUtils.formatCountdown(retryAt)));
+                reschedule(retryAt);
+                if (confirmedDeployments == 0) {
+                    throw new TaskOutcomeUnknownException(
+                            "Gather deployment could not be confirmed; bounded March Queue retry scheduled without recording completion.");
+                }
+                return;
+            }
+            logInfo("Confirmed " + confirmedDeployments + " new gather march deployment(s) in March Queue.");
+        }
 
         // 3. Save & Finalize
         finalizeReschedule(fillResult);
@@ -1259,7 +1284,36 @@ public class GatherRoutine extends DelayedTask {
 
     @Override
     public boolean provideDailyMissionProgress() {
-        return true;
+        return confirmedDailyMissionProgress;
+    }
+
+    static int countConfirmedNewGatherMarches(List<MarchSlotState> before, List<MarchSlotState> after) {
+        if (before.isEmpty() || after.isEmpty()) {
+            return 0;
+        }
+        int confirmed = 0;
+        for (MarchSlotState current : after) {
+            if (!isActiveGatherMarch(current)) {
+                continue;
+            }
+            MarchSlotState previous = before.stream()
+                    .filter(slot -> slot.slot() == current.slot())
+                    .findFirst()
+                    .orElse(null);
+            if (previous != null
+                    && (previous.availability() == MarchSlotAvailability.IDLE
+                    || previous.movementPhase() == MarchMovementPhase.RETURNING)) {
+                confirmed++;
+            }
+        }
+        return confirmed;
+    }
+
+    private static boolean isActiveGatherMarch(MarchSlotState slot) {
+        return slot.activityType() == MarchActivityType.GATHER
+                && slot.availability() == MarchSlotAvailability.OCCUPIED
+                && (slot.movementPhase() == MarchMovementPhase.OUTBOUND
+                || slot.movementPhase() == MarchMovementPhase.WORKING);
     }
 
     // ================= INNER CLASSES =================
