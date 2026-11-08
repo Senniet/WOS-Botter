@@ -9,6 +9,7 @@ import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.schedule.LaunchPoint;
 import dev.frostguard.engine.nav.SearchConfigConstants;
+import dev.frostguard.tasks.diagnostics.TaskControlSignals;
 
 import java.time.LocalDateTime;
 
