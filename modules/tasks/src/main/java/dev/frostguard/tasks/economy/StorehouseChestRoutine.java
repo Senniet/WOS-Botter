@@ -20,6 +20,7 @@ import dev.frostguard.api.domain.AreaData;
 import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.api.domain.OcrSettingsData;
 import dev.frostguard.api.domain.RawImageData;
+import dev.frostguard.engine.error.TaskOutcomeUnknownException;
 import dev.frostguard.engine.service.StaminaService;
 import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.schedule.LaunchPoint;
@@ -103,6 +104,7 @@ public class StorehouseChestRoutine extends DelayedTask {
     private StorehouseVisitFlow.VisitState visitState = StorehouseVisitFlow.VisitState.READY;
     private StorehouseVisitFlow.ActivityPhase activityPhase = StorehouseVisitFlow.ActivityPhase.RESCHEDULING;
     private Integer pendingAgnesStamina;
+    private boolean confirmedDailyMissionProgress;
 
     public StorehouseChestRoutine(AccountDescriptor profile, TpDailyTaskEnum tpDailyTask) {
         super(profile, tpDailyTask);
@@ -117,6 +119,7 @@ public class StorehouseChestRoutine extends DelayedTask {
     protected void execute() {
         this.textHelper = new ResilientOcrExecutor<>(provider);
         pendingAgnesStamina = null;
+        confirmedDailyMissionProgress = false;
         setVisitState(StorehouseVisitFlow.VisitState.READY, "New execute() visit; state recalculated in memory");
 
         StorehouseVisitFlow.VisitDecision decision;
@@ -135,6 +138,8 @@ public class StorehouseChestRoutine extends DelayedTask {
                     + failure.getClass().getSimpleName());
         }
 
+        confirmedDailyMissionProgress = hasConfirmedProgress(
+                decision.confirmedChestCollections(), decision.confirmedStaminaCollections());
         setActivityPhase(StorehouseVisitFlow.ActivityPhase.RESCHEDULING);
         setVisitState(decision.state(), decision.reason());
         LocalDateTime scheduledTime = LocalDateTime.now().plus(decision.delay());
@@ -144,6 +149,10 @@ public class StorehouseChestRoutine extends DelayedTask {
                 decision.confirmedStaminaCollections(), decision.delay(),
                 scheduledTime.format(DATETIME_FORMATTER)));
         reschedule(scheduledTime);
+        if (shouldPropagateUnknownOutcome(decision.state(), confirmedDailyMissionProgress)) {
+            throw new TaskOutcomeUnknownException(
+                    "Storehouse visit ended with an unconfirmed outcome; bounded retry scheduled without recording completion.");
+        }
     }
 
     /**
@@ -478,6 +487,15 @@ public class StorehouseChestRoutine extends DelayedTask {
 
     @Override
     public boolean provideDailyMissionProgress() {
-        return true;
+        return confirmedDailyMissionProgress;
+    }
+
+    static boolean hasConfirmedProgress(int confirmedChestCollections, int confirmedStaminaCollections) {
+        return confirmedChestCollections > 0 || confirmedStaminaCollections > 0;
+    }
+
+    static boolean shouldPropagateUnknownOutcome(
+            StorehouseVisitFlow.VisitState state, boolean confirmedProgress) {
+        return state == StorehouseVisitFlow.VisitState.RETRY_ON_ERROR && !confirmedProgress;
     }
 }
