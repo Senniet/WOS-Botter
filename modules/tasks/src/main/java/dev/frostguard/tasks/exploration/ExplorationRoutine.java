@@ -9,6 +9,7 @@ import dev.frostguard.api.domain.ImageSearchResultData;
 import dev.frostguard.api.domain.PointData;
 import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.api.domain.SizeData;
+import dev.frostguard.engine.error.TaskOutcomeUnknownException;
 import dev.frostguard.engine.nav.SearchConfigConstants;
 import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.schedule.LaunchPoint;
@@ -50,6 +51,10 @@ public class ExplorationRoutine extends DelayedTask {
 		rescheduleFromConfiguredOffset(claimOutcome);
 		pressBack();
 		sleepTask(500);
+		if (claimOutcome == ExplorationClaimOutcome.UNKNOWN) {
+			throw new TaskOutcomeUnknownException(
+					"Exploration claim could not be confirmed; retry scheduled without recording completion.");
+		}
 	}
 
 	private String routineLogExplorationLine(String note) {
