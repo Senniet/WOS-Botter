@@ -37,6 +37,10 @@ public class TaskDispatcher implements PreemptionListener, StaminaChangeListener
         return managedQueues.get(accountId);
     }
 
+    public boolean hasExecutingTasks() {
+        return managedQueues.values().stream().anyMatch(TaskQueue::hasExecutingTask);
+    }
+
     public boolean applyProfileUpdate(AccountDescriptor profile) {
         if (profile == null || profile.getId() == null) return false;
         TaskQueue queue = managedQueues.get(profile.getId());

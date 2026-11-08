@@ -128,6 +128,8 @@ public class TaskQueue {
 
     public LocalDateTime     getScheduledUntil() { return statusModel.getDelayUntil(); }
     public boolean           isActive()          { return statusModel.isRunning(); }
+    /** True only while a concrete automation routine is executing, not while its queue is idle. */
+    public boolean           hasExecutingTask()  { return runningContext != null; }
     public boolean           isPaused()          { return statusModel.isPaused(); }
     public AccountDescriptor getProfile()        { return profile; }
 
