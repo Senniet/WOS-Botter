@@ -124,6 +124,8 @@ private boolean prioritizePromotion;
 
 private boolean ministryAppointmentEnabled;
 
+private boolean trainingProgressConfirmed;
+
 private TroopTypeShape troopTypeBeingTrained;
 
 private boolean isPromotionTraining;
@@ -163,6 +165,7 @@ protected void loadConfiguration() {
 @Override
     protected void execute() {
 
+        trainingProgressConfirmed = false;
         loadConfiguration();
         buildQueuesListFlow();
 
@@ -208,6 +211,12 @@ protected void loadConfiguration() {
         logInfo(routineLogTrainingLine("Verifying final queue states via sidebar."));
         navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME);
         List<QueueSlot> verifiedQueues = inspectAllQueues();
+        trainingProgressConfirmed = hasConfirmedTrainingProgress(readyQueues, verifiedQueues);
+        if (trainingProgressConfirmed) {
+            logInfo(routineLogTrainingLine("Training progress confirmed by a queue transitioning to TRAINING."));
+        } else {
+            logWarning(routineLogTrainingLine("No newly started training queue could be confirmed."));
+        }
         allCompletionTimes.clear();
         allCompletionTimes.addAll(extractExistingCompletionTimesFlow(verifiedQueues));
 
@@ -216,7 +225,7 @@ protected void loadConfiguration() {
 
 @Override
     public boolean provideDailyMissionProgress() {
-        return true;
+        return trainingProgressConfirmed;
     }
 
 @Override
@@ -224,13 +233,13 @@ protected void loadConfiguration() {
         return LaunchPoint.HOME;
     }
 
-private enum TroopTypeShape {
+enum TroopTypeShape {
         INFANTRY,
         LANCER,
         MARKSMAN
     }
 
-private enum QueueMood {
+enum QueueMood {
         IDLE,
         TRAINING,
         COMPLETE,
@@ -238,7 +247,7 @@ private enum QueueMood {
         UNKNOWN
     }
 
-private record QueueSlot(TroopTypeShape type, QueueMood status, LocalDateTime readyAt) {
+record QueueSlot(TroopTypeShape type, QueueMood status, LocalDateTime readyAt) {
     }
 
 private boolean shouldLimitTrainingForAppointmentFlow() {
@@ -1219,6 +1228,22 @@ static LocalDateTime selectUpgradingWakeup(
                 .filter(candidate -> candidate.isAfter(now))
                 .min(LocalDateTime::compareTo)
                 .orElse(fallback);
+    }
+
+static boolean hasConfirmedTrainingProgress(List<QueueSlot> attemptedQueues, List<QueueSlot> verifiedQueues) {
+        Set<TroopTypeShape> eligibleTypes = new HashSet<>();
+        for (QueueSlot queue : attemptedQueues) {
+            if (queue.status() == QueueMood.IDLE || queue.status() == QueueMood.COMPLETE) {
+                eligibleTypes.add(queue.type());
+            }
+        }
+
+        for (QueueSlot queue : verifiedQueues) {
+            if (eligibleTypes.contains(queue.type()) && queue.status() == QueueMood.TRAINING) {
+                return true;
+            }
+        }
+        return false;
     }
 
 private List<QueueSlot> filterReadyQueuesFlow(List<QueueSlot> queues) {
