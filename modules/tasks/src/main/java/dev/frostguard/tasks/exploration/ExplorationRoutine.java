@@ -9,6 +9,7 @@ import dev.frostguard.api.domain.ImageSearchResultData;
 import dev.frostguard.api.domain.PointData;
 import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.api.domain.SizeData;
+import dev.frostguard.engine.error.TaskOutcomeUnknownException;
 import dev.frostguard.engine.nav.SearchConfigConstants;
 import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.schedule.LaunchPoint;
@@ -20,7 +21,7 @@ public class ExplorationRoutine extends DelayedTask {
 	private static final PointData REWARD_POPUP_TOP_LEFT = new PointData(230, 890);
 	private static final PointData REWARD_POPUP_BOTTOM_RIGHT = new PointData(490, 960);
 	private static final int MAX_OPEN_ATTEMPTS = 2;
-	private static final int MAX_CLAIM_TAP_ATTEMPTS = 3;
+	private static final int UNKNOWN_RETRY_MINUTES = 10;
 
 	public ExplorationRoutine(AccountDescriptor profile, TpDailyTaskEnum tpDailyTask) {
 		super(profile, tpDailyTask);
@@ -35,18 +36,25 @@ public class ExplorationRoutine extends DelayedTask {
 	protected void execute() {
 		logInfo(routineLogExplorationLine("Opening Exploration screen from world view."));
 		boolean opened = openExplorationScreen();
-		boolean claimedAnyReward = opened && claimAvailableRewards();
-		if (claimedAnyReward) {
+		ExplorationClaimOutcome claimOutcome = opened
+				? claimAvailableRewards()
+				: ExplorationClaimOutcome.UNKNOWN;
+		if (claimOutcome == ExplorationClaimOutcome.CLAIMED) {
 			logInfo(routineLogExplorationLine("Exploration rewards claimed."));
-		} else if (!opened) {
-			logWarning(routineLogExplorationLine("Exploration screen could not be confirmed."));
-		} else {
+		} else if (claimOutcome == ExplorationClaimOutcome.NONE_AVAILABLE) {
 			logInfo(routineLogExplorationLine("No exploration rewards to claim."));
+		} else {
+			logWarning(routineLogExplorationLine(
+					"Exploration claim outcome is unknown. Scheduling a bounded retry instead of normal completion."));
 		}
 
-		rescheduleFromConfiguredOffset();
+		rescheduleFromConfiguredOffset(claimOutcome);
 		pressBack();
 		sleepTask(500);
+		if (claimOutcome == ExplorationClaimOutcome.UNKNOWN) {
+			throw new TaskOutcomeUnknownException(
+					"Exploration claim could not be confirmed; retry scheduled without recording completion.");
+		}
 	}
 
 	private String routineLogExplorationLine(String note) {
@@ -82,46 +90,37 @@ public class ExplorationRoutine extends DelayedTask {
 		return explorationButton.isFound();
 	}
 
-	private boolean claimAvailableRewards() {
-		for (int attempt = 1; attempt <= MAX_CLAIM_TAP_ATTEMPTS; attempt++) {
-			ImageSearchResultData claimResult = locateEnabledClaimButton();
+	private ExplorationClaimOutcome claimAvailableRewards() {
+		ImageSearchResultData claimResult = locateEnabledClaimButton();
+		if (!claimResult.isFound()) {
+			logDebug(routineLogExplorationLine("Enabled claim button not detected."));
+			return ExplorationClaimOutcome.NONE_AVAILABLE;
+		}
 
-			if (!claimResult.isFound()) {
-				logDebug(routineLogExplorationLine("Enabled claim button not detected on attempt " + attempt + "."));
-				return attempt > 1;
-			}
+		logInfo(routineLogExplorationLine(String.format(
+				"Enabled claim button detected at %s with score %.2f. Pressing once.",
+				claimResult.getPoint(), claimResult.getMatchPercentage())));
+		tapClaimButton(claimResult);
+		sleepTask(800);
+		dismissRewardPopup();
 
+		ImageSearchResultData disabledClaim = locateDisabledClaimButton();
+		if (disabledClaim.isFound()) {
 			logInfo(routineLogExplorationLine(String.format(
-					"Enabled claim button detected at %s with score %.2f. Pressing attempt %d/%d.",
-					claimResult.getPoint(), claimResult.getMatchPercentage(), attempt, MAX_CLAIM_TAP_ATTEMPTS)));
-			tapClaimButton(claimResult);
-			sleepTask(800);
-			dismissRewardPopup();
+					"Disabled claim button detected at %s with score %.2f; reward claim succeeded.",
+					disabledClaim.getPoint(), disabledClaim.getMatchPercentage())));
+			return ExplorationClaimOutcome.CLAIMED;
+		}
 
-			ImageSearchResultData disabledClaim = locateDisabledClaimButton();
-			if (disabledClaim.isFound()) {
-				logInfo(routineLogExplorationLine(String.format(
-						"Disabled claim button detected at %s with score %.2f; reward claim succeeded.",
-						disabledClaim.getPoint(), disabledClaim.getMatchPercentage())));
-				return true;
-			}
-
-			ImageSearchResultData remainingEnabledClaim = locateEnabledClaimButton();
-			if (!remainingEnabledClaim.isFound()) {
-				logInfo(routineLogExplorationLine(String.format(
-						"Claim button no longer visible after attempt %d; reward claim succeeded.",
-						attempt)));
-				return true;
-			}
-
-			logWarning(routineLogExplorationLine(String.format(
-					"Enabled claim button still detected after attempt %d; retrying claim tap.",
-					attempt)));
+		ImageSearchResultData remainingEnabledClaim = locateEnabledClaimButton();
+		if (!remainingEnabledClaim.isFound()) {
+			logInfo(routineLogExplorationLine("Claim button no longer visible after the tap; reward claim succeeded."));
+			return ExplorationClaimOutcome.CLAIMED;
 		}
 
 		logWarning(routineLogExplorationLine(
-				"Enabled claim button remained after all claim attempts. Rescheduling normally."));
-		return false;
+				"Enabled claim button remained after the claim tap; the result is unknown."));
+		return ExplorationClaimOutcome.UNKNOWN;
 	}
 
 	private ImageSearchResultData locateEnabledClaimButton() {
@@ -156,12 +155,26 @@ public class ExplorationRoutine extends DelayedTask {
 		sleepTask(500);
 	}
 
-	private void rescheduleFromConfiguredOffset() {
-		Integer minutes = profile.getConfig(ConfigurationKeyEnum.INT_EXPLORATION_CHEST_OFFSET, Integer.class);
-		LocalDateTime nextSchedule = LocalDateTime.now().plusMinutes(minutes);
+	private void rescheduleFromConfiguredOffset(ExplorationClaimOutcome outcome) {
+		Integer configuredOffset = profile.getConfig(
+				ConfigurationKeyEnum.INT_EXPLORATION_CHEST_OFFSET, Integer.class);
+		LocalDateTime now = LocalDateTime.now();
+		LocalDateTime nextSchedule = ExplorationSchedulePolicy.nextRun(
+				now, configuredOffset, UNKNOWN_RETRY_MINUTES, outcome);
 		reschedule(nextSchedule);
-		logInfo(routineLogExplorationLine("Next execution scheduled at: "
-				+ nextSchedule.format(DATETIME_FORMATTER) + " (" + minutes + " minutes)."));
+		if (outcome == ExplorationClaimOutcome.UNKNOWN) {
+			logWarning(routineLogExplorationLine("Unknown result; retry scheduled at "
+					+ nextSchedule.format(DATETIME_FORMATTER) + " (" + UNKNOWN_RETRY_MINUTES + " minutes)."));
+		} else {
+			logInfo(routineLogExplorationLine("Next execution scheduled at: "
+					+ nextSchedule.format(DATETIME_FORMATTER) + " (" + configuredOffset + " minutes)."));
+		}
+	}
+
+	enum ExplorationClaimOutcome {
+		CLAIMED,
+		NONE_AVAILABLE,
+		UNKNOWN
 	}
 
 }
