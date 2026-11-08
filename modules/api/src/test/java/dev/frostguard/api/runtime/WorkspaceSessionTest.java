@@ -140,6 +140,34 @@ class WorkspaceSessionTest {
     }
 
     @Test
+    void survivalOpsUsesAnIndependentProductIdentityAndWorkspace() {
+        String oldChannel = System.getProperty(WorkspacePaths.CHANNEL_PROPERTY);
+        String oldApplicationId = System.getProperty(WorkspacePaths.APPLICATION_ID_PROPERTY);
+        String oldBrand = System.getProperty("frostguard.brand.name");
+        String oldHome = System.getProperty("user.home");
+        String oldWorkspace = System.getProperty(WorkspacePaths.WORKSPACE_PROPERTY);
+        try {
+            System.setProperty("user.home", tempDir.toString());
+            System.clearProperty(WorkspacePaths.WORKSPACE_PROPERTY);
+            System.setProperty(WorkspacePaths.CHANNEL_PROPERTY, "stable");
+            System.setProperty("frostguard.brand.name", "SurvivalOps");
+            System.setProperty(WorkspacePaths.APPLICATION_ID_PROPERTY, "dev.survivalops.desktop");
+
+            WorkspacePaths paths = WorkspacePaths.current();
+
+            assertEquals(tempDir.resolve(".survivalops/workspaces/stable/default").toAbsolutePath().normalize(),
+                    paths.root());
+            assertEquals(RuntimeChannel.STABLE, paths.channel());
+        } finally {
+            restore(WorkspacePaths.CHANNEL_PROPERTY, oldChannel);
+            restore(WorkspacePaths.APPLICATION_ID_PROPERTY, oldApplicationId);
+            restore("frostguard.brand.name", oldBrand);
+            restore("user.home", oldHome);
+            restore(WorkspacePaths.WORKSPACE_PROPERTY, oldWorkspace);
+        }
+    }
+
+    @Test
     void rejectsAProductIdentityThatDoesNotMatchItsChannel() {
         String oldChannel = System.getProperty(WorkspacePaths.CHANNEL_PROPERTY);
         String oldApplicationId = System.getProperty(WorkspacePaths.APPLICATION_ID_PROPERTY);

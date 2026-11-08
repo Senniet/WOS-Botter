@@ -13,7 +13,7 @@
                 </HBox>
                 <VBox styleClass="task-section-inner" spacing="10">
                     <Label styleClass="task-card-description"
-                           text="Active codes are loaded from the Frostguard gift code source. Discovery dates show when a code entered the list, not when it expires."
+                           text="Active codes are loaded from the SurvivalOps gift code source. Discovery dates show when a code entered the list, not when it expires."
                            wrapText="true" />
                     <HBox spacing="10" alignment="CENTER_LEFT">
                         <Button fx:id="buttonFetch" onAction="#handleFetch" styleClass="giftcode-fetch-btn" text="Refresh" />

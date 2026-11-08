@@ -16,7 +16,7 @@
 
     <Label text="Application Updates"
            style="-fx-font-size: 20px; -fx-font-weight: bold; -fx-text-fill: #e6edf3;" />
-    <Label text="Updates are selected for this product identity and verified before Frostguard exits."
+    <Label text="Updates are selected for this product identity and verified before SurvivalOps exits."
            wrapText="true" style="-fx-text-fill: #9da7b3;" />
 
     <HBox spacing="20">

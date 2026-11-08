@@ -33,14 +33,22 @@ public record WorkspacePaths(Path root, RuntimeChannel channel) {
         }
         RuntimeChannel channel = RuntimeChannel.from(configuredChannel);
         String applicationId = System.getProperty(APPLICATION_ID_PROPERTY, "").trim();
-        if (!applicationId.isEmpty() && !applicationId.equals(channel.applicationId())) {
+        boolean survivalOps = isSurvivalOpsBrand();
+        if (!applicationId.isEmpty() && !applicationId.equals(channel.applicationId())
+                && !(survivalOps && applicationId.equals("dev.survivalops.desktop"))) {
             throw new IllegalStateException("Application ID " + applicationId
                     + " does not match channel " + channel.directoryName());
         }
         Path root = override == null || override.isBlank()
-                ? userWorkspace(channel, "default")
+                ? (survivalOps
+                        ? Path.of(System.getProperty("user.home"), ".survivalops", "workspaces", channel.directoryName(), "default")
+                        : userWorkspace(channel, "default"))
                 : Path.of(override);
         return new WorkspacePaths(root, channel);
+    }
+
+    private static boolean isSurvivalOpsBrand() {
+        return "SurvivalOps".equalsIgnoreCase(System.getProperty("frostguard.brand.name", "").trim());
     }
 
     public static Path userWorkspace(RuntimeChannel channel, String name) {
@@ -51,7 +59,8 @@ public record WorkspacePaths(Path root, RuntimeChannel channel) {
                 || name.contains("/") || name.contains("\\")) {
             throw new IllegalArgumentException("Workspace name must be one path segment");
         }
-        return Path.of(System.getProperty("user.home"), ".frostguard", "workspaces",
+        String productDirectory = isSurvivalOpsBrand() ? ".survivalops" : ".frostguard";
+        return Path.of(System.getProperty("user.home"), productDirectory, "workspaces",
                 channel.directoryName(), name).toAbsolutePath().normalize();
     }
 

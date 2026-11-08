@@ -262,7 +262,7 @@
                                             <arg value="--app-version" />
                                             <arg value="${frostguard.windows.launcher-version}" />
                                             <arg value="--vendor" />
-                                            <arg value="Frostguard" />
+                                            <arg value="${frostguard.product.name}" />
                                             <arg value="--description" />
                                             <arg value="${frostguard.product.description}" />
                                             <arg value="--icon" />
@@ -275,6 +275,8 @@
                                             <arg value="--enable-native-access=ALL-UNNAMED" />
                                             <arg value="--java-options" />
                                             <arg value="-Dfrostguard.channel=${frostguard.release.channel}" />
+                                            <arg value="--java-options" />
+                                            <arg value="-Dfrostguard.brand.name=${frostguard.product.name}" />
                                             <arg value="--java-options" />
                                             <arg value="-Dfrostguard.application.id=${frostguard.product.identifier}" />
                                             <arg value="--java-options" />
@@ -342,7 +344,7 @@
                                             <arg value="--app-version" />
                                             <arg value="${frostguard.windows.app-version}" />
                                             <arg value="--vendor" />
-                                            <arg value="Frostguard" />
+                                            <arg value="${frostguard.product.name}" />
                                             <arg value="--description" />
                                             <arg value="${frostguard.product.description}" />
                                             <arg value="--app-image" />
@@ -357,7 +359,7 @@
                                             <arg value="--win-dir-chooser" />
                                             <arg value="--win-menu" />
                                             <arg value="--win-menu-group" />
-                                            <arg value="Frostguard" />
+                                            <arg value="${frostguard.product.name}" />
                                             <arg value="--win-shortcut" />
                                             <arg value="--win-shortcut-prompt" />
                                             <arg value="--win-upgrade-uuid" />
