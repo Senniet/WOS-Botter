@@ -164,11 +164,11 @@ public ResearchRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
 
             logInfo(routineLogResearchLine("Research queue OCR status: '" + queueStatus + "'"));
 
-            if (!queueStatus.toLowerCase().contains("idle")) {
+            if (!ResearchQueueStatusPolicy.isExplicitlyIdle(queueStatus)) {
 
 
                 logInfo(routineLogResearchLine("Research queue is busy. Attempting to read remaining time..."));
-                Duration busyTime = durationHelper.attemptRecognition(
+                var busyTimeRead = durationHelper.attemptRecognitionDetailed(
                         new PointData(164, 811),
                         new PointData(303, 841),
                         5,
@@ -176,8 +176,9 @@ public ResearchRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
                         null,
                         GameTimeUtils::isAcceptedFormat,
                         GameTimeUtils::parseDuration);
+                Duration busyTime = busyTimeRead.value();
 
-                if (busyTime != null) {
+                if (busyTimeRead.accepted() && busyTime != null) {
                     Duration recheckDelay = ResearchTimerPolicy.recheckDelay(busyTime);
                     LocalDateTime rescheduleTime = LocalDateTime.now().plus(recheckDelay);
                     logInfo(routineLogResearchLine("Research busy for "
@@ -186,7 +187,9 @@ public ResearchRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
                             + formatDuration(recheckDelay) + "."));
                     this.reschedule(rescheduleTime);
                 } else {
-                    scheduleUnknownQueueRetry("remaining time OCR returned no valid duration");
+                    scheduleUnknownQueueRetry("remaining time OCR status=" + busyTimeRead.status()
+                            + " attempts=" + busyTimeRead.attempts()
+                            + (busyTimeRead.failure() == null ? "" : " failure=" + busyTimeRead.failure()));
                 }
                 return;
             }
@@ -233,7 +236,7 @@ public ResearchRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
 
 
                 logInfo(routineLogResearchLine("Reading research time via OCR..."));
-                Duration researchTime = durationHelper.attemptRecognition(
+                var researchTimeRead = durationHelper.attemptRecognitionDetailed(
                         new PointData(226, 1194),
                         new PointData(422, 1234),
                         5,
@@ -241,9 +244,9 @@ public ResearchRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
                         null,
                         GameTimeUtils::isAcceptedFormat,
                         GameTimeUtils::parseDuration);
+                Duration researchTime = researchTimeRead.value();
 
-
-                if (researchTime != null) {
+                if (researchTimeRead.accepted() && researchTime != null) {
                     Duration recheckDelay = ResearchTimerPolicy.recheckDelay(researchTime);
                     LocalDateTime rescheduleTime = LocalDateTime.now().plus(recheckDelay);
 
@@ -255,8 +258,10 @@ public ResearchRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
                     this.reschedule(rescheduleTime);
                     return;
                 } else {
-                    logWarning(routineLogResearchLine("Could not OCR running research time. Retrying in "
-                            + RESEARCH_TIMER_RETRY_MINUTES + " minute."));
+                    logWarning(routineLogResearchLine("Could not OCR running research time: status="
+                            + researchTimeRead.status() + " attempts=" + researchTimeRead.attempts()
+                            + (researchTimeRead.failure() == null ? "" : " failure=" + researchTimeRead.failure())
+                            + ". Retrying in " + RESEARCH_TIMER_RETRY_MINUTES + " minute."));
                 }
 
         this.reschedule(LocalDateTime.now().plusMinutes(RESEARCH_TIMER_RETRY_MINUTES));
