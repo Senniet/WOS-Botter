@@ -9,6 +9,7 @@ import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.schedule.LaunchPoint;
 import dev.frostguard.engine.nav.SearchConfigConstants;
+import dev.frostguard.tasks.diagnostics.TaskControlSignals;
 
 import java.time.LocalDateTime;
 
@@ -29,6 +30,8 @@ public class DailyLabyrinthRoutine extends DelayedTask {
     private static final int MENU_NAVIGATION_DELAY = 1000;
     private static final int BATTLE_COMPLETION_DELAY = 3000;
 
+    private boolean challengeAttempted;
+
     // =========================== CONSTRUCTOR ===========================
 
     public DailyLabyrinthRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
@@ -39,7 +42,11 @@ public class DailyLabyrinthRoutine extends DelayedTask {
 
     @Override
     public boolean provideDailyMissionProgress() {
-        return true;
+        return shouldReportDailyMissionProgress(challengeAttempted);
+    }
+
+    static boolean shouldReportDailyMissionProgress(boolean challengeAttempted) {
+        return challengeAttempted;
     }
 
     @Override
@@ -50,6 +57,7 @@ public class DailyLabyrinthRoutine extends DelayedTask {
     @Override
     protected void execute() {
 
+        challengeAttempted = false;
         try {
             // Step 1: Navigate to labyrinth menu
             if (!navigateToLabyrinthMenu()) {
@@ -58,11 +66,12 @@ public class DailyLabyrinthRoutine extends DelayedTask {
             }
 
             // The Daily sidebar opens the currently active Land of Heroes dungeon directly.
-            executeCurrentChallenge();
+            challengeAttempted = executeCurrentChallenge();
 
             reschedule(GameTimeUtils.dailyResetTime());
 
         } catch (Exception e) {
+            TaskControlSignals.rethrowControlSignal(e);
             logError("An error occurred during the Labyrinth task: " + e.getMessage());
             rescheduleOneHourLater("Unexpected error during execution: " + e.getMessage());
         }
