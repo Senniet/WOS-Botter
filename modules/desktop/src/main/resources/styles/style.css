@@ -2080,3 +2080,46 @@
     -fx-text-fill: #dce9f7; -fx-font-size: 13px; -fx-padding: 6 8;
     -fx-background-color: rgba(10,25,41,.48); -fx-background-radius: 6;
 }
+
+/* SurvivalOps dashboard refinement — screenshot-aligned spacing and hierarchy */
+.dashboard-root { -fx-spacing: 20; }
+.dashboard-heading { -fx-font-size: 30px; -fx-letter-spacing: .2px; }
+.dashboard-subtitle { -fx-font-size: 14px; -fx-text-fill: #aebfd2; }
+.dashboard-live-pill, .panel-overline {
+    -fx-text-fill: #83cfff; -fx-font-size: 10px; -fx-font-weight: 800;
+    -fx-background-color: rgba(38,151,226,.13); -fx-background-radius: 20;
+    -fx-padding: 6 10; -fx-border-color: rgba(87,177,235,.28); -fx-border-radius: 20;
+}
+.panel-overline { -fx-background-color: transparent; -fx-border-color: transparent; -fx-padding: 0; -fx-text-fill: #7e9db9; }
+.dashboard-metric-card { -fx-min-height: 108; -fx-padding: 17 16; -fx-border-color: #34536f; }
+.metric-icon { -fx-min-width: 56; -fx-min-height: 56; -fx-font-size: 26px; }
+.metric-value { -fx-font-size: 18px; }
+.metric-caption { -fx-text-fill: #8faac4; -fx-font-size: 12px; -fx-font-weight: bold; }
+.dashboard-panel { -fx-padding: 17; -fx-background-color: linear-gradient(to bottom right, #192f45, #13263a); -fx-border-color: #2b4b68; }
+.panel-title { -fx-font-size: 17px; }
+.dashboard-table-header { -fx-padding: 11 10; -fx-background-color: #203b55; }
+.dashboard-table-header .label { -fx-font-size: 11px; -fx-text-fill: #a9c4dd; }
+.dashboard-account-row { -fx-padding: 12 10; -fx-min-height: 58; -fx-spacing: 10; -fx-border-color: transparent transparent rgba(87,127,163,.18) transparent; -fx-border-width: 0 0 1 0; }
+.dashboard-row-name { -fx-font-size: 13px; }
+.dashboard-row-task { -fx-text-fill: #e1edf8; -fx-font-size: 12px; }
+.dashboard-row-detail { -fx-font-size: 11px; }
+.status-active, .status-paused, .status-idle { -fx-padding: 5 8; -fx-background-radius: 12; -fx-font-size: 10px; }
+.system-label { -fx-text-fill: #c9d9e9; -fx-font-size: 12px; }
+.system-value { -fx-text-fill: #e1edf9; -fx-font-size: 12px; }
+.system-progress { -fx-pref-height: 8; }
+.dashboard-separator { -fx-opacity: .45; }
+.system-dot { -fx-font-size: 10px; }
+.system-dot-neutral { -fx-text-fill: #91a8bd; }
+.system-symbol { -fx-text-fill: #80bce8; -fx-font-size: 15px; }
+.routine-name { -fx-text-fill: #f0f6fd; -fx-font-size: 15px; -fx-font-weight: bold; }
+.routine-state-pill { -fx-padding: 5 10; -fx-background-radius: 12; -fx-font-size: 10px; -fx-font-weight: bold; }
+.routine-state-active { -fx-text-fill: #73e5a5; -fx-background-color: rgba(45,190,125,.16); }
+.routine-state-paused { -fx-text-fill: #f3d58a; -fx-background-color: rgba(206,161,60,.16); }
+.routine-state-stopped { -fx-text-fill: #aabbd0; -fx-background-color: rgba(111,143,177,.16); }
+.routine-stepper { -fx-padding: 10 2 8 2; }
+.routine-step { -fx-min-width: 62; }
+.routine-step-number { -fx-min-width: 27; -fx-min-height: 27; -fx-alignment: center; -fx-background-radius: 18; -fx-background-color: #263f58; -fx-text-fill: #b9cde0; -fx-font-size: 11px; -fx-font-weight: bold; }
+.routine-step-label { -fx-text-fill: #9eb4c9; -fx-font-size: 10px; }
+.routine-step-line { -fx-min-height: 1; -fx-max-height: 1; -fx-background-color: #3b5873; -fx-translate-y: -8; }
+.routine-current-value { -fx-text-fill: #e7f1fb; -fx-font-size: 12px; -fx-font-weight: bold; }
+.dashboard-activity-line { -fx-padding: 8 10; -fx-background-color: rgba(8,23,39,.56); -fx-border-color: transparent transparent rgba(87,127,163,.14) transparent; -fx-font-size: 12px; }

@@ -19,6 +19,9 @@ public class DashboardLayoutController {
     @FXML private Label queueCount;
     @FXML private Label queueDetail;
     @FXML private Label engineState;
+    @FXML private Label nextActionValue;
+    @FXML private Label routineBadge;
+    @FXML private Label routineNextAction;
     @FXML private Label uptimeValue;
     @FXML private VBox accountRows;
     @FXML private Label accountEmpty;
@@ -46,7 +49,7 @@ public class DashboardLayoutController {
         accountDetail.setText(profileCount == 0 ? "Nog geen accounts ingesteld" : "Profielen in SurvivalOps");
         queueCount.setText((active + waiting) + " Wachtrijen");
         queueDetail.setText(active + " actief · " + waiting + " gepauzeerd");
-        engineState.setText(!engineRunning ? "Gestopt" : allQueuesPaused ? "Gepauzeerd" : "Actief");
+        engineState.setText(!engineRunning ? "Automatisering gestopt" : allQueuesPaused ? "Automatisering gepauzeerd" : "Automatisering actief");
         uptimeValue.setText(uptime == null ? "—" : uptime);
 
         accountRows.getChildren().clear();
@@ -56,16 +59,26 @@ public class DashboardLayoutController {
                 String state = queue == null ? "Niet actief" : queue.isPaused() ? "Gepauzeerd" : "Actief";
                 HBox row = new HBox(10);
                 row.getStyleClass().add("dashboard-account-row");
+                VBox accountInfo = new VBox(3);
+                accountInfo.setPrefWidth(150);
                 Label name = new Label(profile.getName() == null ? "Onbekend account" : profile.getName());
                 name.getStyleClass().add("dashboard-row-name");
-                name.setMaxWidth(Double.MAX_VALUE);
-                HBox.setHgrow(name, Priority.ALWAYS);
-                Label status = new Label(state);
-                status.getStyleClass().add(queue == null ? "status-idle" : queue.isPaused() ? "status-paused" : "status-active");
                 Label emulator = new Label(profile.getEmulatorNumber() == null || profile.getEmulatorNumber().isBlank()
                         ? "Emulator niet ingesteld" : "Emulator " + profile.getEmulatorNumber());
                 emulator.getStyleClass().add("dashboard-row-detail");
-                row.getChildren().addAll(name, status, emulator);
+                accountInfo.getChildren().addAll(name, emulator);
+                Label status = new Label(state);
+                status.setPrefWidth(86);
+                status.getStyleClass().add(queue == null ? "status-idle" : queue.isPaused() ? "status-paused" : "status-active");
+                Label current = new Label(currentTasks == null ? "—" : currentTasks.getOrDefault(profile.getId(), "—"));
+                current.setPrefWidth(120);
+                current.setWrapText(true);
+                current.getStyleClass().add("dashboard-row-task");
+                Label next = new Label(nextTasks == null ? "—" : nextTasks.getOrDefault(profile.getId(), "—"));
+                next.setPrefWidth(112);
+                next.setWrapText(true);
+                next.getStyleClass().add("dashboard-row-detail");
+                row.getChildren().addAll(accountInfo, status, current, next);
                 accountRows.getChildren().add(row);
             }
         }
@@ -73,6 +86,11 @@ public class DashboardLayoutController {
         accountEmpty.setManaged(profileCount == 0);
         String currentTask = firstTask(currentTasks);
         String nextTask = firstTask(nextTasks);
+        nextActionValue.setText(nextTask == null ? "Geen ingepland" : nextTask);
+        routineNextAction.setText(nextTask == null ? "—" : nextTask);
+        routineBadge.setText(!engineRunning ? "GESTOPT" : allQueuesPaused ? "GEPAUZEERD" : "ACTIEF");
+        routineBadge.getStyleClass().removeAll("routine-state-active", "routine-state-paused", "routine-state-stopped");
+        routineBadge.getStyleClass().add(!engineRunning ? "routine-state-stopped" : allQueuesPaused ? "routine-state-paused" : "routine-state-active");
         routineState.setText(engineRunning
                 ? (allQueuesPaused ? "Automatisering is gepauzeerd." : "Automatisering draait.")
                     + (currentTask != null ? " Actieve taak: " + currentTask
