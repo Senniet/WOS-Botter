@@ -12,8 +12,13 @@ public final class UpdateEndpointResolver {
     public Optional<URI> resolve(RuntimeChannel channel) throws UpdateException {
         if ("SurvivalOps".equalsIgnoreCase(System.getProperty("frostguard.brand.name", "").trim())) {
             if (channel != RuntimeChannel.STABLE) return Optional.empty();
-            String value = System.getProperty("survivalops.update.manifest.stable",
-                    "https://github.com/Senniet/WOS-Botter/releases/download/survivalops-stable/survivalops-stable-manifest.json");
+            String value = System.getProperty("survivalops.update.manifest.stable");
+            if (value == null || value.isBlank()) {
+                value = System.getProperty(STABLE_PROPERTY);
+            }
+            if (value == null || value.isBlank()) {
+                value = "https://github.com/Senniet/WOS-Botter/releases/download/survivalops-stable/survivalops-stable-manifest.json";
+            }
             return Optional.of(validate(value));
         }
         if (channel == RuntimeChannel.DEVELOPMENT) {

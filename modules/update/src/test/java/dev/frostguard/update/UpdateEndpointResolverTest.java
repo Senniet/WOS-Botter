@@ -40,6 +40,23 @@ class UpdateEndpointResolverTest {
     }
 
     @Test
+    void survivalOpsCanUsePackagedStablePropertyForIsolatedTestFeed() throws Exception {
+        System.setProperty("frostguard.brand.name", "SurvivalOps");
+        System.setProperty(UpdateEndpointResolver.STABLE_PROPERTY,
+                "https://github.com/Senniet/WOS-Botter/releases/download/survivalops-test/survivalops-test-manifest.json");
+        assertEquals("https://github.com/Senniet/WOS-Botter/releases/download/survivalops-test/survivalops-test-manifest.json",
+                resolver.resolve(RuntimeChannel.STABLE).orElseThrow().toString());
+    }
+
+    @Test
+    void blankPackagedPropertyFallsBackToProductionStableFeed() throws Exception {
+        System.setProperty("frostguard.brand.name", "SurvivalOps");
+        System.setProperty(UpdateEndpointResolver.STABLE_PROPERTY, "");
+        assertEquals("https://github.com/Senniet/WOS-Botter/releases/download/survivalops-stable/survivalops-stable-manifest.json",
+                resolver.resolve(RuntimeChannel.STABLE).orElseThrow().toString());
+    }
+
+    @Test
     void rejectsInsecureEndpoint() {
         System.setProperty(UpdateEndpointResolver.STABLE_PROPERTY, "http://updates.example.com/stable.json");
         assertThrows(UpdateException.class, () -> resolver.resolve(RuntimeChannel.STABLE));
