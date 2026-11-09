@@ -19,10 +19,11 @@
                    onMouseClicked="#handleTitleBarMouseClicked">
 
             <!-- Title label centered in stack -->
-            <Label fx:id="labelWindowTitle" text="Whiteout Survival Bot"
+            <Label fx:id="labelWindowTitle" text="SurvivalOps 1.0.0"
                    styleClass="title-bar-text"
                    mouseTransparent="true"
-                   StackPane.alignment="CENTER" />
+                   StackPane.alignment="CENTER_LEFT"
+                   style="-fx-padding: 0 0 0 42;" />
 
             <!-- Window controls pinned right -->
             <HBox alignment="CENTER_RIGHT" styleClass="title-bar-controls"
@@ -71,6 +72,14 @@
 
             <!-- Pinned buttons at sidebar bottom -->
             <VBox fx:id="pinnedButtonsContainer" styleClass="sidebar-footer" spacing="8" />
+            <VBox styleClass="sidebar-automation-status" spacing="4">
+                <HBox alignment="CENTER_LEFT" spacing="9">
+                    <Label text="●" styleClass="sidebar-status-check"/>
+                    <Label text="Actief" styleClass="sidebar-status-title"/>
+                </HBox>
+                <Label text="Automatisering draait" styleClass="sidebar-status-copy"/>
+                <Label text="Uptime wordt bijgewerkt" styleClass="sidebar-status-copy"/>
+            </VBox>
         </VBox>
     </left>
 
@@ -79,11 +88,11 @@
         <StackPane fx:id="centerStack">
             <VBox fx:id="centerContentShell" spacing="0">
                 <StackPane fx:id="heroBanner" styleClass="survivalops-hero" minHeight="180" prefHeight="180" maxHeight="180">
-                    <VBox alignment="CENTER_LEFT" spacing="5" styleClass="survivalops-hero-copy" StackPane.alignment="CENTER_LEFT">
+                    <VBox visible="false" managed="false" alignment="CENTER_LEFT" spacing="5" styleClass="survivalops-hero-copy" StackPane.alignment="CENTER_LEFT">
                         <Label text="SURVIVALOPS" styleClass="survivalops-hero-title" />
                         <Label text="Command. Automate. Survive." styleClass="survivalops-hero-subtitle" />
                     </VBox>
-                    <HBox alignment="CENTER_RIGHT" spacing="10" styleClass="survivalops-hero-tools" StackPane.alignment="CENTER_RIGHT">
+                    <HBox visible="false" managed="false" alignment="CENTER_RIGHT" spacing="10" styleClass="survivalops-hero-tools" StackPane.alignment="CENTER_RIGHT">
                         <TextField fx:id="navSearchField" promptText="Zoek functies..." styleClass="search-field" prefWidth="210" />
                         <ComboBox fx:id="profileComboBox" promptText="Selecteer account" prefWidth="190" />
                     </HBox>
@@ -106,17 +115,17 @@
                 <HBox alignment="CENTER_LEFT" spacing="12">
                     <Label fx:id="labelVersion" text="Whiteout Survival Bot" styleClass="app-version"
                            style="-fx-text-fill: #e6edf3; -fx-font-weight: bold; -fx-font-size: 13px;" />
-                    <org.kordamp.ikonli.javafx.FontIcon fx:id="iconDiscord" iconSize="18"
+                    <org.kordamp.ikonli.javafx.FontIcon fx:id="iconDiscord" visible="false" managed="false" iconSize="18"
                         iconColor="#e6edf3" styleClass="social-icon"
                         onMouseClicked="#openDiscord" style="-fx-cursor: hand;" />
-                    <org.kordamp.ikonli.javafx.FontIcon fx:id="iconGithub" iconSize="18"
+                    <org.kordamp.ikonli.javafx.FontIcon fx:id="iconGithub" visible="false" managed="false" iconSize="18"
                         iconColor="#e6edf3" styleClass="social-icon"
                         onMouseClicked="#openGithub" style="-fx-cursor: hand;" />
                 </HBox>
             </VBox>
 
             <!-- Notification bubbles cluster -->
-            <HBox spacing="10" alignment="CENTER_LEFT">
+            <HBox spacing="10" alignment="CENTER_LEFT" visible="false" managed="false">
                 <HBox fx:id="discordBubbleContainer" alignment="CENTER" styleClass="discord-bubble">
                     <Label text="Having problems? Join our Discord" styleClass="discord-bubble-text"
                            onMouseClicked="#openDiscord" />
@@ -140,7 +149,7 @@
 
             <!-- Right cluster: runtime + action controls -->
             <HBox alignment="CENTER" spacing="16">
-                <StackPane fx:id="notificationButtonContainer" styleClass="notification-button-container">
+                <StackPane fx:id="notificationButtonContainer" visible="false" managed="false" styleClass="notification-button-container">
                     <Button fx:id="buttonNotifications" accessibleText="Notifications"
                             onAction="#handleNotifications" focusTraversable="false"
                             styleClass="notification-button">
@@ -156,8 +165,11 @@
 
                 <Label fx:id="labelRunTime" text="Uptime: 00:00:00"
                        style="-fx-text-fill: #e6edf3; -fx-font-size: 13px;" />
+                <Label text="●  Alle systemen operationeel" style="-fx-text-fill: #e5f2ff; -fx-font-size: 12px;"/>
+                <Label text="▮▮  ADB: Verbonden" style="-fx-text-fill: #d7eaff; -fx-font-size: 12px;"/>
+                <Label text="✓  Updates: beschikbaar" style="-fx-text-fill: #e5f2ff; -fx-font-size: 12px;"/>
 
-                <SplitMenuButton fx:id="buttonPauseResume" disable="true" mnemonicParsing="false"
+                <SplitMenuButton fx:id="buttonPauseResume" visible="false" managed="false" disable="true" mnemonicParsing="false"
                                  onAction="#handleButtonPauseResume" text="Pause"
                                  styleClass="action-button-pause" prefHeight="38" prefWidth="140"
                                  minWidth="-Infinity">
@@ -169,7 +181,7 @@
                     </items>
                 </SplitMenuButton>
 
-                <Button fx:id="buttonStartStop" disable="true" mnemonicParsing="false"
+                <Button fx:id="buttonStartStop" visible="false" managed="false" disable="true" mnemonicParsing="false"
                         onAction="#handleButtonStartStop" text="Start Bot"
                         styleClass="action-button-start" prefHeight="38" prefWidth="140"
                         minWidth="-Infinity" />

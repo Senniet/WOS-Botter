@@ -7,20 +7,19 @@
 <ScrollPane xmlns="http://javafx.com/javafx/23.0.1" xmlns:fx="http://javafx.com/fxml/1"
             fitToWidth="true" hbarPolicy="NEVER" styleClass="dashboard-scroll">
     <content>
-        <VBox spacing="18" styleClass="dashboard-root">
-            <padding><Insets top="22" right="24" bottom="24" left="24"/></padding>
+        <VBox spacing="14" styleClass="dashboard-root">
+            <padding><Insets top="10" right="22" bottom="14" left="22"/></padding>
 
             <VBox spacing="5">
                 <HBox spacing="12" alignment="CENTER_LEFT">
                     <Label text="⌂" styleClass="dashboard-heading-icon"/>
                     <Label text="Dashboard" styleClass="dashboard-heading"/>
                     <Region HBox.hgrow="ALWAYS"/>
-                    <Label text="LIVE OVERZICHT" styleClass="dashboard-live-pill"/>
                 </HBox>
                 <Label text="Overzicht van je accounts, taken, automatisering en systeemstatus." styleClass="dashboard-subtitle"/>
             </VBox>
 
-            <GridPane hgap="12" vgap="12" styleClass="dashboard-metrics">
+            <GridPane hgap="10" vgap="10" styleClass="dashboard-metrics">
                 <columnConstraints>
                     <ColumnConstraints percentWidth="25" hgrow="ALWAYS"/>
                     <ColumnConstraints percentWidth="25" hgrow="ALWAYS"/>
@@ -45,15 +44,16 @@
                 </HBox>
             </GridPane>
 
-            <GridPane hgap="14" vgap="14">
+            <GridPane hgap="16" vgap="12" styleClass="dashboard-main-grid">
                 <columnConstraints>
-                    <ColumnConstraints percentWidth="63" hgrow="ALWAYS"/>
-                    <ColumnConstraints percentWidth="37" hgrow="ALWAYS"/>
+                    <ColumnConstraints percentWidth="62" hgrow="ALWAYS"/>
+                    <ColumnConstraints percentWidth="38" hgrow="ALWAYS"/>
                 </columnConstraints>
                 <VBox styleClass="dashboard-panel" spacing="13" GridPane.columnIndex="0">
                     <HBox alignment="CENTER_LEFT" spacing="10">
                         <Label text="♟" styleClass="panel-icon"/><Label text="Accountstatus" styleClass="panel-title"/>
-                        <Region HBox.hgrow="ALWAYS"/><Label text="LIVE STATUS" styleClass="panel-overline"/>
+                        <Region HBox.hgrow="ALWAYS"/>
+                        <Label text="+  Account toevoegen" styleClass="dashboard-add-button"/>
                     </HBox>
                     <GridPane styleClass="dashboard-table-header" hgap="10">
                         <columnConstraints><ColumnConstraints percentWidth="31"/><ColumnConstraints percentWidth="18"/><ColumnConstraints percentWidth="27"/><ColumnConstraints percentWidth="24"/></columnConstraints>
@@ -68,39 +68,64 @@
                     <ProgressBar fx:id="cpuBar" progress="0" maxWidth="Infinity" styleClass="system-progress"/>
                     <HBox alignment="CENTER_LEFT"><Label text="Geheugen" styleClass="system-label"/><Region HBox.hgrow="ALWAYS"/><Label fx:id="memoryValue" text="Niet beschikbaar" styleClass="system-value"/></HBox>
                     <ProgressBar fx:id="memoryBar" progress="0" maxWidth="Infinity" styleClass="system-progress"/>
+                    <HBox alignment="CENTER_LEFT"><Label text="Opslag" styleClass="system-label"/><Region HBox.hgrow="ALWAYS"/><Label text="—" styleClass="system-value"/></HBox>
+                    <ProgressBar progress="0.24" maxWidth="Infinity" styleClass="system-progress"/>
                     <Separator styleClass="dashboard-separator"/>
-                    <HBox alignment="CENTER_LEFT" spacing="8"><Label text="●" styleClass="system-dot system-dot-neutral"/><Label text="ADB" styleClass="system-label"/><Region HBox.hgrow="ALWAYS"/><Label fx:id="adbValue" text="Niet gecontroleerd" styleClass="system-value"/></HBox>
-                    <HBox alignment="CENTER_LEFT" spacing="8"><Label text="◈" styleClass="system-symbol"/><Label text="OCR / Vision" styleClass="system-label"/><Region HBox.hgrow="ALWAYS"/><Label text="Module-integratie" styleClass="system-value"/></HBox>
+                    <HBox alignment="CENTER_LEFT" spacing="8"><Label text="▣" styleClass="system-symbol"/><Label text="ADB" styleClass="system-label"/><Region HBox.hgrow="ALWAYS"/><Label fx:id="adbValue" text="Niet gecontroleerd" styleClass="system-value"/></HBox>
+                    <HBox alignment="CENTER_LEFT" spacing="8"><Label text="◈" styleClass="system-symbol"/><Label text="OCR" styleClass="system-label"/><Region HBox.hgrow="ALWAYS"/><Label text="Actief" styleClass="system-ok"/></HBox>
+                    <HBox alignment="CENTER_LEFT" spacing="8"><Label text="▧" styleClass="system-symbol"/><Label text="Screenshot" styleClass="system-label"/><Region HBox.hgrow="ALWAYS"/><Label text="OK" styleClass="system-ok"/></HBox>
                 </VBox>
             </GridPane>
 
-            <GridPane hgap="14" vgap="14">
+            <GridPane hgap="16" vgap="12" styleClass="dashboard-lower-grid">
                 <columnConstraints><ColumnConstraints percentWidth="58" hgrow="ALWAYS"/><ColumnConstraints percentWidth="42" hgrow="ALWAYS"/></columnConstraints>
                 <VBox styleClass="dashboard-panel" spacing="13" GridPane.columnIndex="0">
                     <HBox alignment="CENTER_LEFT" spacing="10"><Label text="⚙" styleClass="panel-icon"/><Label text="Actieve routine" styleClass="panel-title"/><Region HBox.hgrow="ALWAYS"/><Label fx:id="routineBadge" text="GESTOPT" styleClass="routine-state-pill"/></HBox>
                     <Label text="Standaard WOS Routine" styleClass="routine-name"/>
-                    <HBox fx:id="routineSteps" alignment="CENTER_LEFT" spacing="0" styleClass="routine-stepper">
-                        <VBox alignment="CENTER" spacing="6" styleClass="routine-step"><Label text="1" styleClass="routine-step-number"/><Label text="Verzamelen" styleClass="routine-step-label"/></VBox>
+                    <HBox fx:id="routineSteps" alignment="CENTER" spacing="0" styleClass="routine-stepper">
+                        <VBox alignment="CENTER" spacing="5" styleClass="routine-step routine-step-done"><Label text="✓" styleClass="routine-step-number"/><Label text="Verzamelen" styleClass="routine-step-label"/></VBox>
+                        <Region HBox.hgrow="ALWAYS" styleClass="routine-step-line routine-line-done"/>
+                        <VBox alignment="CENTER" spacing="5" styleClass="routine-step routine-step-done"><Label text="✓" styleClass="routine-step-number"/><Label text="Bouw" styleClass="routine-step-label"/></VBox>
+                        <Region HBox.hgrow="ALWAYS" styleClass="routine-step-line routine-line-done"/>
+                        <VBox alignment="CENTER" spacing="5" styleClass="routine-step routine-step-done"><Label text="✓" styleClass="routine-step-number"/><Label text="Onderzoek" styleClass="routine-step-label"/></VBox>
+                        <Region HBox.hgrow="ALWAYS" styleClass="routine-step-line routine-line-active"/>
+                        <VBox alignment="CENTER" spacing="5" styleClass="routine-step routine-step-current"><Label text="●" styleClass="routine-step-number"/><Label text="Training" styleClass="routine-step-label"/></VBox>
                         <Region HBox.hgrow="ALWAYS" styleClass="routine-step-line"/>
-                        <VBox alignment="CENTER" spacing="6" styleClass="routine-step"><Label text="2" styleClass="routine-step-number"/><Label text="Bouw" styleClass="routine-step-label"/></VBox>
+                        <VBox alignment="CENTER" spacing="5" styleClass="routine-step"><Label text="5" styleClass="routine-step-number"/><Label text="Marsen" styleClass="routine-step-label"/></VBox>
                         <Region HBox.hgrow="ALWAYS" styleClass="routine-step-line"/>
-                        <VBox alignment="CENTER" spacing="6" styleClass="routine-step"><Label text="3" styleClass="routine-step-number"/><Label text="Onderzoek" styleClass="routine-step-label"/></VBox>
+                        <VBox alignment="CENTER" spacing="5" styleClass="routine-step"><Label text="6" styleClass="routine-step-number"/><Label text="Beloningen" styleClass="routine-step-label"/></VBox>
                         <Region HBox.hgrow="ALWAYS" styleClass="routine-step-line"/>
-                        <VBox alignment="CENTER" spacing="6" styleClass="routine-step"><Label text="4" styleClass="routine-step-number"/><Label text="Training" styleClass="routine-step-label"/></VBox>
-                        <Region HBox.hgrow="ALWAYS" styleClass="routine-step-line"/>
-                        <VBox alignment="CENTER" spacing="6" styleClass="routine-step"><Label text="5" styleClass="routine-step-number"/><Label text="Marsen" styleClass="routine-step-label"/></VBox>
+                        <VBox alignment="CENTER" spacing="5" styleClass="routine-step"><Label text="7" styleClass="routine-step-number"/><Label text="Events" styleClass="routine-step-label"/></VBox>
                     </HBox>
                     <Separator styleClass="dashboard-separator"/>
-                    <HBox spacing="24" alignment="CENTER_LEFT">
-                        <VBox spacing="4" HBox.hgrow="ALWAYS"><Label text="HUIDIGE STATUS" styleClass="panel-overline"/><Label fx:id="routineState" text="Geen actieve routine." styleClass="routine-current-value" wrapText="true"/></VBox>
-                        <VBox spacing="4"><Label text="VOLGENDE ACTIE" styleClass="panel-overline"/><Label fx:id="routineNextAction" text="—" styleClass="routine-current-value" wrapText="true"/></VBox>
+                    <HBox spacing="14" alignment="CENTER_LEFT" styleClass="routine-summary">
+                        <VBox spacing="3" HBox.hgrow="ALWAYS"><Label text="HUIDIGE ACTIE" styleClass="panel-overline"/><Label fx:id="routineState" text="Geen actieve routine." styleClass="routine-current-value" wrapText="true"/></VBox>
+                        <Separator orientation="VERTICAL"/>
+                        <VBox spacing="3"><Label text="VOLGENDE ACTIE" styleClass="panel-overline"/><Label fx:id="routineNextAction" text="—" styleClass="routine-current-value" wrapText="true"/></VBox>
                     </HBox>
                 </VBox>
                 <VBox styleClass="dashboard-panel" spacing="12" GridPane.columnIndex="1">
-                    <HBox alignment="CENTER_LEFT" spacing="10"><Label text="▤" styleClass="panel-icon"/><Label text="Recente activiteit" styleClass="panel-title"/><Region HBox.hgrow="ALWAYS"/><Label text="LAATSTE 5" styleClass="panel-overline"/></HBox>
+                    <HBox alignment="CENTER_LEFT" spacing="10"><Label text="▤" styleClass="panel-icon"/><Label text="Recente activiteit" styleClass="panel-title"/><Region HBox.hgrow="ALWAYS"/><Label text="Alles tonen" styleClass="activity-filter"/></HBox>
                     <VBox fx:id="activityRows" spacing="8" />
                     <Label fx:id="activityEmpty" text="Nog geen activiteit geregistreerd." styleClass="dashboard-empty" wrapText="true"/>
                 </VBox>
+            </GridPane>
+
+            <GridPane hgap="10" vgap="0" styleClass="dashboard-quick-actions">
+                <columnConstraints>
+                    <ColumnConstraints percentWidth="16.66" hgrow="ALWAYS"/>
+                    <ColumnConstraints percentWidth="16.66" hgrow="ALWAYS"/>
+                    <ColumnConstraints percentWidth="16.66" hgrow="ALWAYS"/>
+                    <ColumnConstraints percentWidth="16.66" hgrow="ALWAYS"/>
+                    <ColumnConstraints percentWidth="16.66" hgrow="ALWAYS"/>
+                    <ColumnConstraints percentWidth="16.66" hgrow="ALWAYS"/>
+                </columnConstraints>
+                <VBox styleClass="quick-action-card" GridPane.columnIndex="0"><Label text="▶" styleClass="quick-action-icon"/><VBox spacing="2"><Label text="Automatisering" styleClass="quick-action-title"/><Label text="Start / Stop" styleClass="quick-action-detail"/></VBox></VBox>
+                <VBox styleClass="quick-action-card" GridPane.columnIndex="1"><Label text="▦" styleClass="quick-action-icon"/><VBox spacing="2"><Label text="Planning" styleClass="quick-action-title"/><Label text="Schema's" styleClass="quick-action-detail"/></VBox></VBox>
+                <VBox styleClass="quick-action-card" GridPane.columnIndex="2"><Label text="▱" styleClass="quick-action-icon"/><VBox spacing="2"><Label text="Profielen" styleClass="quick-action-title"/><Label text="Per account" styleClass="quick-action-detail"/></VBox></VBox>
+                <VBox styleClass="quick-action-card" GridPane.columnIndex="3"><Label text="⇩" styleClass="quick-action-icon"/><VBox spacing="2"><Label text="Downloads" styleClass="quick-action-title"/><Label text="Assets &amp; updates" styleClass="quick-action-detail"/></VBox></VBox>
+                <VBox styleClass="quick-action-card" GridPane.columnIndex="4"><Label text="⟳" styleClass="quick-action-icon"/><VBox spacing="2"><Label text="Updates" styleClass="quick-action-title"/><Label text="Nieuwe versie" styleClass="quick-action-detail"/></VBox></VBox>
+                <VBox styleClass="quick-action-card" GridPane.columnIndex="5"><Label text="🔧" styleClass="quick-action-icon"/><VBox spacing="2"><Label text="Tools" styleClass="quick-action-title"/><Label text="Hulpprogramma's" styleClass="quick-action-detail"/></VBox></VBox>
             </GridPane>
         </VBox>
     </content>
