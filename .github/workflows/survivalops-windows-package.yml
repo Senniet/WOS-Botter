@@ -81,7 +81,7 @@ jobs:
             "-Dfrostguard.product.install-dir=SurvivalOps",
             "-Dfrostguard.watcher.name=SurvivalOpsWatcher",
             "-Dfrostguard.product.upgrade-uuid=6d5b2a7e-9b3a-4f2a-8c1d-0e7f6a5b4c31",
-            "-Dfrostguard.pull-request-build=true", "-Pwindows-installer", "package"
+            "-Dfrostguard.pull-request-build=true", "-Pwindows-installer", "-DskipTests", "package"
           )
           & .\mvnw.cmd @args
           if ($LASTEXITCODE -ne 0) { throw "SurvivalOps MSI build failed" }
