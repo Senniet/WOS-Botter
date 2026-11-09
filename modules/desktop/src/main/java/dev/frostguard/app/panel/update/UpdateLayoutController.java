@@ -16,6 +16,7 @@ import dev.frostguard.update.UpdateManager;
 import dev.frostguard.update.UpdatePlatform;
 import dev.frostguard.update.WindowsAuthenticodeVerifier;
 import dev.frostguard.update.WindowsInstallerHandoff;
+import dev.frostguard.engine.service.ScheduleService;
 import javafx.application.Platform;
 import javafx.fxml.FXML;
 import javafx.scene.control.Alert;
@@ -32,6 +33,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
 import java.util.concurrent.Callable;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 public final class UpdateLayoutController {
@@ -56,19 +60,29 @@ public final class UpdateLayoutController {
     private RunningBuild runningBuild;
     private UpdateCandidate candidate;
     private RuntimeChannel switchTarget;
+    private final ScheduledExecutorService updateScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread thread = new Thread(r, "survivalops-update-check");
+        thread.setDaemon(true);
+        return thread;
+    });
+    private volatile PreparedUpdate preparedUpdate;
+    private volatile boolean updateHandoffQueued;
+    private volatile boolean automationPausedForUpdate;
 
     @FXML
     private void initialize() {
         runningBuild = runningBuild();
         labelCurrentVersion.setText("Current version: " + runningBuild.version());
-        labelChannel.setText("Channel: " + runningBuild.channel().directoryName());
+        labelChannel.setText("Edition: " + (isSurvivalOps() ? "Whiteout Survival" : runningBuild.channel().directoryName()));
         setAvailableUpdateVisible(false);
         progress.setVisible(false);
         configureChannelSwitch();
 
         if (!runningBuild.permitsAutomaticUpdates()) {
             buttonCheck.setDisable(true);
-            if (runningBuild.pullRequestBuild()) {
+            if (isSurvivalOps()) {
+                labelStatus.setText("SurvivalOps updates are not yet configured: its dedicated signing key is missing.");
+            } else if (runningBuild.pullRequestBuild()) {
                 labelStatus.setText("PR-test builds cannot use automatic updates.");
             } else if (runningBuild.channel() == RuntimeChannel.DEVELOPMENT) {
                 labelStatus.setText("Development builds do not use release update feeds.");
@@ -79,7 +93,12 @@ public final class UpdateLayoutController {
             buttonCheck.setDisable(true);
             labelStatus.setText("Automatic installer handoff is currently available on Windows only.");
         } else {
-            labelStatus.setText("Check the configured " + runningBuild.channel().directoryName() + " release feed.");
+            labelStatus.setText("Automatically checking the SurvivalOps release feed.");
+            if (isSurvivalOps()) {
+                updateScheduler.schedule(this::checkForUpdatesInBackground, 45, TimeUnit.SECONDS);
+                updateScheduler.scheduleAtFixedRate(this::checkForUpdatesInBackground,
+                        6, 6, TimeUnit.HOURS);
+            }
         }
     }
 
@@ -89,10 +108,10 @@ public final class UpdateLayoutController {
             return;
         }
         Alert confirmation = new Alert(Alert.AlertType.CONFIRMATION);
-        confirmation.setTitle("Open Frostguard " + switchTarget.displayName());
+        confirmation.setTitle("Open SurvivalOps " + switchTarget.displayName());
         confirmation.setHeaderText(switchTarget == RuntimeChannel.NIGHTLY
-                ? "Try Frostguard Nightly as a separate installation?"
-                : "Return to Frostguard Stable?");
+                ? "Try SurvivalOps Nightly as a separate installation?"
+                : "Return to SurvivalOps Stable?");
         confirmation.setContentText("Stable and Nightly keep separate profiles, tasks, schedules, Telegram "
                 + "settings, and databases. Both can run side by side. A first Nightly launch can copy a "
                 + "one-time Stable snapshot, but later changes are not synchronized.");
@@ -102,10 +121,10 @@ public final class UpdateLayoutController {
         try {
             ChannelSwitchService.Result result = channelSwitcher.open(switchTarget);
             labelStatus.setText(result == ChannelSwitchService.Result.LAUNCHED_INSTALLED
-                    ? "Frostguard " + switchTarget.displayName() + " was launched separately."
-                    : "Opened the Frostguard " + switchTarget.displayName() + " release page.");
+                    ? "SurvivalOps " + switchTarget.displayName() + " was launched separately."
+                    : "Opened the SurvivalOps " + switchTarget.displayName() + " release page.");
         } catch (Exception failure) {
-            showFailure(new UpdateException("Could not open Frostguard " + switchTarget.displayName()
+            showFailure(new UpdateException("Could not open SurvivalOps " + switchTarget.displayName()
                     + ": " + failure.getMessage(), failure));
         }
     }
@@ -126,13 +145,13 @@ public final class UpdateLayoutController {
             return;
         }
         Alert confirmation = new Alert(Alert.AlertType.CONFIRMATION);
-        confirmation.setTitle("Update Frostguard");
-        confirmation.setHeaderText("Download Frostguard " + candidate.version() + " and restart?");
+        confirmation.setTitle("Update SurvivalOps");
+        confirmation.setHeaderText("Download SurvivalOps " + candidate.version() + " and restart?");
         confirmation.setContentText("Channel: " + candidate.channel().directoryName() + "\n"
                 + "Download: " + formatSize(candidate.artifact().size()) + "\n\n"
-                + "Frostguard will verify the project-signed release, stop automation, close its workspace, "
-                + "apply the update with a compact Windows progress window, and restart this workspace. "
-                + "Windows may show an unknown-publisher warning.");
+                + "SurvivalOps will verify the signed release and download it. Automation will be paused "
+                + "without interrupting an active routine; installation starts only after the routine finishes. "
+                + "Your workspace and settings are preserved.");
         if (confirmation.showAndWait().filter(ButtonType.OK::equals).isEmpty()) {
             return;
         }
@@ -153,19 +172,90 @@ public final class UpdateLayoutController {
     }
 
     private void showCheckResult(Optional<UpdateCandidate> result) {
-        setBusy(false, result.isPresent() ? "An update is available." : "Frostguard is up to date.");
+        setBusy(false, result.isPresent() ? "An update is available." : "SurvivalOps is up to date.");
         candidate = result.orElse(null);
         setAvailableUpdateVisible(candidate != null);
         if (candidate != null) {
-            labelAvailableVersion.setText("Frostguard " + candidate.version());
+            labelAvailableVersion.setText("SurvivalOps " + candidate.version() + " is available");
             labelArtifactDetails.setText(candidate.channel().directoryName() + " / " + candidate.platform().key()
-                    + " / " + formatSize(candidate.artifact().size()));
+                    + " / " + formatSize(candidate.artifact().size())
+                    + "\nChoose Install now to download and verify it. You can safely choose Later.");
             linkReleaseNotes.setText(candidate.releaseNotes().toString());
+            buttonDownloadInstall.setText("Nu installeren");
+            if (isSurvivalOps()) {
+                labelStatus.setText("A new SurvivalOps version is available. Installation requires your approval.");
+            }
+        }
+    }
+
+    @FXML
+    private void handleLater() {
+        setAvailableUpdateVisible(false);
+        labelStatus.setText("Update postponed. SurvivalOps will check again automatically.");
+    }
+
+    private void checkForUpdatesInBackground() {
+        if (!isSurvivalOps() || !runningBuild.permitsAutomaticUpdates() || manager.isOperationActive()) return;
+        try {
+            URI endpoint = endpoints.resolve(runningBuild.channel()).orElse(null);
+            if (endpoint == null) return;
+            Optional<UpdateCandidate> result = manager.check(endpoint, runningBuild);
+            Platform.runLater(() -> {
+                if (result.isPresent()) showCheckResult(result);
+                else if (candidate == null) labelStatus.setText("SurvivalOps is up to date.");
+            });
+        } catch (Exception failure) {
+            Platform.runLater(() -> labelStatus.setText("Automatic update check failed: "
+                    + (failure.getMessage() == null ? "unknown error" : failure.getMessage())));
         }
     }
 
     private void beginHandoff(PreparedUpdate prepared) {
-        labelStatus.setText("Update verified. Restarting Frostguard to apply it...");
+        preparedUpdate = prepared;
+        try {
+            // Pause queue dispatch first so another routine cannot start while we wait for the current one.
+            ScheduleService.obtain().suspendEngine();
+            automationPausedForUpdate = true;
+        } catch (Exception failure) {
+            showFailure(new UpdateException("Could not safely pause automation for the update: "
+                    + failure.getMessage(), failure));
+            return;
+        }
+        if (hasExecutingBotRoutine()) {
+            if (!updateHandoffQueued) {
+                updateHandoffQueued = true;
+                labelStatus.setText("Update downloaded and verified. Waiting for the active bot routine to finish; "
+                        + "SurvivalOps will not interrupt it.");
+                updateScheduler.scheduleAtFixedRate(this::tryApplyPreparedUpdate, 10, 10, TimeUnit.SECONDS);
+            }
+            return;
+        }
+        applyPreparedUpdate(prepared);
+    }
+
+    private boolean hasExecutingBotRoutine() {
+        try {
+            return ScheduleService.obtain().hasExecutingTasks();
+        } catch (Exception failure) {
+            // Fail closed: if task state cannot be established, do not shut down automation.
+            labelStatus.setText("Cannot confirm that automation is idle. Update installation is paused.");
+            return true;
+        }
+    }
+
+    private void tryApplyPreparedUpdate() {
+        PreparedUpdate ready = preparedUpdate;
+        if (ready == null || hasExecutingBotRoutine()) return;
+        updateScheduler.shutdown();
+        Platform.runLater(() -> applyPreparedUpdate(ready));
+    }
+
+    private void applyPreparedUpdate(PreparedUpdate prepared) {
+        if (hasExecutingBotRoutine()) {
+            labelStatus.setText("A bot routine became active. Installation postponed until it finishes.");
+            return;
+        }
+        labelStatus.setText("Update verified and automation idle. Restarting SurvivalOps to apply it...");
         InstallerHandoff.HandoffSession session = null;
         try {
             session = manager.stageHandoff(prepared, ProcessHandle.current().pid(),
@@ -186,11 +276,11 @@ public final class UpdateLayoutController {
     static Path currentNativeLauncher() throws UpdateException {
         String configured = System.getProperty("jpackage.app-path", "").trim();
         if (configured.isEmpty()) {
-            throw new UpdateException("The installed Frostguard launcher could not be resolved");
+            throw new UpdateException("The installed SurvivalOps launcher could not be resolved");
         }
         Path launcher = Path.of(configured).toAbsolutePath().normalize();
         if (!Files.isRegularFile(launcher)) {
-            throw new UpdateException("The installed Frostguard launcher does not exist: " + launcher);
+            throw new UpdateException("The installed SurvivalOps launcher does not exist: " + launcher);
         }
         return launcher;
     }
@@ -207,9 +297,18 @@ public final class UpdateLayoutController {
     }
 
     private void showFailure(Exception exception) {
+        if (automationPausedForUpdate) {
+            try {
+                ScheduleService.obtain().resumeEngine();
+                automationPausedForUpdate = false;
+            } catch (Exception resumeFailure) {
+                labelStatus.setText("Update failed and automation could not be resumed automatically: "
+                        + resumeFailure.getMessage());
+            }
+        }
         setBusy(false, exception.getMessage() == null ? "Update operation failed." : exception.getMessage());
         Alert alert = new Alert(Alert.AlertType.ERROR);
-        alert.setTitle("Frostguard update failed");
+        alert.setTitle("SurvivalOps update failed");
         alert.setHeaderText("The current installation was not replaced.");
         alert.setContentText(labelStatus.getText());
         alert.show();
@@ -228,7 +327,7 @@ public final class UpdateLayoutController {
     }
 
     private void configureChannelSwitch() {
-        boolean supported = supportsChannelSwitch(runningBuild.channel());
+        boolean supported = !isSurvivalOps() && supportsChannelSwitch(runningBuild.channel());
         channelSwitchPane.setVisible(supported);
         channelSwitchPane.setManaged(supported);
         if (!supported) {
@@ -237,8 +336,12 @@ public final class UpdateLayoutController {
         }
         switchTarget = runningBuild.channel().alternateRelease();
         buttonSwitchChannel.setText(switchTarget == RuntimeChannel.NIGHTLY ? "Try Nightly" : "Return to Stable");
-        labelChannelSwitch.setText("Frostguard " + switchTarget.displayName()
+        labelChannelSwitch.setText("SurvivalOps " + switchTarget.displayName()
                 + " is a separate application with its own settings and workspace.");
+    }
+
+    private static boolean isSurvivalOps() {
+        return "SurvivalOps".equalsIgnoreCase(System.getProperty("frostguard.brand.name", "").trim());
     }
 
     static boolean supportsChannelSwitch(RuntimeChannel channel) {

@@ -15,6 +15,9 @@ public class Main {
     private static volatile WorkspaceSession workspace;
 
     public static void main(String[] args) {
+        String productName = System.getProperty("frostguard.brand.name", "").trim();
+        if (productName.isEmpty()) productName = "Frostguard";
+        final String applicationName = productName;
         StartupOptions options;
         WorkspacePaths paths;
         try {
@@ -25,7 +28,7 @@ public class Main {
             reportWorkspaceInUse(alreadyRunning.paths(), hasHeadlessArgument(args));
             return;
         } catch (RuntimeException startupConfigurationFailure) {
-            StartupFailureReporter.report("Frostguard could not start",
+            StartupFailureReporter.report(applicationName + " could not start",
                     startupConfigurationFailure.getMessage(), hasHeadlessArgument(args));
             return;
         }
@@ -40,7 +43,7 @@ public class Main {
                 return;
             }
 
-            logger.info("Initializing Frostguard with workspace {}", workspace.paths().root());
+            logger.info("Initializing {} with workspace {}", applicationName, workspace.paths().root());
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 logger.info("Closing down subsystems.");
                 ApplicationLifecycle.runShutdownHook();

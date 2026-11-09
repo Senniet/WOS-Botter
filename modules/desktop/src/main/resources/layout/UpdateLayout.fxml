@@ -16,7 +16,7 @@
 
     <Label text="Application Updates"
            style="-fx-font-size: 20px; -fx-font-weight: bold; -fx-text-fill: #e6edf3;" />
-    <Label text="Updates are selected for this product identity and verified before Frostguard exits."
+    <Label text="Updates are selected for this product identity and verified before SurvivalOps exits."
            wrapText="true" style="-fx-text-fill: #9da7b3;" />
 
     <HBox spacing="20">
@@ -36,8 +36,11 @@
                style="-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #e6edf3;" />
         <Label fx:id="labelArtifactDetails" style="-fx-text-fill: #9da7b3;" />
         <Hyperlink fx:id="linkReleaseNotes" text="Release notes" onAction="#openReleaseNotes" />
-        <Button fx:id="buttonDownloadInstall" text="Download and restart"
-                onAction="#handleDownloadInstall" />
+        <HBox spacing="8">
+            <Button fx:id="buttonDownloadInstall" text="Nu installeren"
+                    onAction="#handleDownloadInstall" />
+            <Button text="Later" onAction="#handleLater" />
+        </HBox>
     </VBox>
 
     <VBox fx:id="channelSwitchPane" spacing="10"

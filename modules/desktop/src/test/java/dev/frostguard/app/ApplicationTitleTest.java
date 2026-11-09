@@ -10,6 +10,8 @@ class ApplicationTitleTest {
     void identifiesChannelInstanceAndVersion() {
         assertEquals("Frostguard · default · v2.1.0",
                 ApplicationTitle.format(RuntimeChannel.STABLE, "2.1.0", "default"));
+        assertEquals("SurvivalOps · default · v1.0.0",
+                ApplicationTitle.format(RuntimeChannel.STABLE, "1.0.0", "default", "SurvivalOps"));
         assertEquals("Frostguard Nightly · bot-2 · v26.8.1",
                 ApplicationTitle.format(RuntimeChannel.NIGHTLY, "26.8.1", "bot-2"));
         assertEquals("Frostguard Development · fix/arena-refresh-budget · v3.0.0-dev",

@@ -398,6 +398,11 @@ public class ScheduleService {
 		configs.saveSetting(row);
 	}
 
+	/** Returns true while any profile is in the middle of an automation routine. */
+	public boolean hasExecutingTasks() {
+		return dispatcher.hasExecutingTasks();
+	}
+
 	public TaskDispatcher getCoordinator() {
 		return dispatcher;
 	}
