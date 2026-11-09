@@ -66,7 +66,7 @@ jobs:
         run: |
           $image = "packaging/desktop/target/app-image/SurvivalOps"
           if (-not (Test-Path "$image/SurvivalOps.exe")) { throw "SurvivalOps.exe missing" }
-          if (-not (Test-Path "$image/runtime/bin/java.exe")) { throw "Bundled Java runtime missing" }
+          if (-not (Test-Path "$image/runtime/bin/server/jvm.dll")) { throw "Bundled Java VM runtime missing" }
           if (-not (Test-Path "$image/SurvivalOpsWatcher.exe")) { throw "Watcher launcher missing" }
       - name: Build SurvivalOps MSI installer
         shell: pwsh

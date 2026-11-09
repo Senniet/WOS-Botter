@@ -90,7 +90,9 @@ jobs:
           & .\mvnw.cmd @args
           if ($LASTEXITCODE -ne 0) { throw 'SurvivalOps app-image build failed' }
           $image = 'packaging/desktop/target/app-image/SurvivalOps'
-          if (-not (Test-Path (Join-Path $image 'SurvivalOps.exe')) -or -not (Test-Path (Join-Path $image 'runtime/bin/java.exe'))) { throw 'SurvivalOps app-image is incomplete' }
+          if (-not (Test-Path (Join-Path $image 'SurvivalOps.exe'))) { throw 'SurvivalOps.exe is missing from app-image' }
+          if (-not (Test-Path (Join-Path $image 'SurvivalOpsWatcher.exe'))) { throw 'SurvivalOpsWatcher.exe is missing from app-image' }
+          if (-not (Test-Path (Join-Path $image 'runtime/bin/server/jvm.dll'))) { throw 'Bundled Java VM runtime is missing from app-image' }
 
       - name: Build SurvivalOps MSI installer
         shell: pwsh
