@@ -1,0 +1,195 @@
+name: SurvivalOps — Signed Windows Test Release
+
+on:
+  push:
+    tags:
+      - 'survivalops-test-v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'SurvivalOps test version (for example 1.0.3)'
+        required: true
+        default: '1.0.3'
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: survivalops-test-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish signed SurvivalOps test update
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      SURVIVALOPS_UPDATE_SIGNING_PRIVATE_KEY_BASE64: ${{ secrets.SURVIVALOPS_UPDATE_SIGNING_PRIVATE_KEY_BASE64 }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: false
+
+      - name: Resolve version and validate update trust configuration
+        id: identity
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
+            $version = '${{ inputs.version }}'
+          } else {
+            $version = $env:GITHUB_REF_NAME -replace '^survivalops-test-v', ''
+          }
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid SurvivalOps version: $version" }
+          if ([string]::IsNullOrWhiteSpace($env:SURVIVALOPS_UPDATE_SIGNING_PRIVATE_KEY_BASE64)) {
+            throw 'GitHub Actions secret SURVIVALOPS_UPDATE_SIGNING_PRIVATE_KEY_BASE64 is missing'
+          }
+          $key = Get-Content -Raw modules/update/src/main/resources/dev/frostguard/update/survivalops-update-key.properties | ConvertFrom-StringData
+          if ([string]::IsNullOrWhiteSpace($key.keyId) -or [string]::IsNullOrWhiteSpace($key.publicKey)) {
+            throw 'Dedicated SurvivalOps public key is not configured in survivalops-update-key.properties'
+          }
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Verify shipped binaries
+        shell: bash
+        run: build-support/verification/check_lfs_assets.sh
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21.0.12+8.0.LTS'
+          cache: maven
+
+      - name: Install WiX Toolset 3
+        shell: pwsh
+        run: |
+          choco install wixtoolset --version=3.14.1.20250415 --no-progress -y
+          $wixBin = "${env:ProgramFiles(x86)}\WiX Toolset v3.14\bin"
+          if (-not (Test-Path (Join-Path $wixBin 'candle.exe'))) { throw 'WiX Toolset missing' }
+          $wixBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Build SurvivalOps application image
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.identity.outputs.version }}
+        run: |
+          $args = @(
+            '-B', '--no-transfer-progress', '-Dstyle.color=never',
+            "-Drevision=$env:VERSION", "-Dfrostguard.windows.app-version=$env:VERSION",
+            "-Dfrostguard.windows.launcher-version=$env:VERSION",
+            '-Dfrostguard.product.name=SurvivalOps',
+            '-Dfrostguard.product.identifier=dev.survivalops.desktop',
+            '-Dfrostguard.product.description=SurvivalOps Whiteout Survival Automation Suite',
+            '-Dfrostguard.product.install-dir=SurvivalOps',
+            '-Dfrostguard.watcher.name=SurvivalOpsWatcher',
+            '-Dfrostguard.product.upgrade-uuid=6d5b2a7e-9b3a-4f2a-8c1d-0e7f6a5b4c31',
+            '-Dfrostguard.pull-request-build=false', '-Pwindows-app-image', 'package'
+          )
+          & .\mvnw.cmd @args
+          if ($LASTEXITCODE -ne 0) { throw 'SurvivalOps app-image build failed' }
+          $image = 'packaging/desktop/target/app-image/SurvivalOps'
+          if (-not (Test-Path (Join-Path $image 'SurvivalOps.exe'))) { throw 'SurvivalOps.exe is missing from app-image' }
+          if (-not (Test-Path (Join-Path $image 'SurvivalOpsWatcher.exe'))) { throw 'SurvivalOpsWatcher.exe is missing from app-image' }
+          if (-not (Test-Path (Join-Path $image 'runtime/bin/server/jvm.dll'))) { throw 'Bundled Java VM runtime is missing from app-image' }
+
+      - name: Build SurvivalOps MSI installer
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.identity.outputs.version }}
+        run: |
+          $args = @(
+            '-B', '--no-transfer-progress', '-Dstyle.color=never',
+            "-Drevision=$env:VERSION", "-Dfrostguard.windows.app-version=$env:VERSION",
+            "-Dfrostguard.windows.launcher-version=$env:VERSION",
+            '-Dfrostguard.product.name=SurvivalOps',
+            '-Dfrostguard.product.identifier=dev.survivalops.desktop',
+            '-Dfrostguard.product.description=SurvivalOps Whiteout Survival Automation Suite',
+            '-Dfrostguard.product.install-dir=SurvivalOps',
+            '-Dfrostguard.watcher.name=SurvivalOpsWatcher',
+            '-Dfrostguard.product.upgrade-uuid=6d5b2a7e-9b3a-4f2a-8c1d-0e7f6a5b4c31',
+            '-Dfrostguard.pull-request-build=false', '-Pwindows-installer', '-DskipTests', 'package'
+          )
+          & .\mvnw.cmd @args
+          if ($LASTEXITCODE -ne 0) { throw 'SurvivalOps MSI build failed' }
+
+      - name: Verify installer and create versioned release
+        id: installer
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.identity.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $files = @(Get-ChildItem 'packaging/desktop/target/installers/stable' -Filter 'SurvivalOps-*.msi' -File)
+          if ($files.Count -ne 1 -or $files[0].Length -lt 1MB) { throw 'Expected one valid SurvivalOps MSI' }
+          $name = "SurvivalOps-$env:VERSION.msi"
+          $msi = Join-Path $env:RUNNER_TEMP $name
+          Copy-Item $files[0].FullName $msi
+          $hash = (Get-FileHash $msi -Algorithm SHA256).Hash.ToLowerInvariant()
+          "path=$msi" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "name=$name" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "size=$((Get-Item $msi).Length)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "sha256=$hash" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          $tag = "survivalops-test-v$env:VERSION"
+          $notes = "SurvivalOps $env:VERSION`n`nTEST BUILD. Updates are delivered only through the signed SurvivalOps test feed."
+          $notesPath = Join-Path $env:RUNNER_TEMP 'release-notes.md'
+          Set-Content -LiteralPath $notesPath -Value $notes -Encoding utf8
+          gh release create $tag $msi --title "SurvivalOps TEST $env:VERSION" --notes-file $notesPath --latest=false --target $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'Could not create versioned SurvivalOps release' }
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Create and sign test update manifest
+        id: sign
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.identity.outputs.version }}
+          MSI_NAME: ${{ steps.installer.outputs.name }}
+          MSI_SIZE: ${{ steps.installer.outputs.size }}
+          MSI_SHA256: ${{ steps.installer.outputs.sha256 }}
+          RELEASE_TAG: ${{ steps.installer.outputs.tag }}
+        run: |
+          $manifest = [ordered]@{
+            schemaVersion = 1
+            channel = 'stable'
+            version = $env:VERSION
+            publishedAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+            minimumUpdaterVersion = '1.0.0'
+            releaseNotesUrl = "https://github.com/$env:GITHUB_REPOSITORY/releases/tag/$env:RELEASE_TAG"
+            artifacts = [ordered]@{
+              'windows-x64' = [ordered]@{
+                operatingSystem = 'windows'
+                architecture = 'x64'
+                fileName = $env:MSI_NAME
+                url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:RELEASE_TAG/$env:MSI_NAME"
+                sha256 = $env:MSI_SHA256
+                size = [long]$env:MSI_SIZE
+                signature = $null
+              }
+            }
+          }
+          $payload = Join-Path $env:RUNNER_TEMP 'survivalops-manifest-payload.json'
+          $envelope = Join-Path $env:RUNNER_TEMP 'survivalops-test-manifest.json'
+          $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $payload -Encoding utf8
+          java '-Dfrostguard.brand.name=SurvivalOps' -cp modules/update/target/classes dev.frostguard.update.ProjectManifestSigner sign $payload $envelope
+          if ($LASTEXITCODE -ne 0) { throw 'Could not sign SurvivalOps update manifest' }
+          $verificationClasspath = "modules/update/target/classes;modules/api/target/classes;packaging/desktop/target/input/lib/*"
+          java '-Dfrostguard.brand.name=SurvivalOps' -cp $verificationClasspath dev.frostguard.update.ProjectManifestSigner verify $envelope
+          if ($LASTEXITCODE -ne 0) { throw 'Signed SurvivalOps update manifest failed verification' }
+          "manifest=$envelope" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Publish test feed manifest
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MANIFEST: ${{ steps.sign.outputs.manifest }}
+        run: |
+          $feedTag = 'survivalops-test'
+          gh release view $feedTag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $feedTag --title 'SurvivalOps Test Update Feed' --notes 'Machine-readable signed update feed for SurvivalOps Test. Not for production installations.' --latest=false
+            if ($LASTEXITCODE -ne 0) { throw 'Could not create test feed release' }
+          }
+          gh release upload $feedTag $env:MANIFEST --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Could not publish signed test update manifest' }
