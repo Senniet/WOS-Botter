@@ -1961,3 +1961,122 @@
     -fx-border-color: -fg-yellow;
     -fx-border-width: 2px;
 }
+/* SurvivalOps reference dashboard visual system */
+.root {
+    -fx-font-family: "Segoe UI", "Inter", sans-serif;
+    -fx-font-size: 14px;
+    -fg-bg-app: #0c1929;
+    -fg-bg-sidebar: #091727;
+    -fg-bg-card: #17283a;
+    -fg-bg-table-row: #15283b;
+    -fg-bg-table-alt: #1a3046;
+    -fg-blue: #2498ef;
+    -fg-green: #43d17c;
+    -fg-text-primary: #f2f6fc;
+    -fg-text-secondary: #b8c9dc;
+    -fg-border-subtle: #2a425b;
+    -fx-background-color: #0c1929;
+}
+.nav-sidebar {
+    -fx-background-color: linear-gradient(to bottom, #0b1a2b, #081525);
+    -fx-border-color: transparent #213b54 transparent transparent;
+    -fx-min-width: 298; -fx-pref-width: 298; -fx-max-width: 298;
+}
+#sidebarHeader { -fx-padding: 18 18 18 18; -fx-spacing: 10; }
+#logoContainer { -fx-padding: 0 0 8 0; }
+.nav-button-container { -fx-padding: 10 12 12 12; -fx-spacing: 6; }
+.nav-button {
+    -fx-background-color: transparent; -fx-border-color: transparent;
+    -fx-border-width: 1; -fx-background-radius: 11; -fx-border-radius: 11;
+    -fx-padding: 12 14; -fx-min-height: 48; -fx-font-size: 15px;
+    -fx-font-weight: normal; -fx-graphic-text-gap: 15;
+}
+.nav-button .label { -fx-text-fill: #edf4fd; -fx-font-size: 15px; -fx-font-weight: normal; }
+.nav-button .ikonli-font-icon { -fx-icon-color: #c5d8ec; -fx-icon-size: 23; }
+.nav-button:hover { -fx-background-color: rgba(74,144,211,.14); -fx-border-color: rgba(105,169,226,.16); }
+.nav-button.active {
+    -fx-background-color: linear-gradient(to right, #174d82, #245a91);
+    -fx-border-color: #286da8; -fx-text-fill: white;
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,.24), 8, .1, 0, 2);
+}
+.nav-button.active .label { -fx-text-fill: white; -fx-font-weight: bold; }
+.nav-button.active .ikonli-font-icon { -fx-icon-color: #7bd0ff; }
+.sidebar-footer {
+    -fx-background-color: transparent; -fx-border-color: #213b54 transparent transparent transparent;
+    -fx-padding: 12 12 16 12;
+}
+.status-bar {
+    -fx-background-color: linear-gradient(to bottom, #172a3e, #0e1c2c);
+    -fx-border-color: #304b66 transparent transparent transparent; -fx-padding: 9 18;
+    -fx-min-height: 48;
+}
+.custom-title-bar { -fx-background-color: #0d1a29; -fx-border-color: transparent transparent #263e56 transparent; }
+.title-bar-text { -fx-text-fill: #edf4fd; -fx-font-size: 14px; -fx-font-weight: bold; }
+.title-bar-btn { -fx-background-color: transparent; -fx-text-fill: #e8f2ff; }
+.title-bar-btn:hover { -fx-background-color: #263c53; }
+.title-bar-close:hover { -fx-background-color: #b83242; }
+.dashboard-scroll, .dashboard-scroll > .viewport { -fx-background-color: #0c1929; }
+.dashboard-root { -fx-background-color: linear-gradient(to bottom right, #0e1d2e, #101f31 55%, #0b1929); }
+.dashboard-heading { -fx-text-fill: #f4f8ff; -fx-font-size: 28px; -fx-font-weight: bold; }
+.dashboard-heading-icon { -fx-text-fill: #59baff; -fx-font-size: 34px; -fx-font-weight: bold; }
+.dashboard-subtitle { -fx-text-fill: #c2d2e4; -fx-font-size: 15px; -fx-padding: 0 0 2 42; }
+.dashboard-metric-card {
+    -fx-background-color: linear-gradient(to bottom right, #1c3147, #14263a);
+    -fx-border-color: #35536f; -fx-border-radius: 13; -fx-background-radius: 13;
+    -fx-padding: 16; -fx-min-height: 102;
+}
+.metric-icon {
+    -fx-min-width: 64; -fx-min-height: 64; -fx-alignment: center;
+    -fx-background-radius: 40; -fx-font-size: 29px; -fx-font-weight: bold;
+}
+.metric-blue { -fx-text-fill: #85d6ff; -fx-background-color: rgba(87,160,220,.2); }
+.metric-green { -fx-text-fill: #68e4a8; -fx-background-color: rgba(45,190,125,.19); }
+.metric-value { -fx-text-fill: #f5f8fd; -fx-font-size: 19px; -fx-font-weight: bold; }
+.metric-detail { -fx-text-fill: #c0d0e1; -fx-font-size: 14px; }
+.dashboard-panel {
+    -fx-background-color: linear-gradient(to bottom right, #192c40, #14263a);
+    -fx-border-color: #304d69; -fx-border-radius: 13; -fx-background-radius: 13; -fx-padding: 14;
+}
+.panel-title { -fx-text-fill: #f1f6fd; -fx-font-size: 18px; -fx-font-weight: bold; }
+.panel-icon { -fx-text-fill: #b9d8f2; -fx-font-size: 22px; }
+.dashboard-table-header { -fx-background-color: #263d55; -fx-background-radius: 8; -fx-padding: 10; }
+.dashboard-table-header .label { -fx-text-fill: #f1f6fc; -fx-font-weight: bold; }
+.dashboard-account-row { -fx-background-color: rgba(12,29,47,.58); -fx-background-radius: 8; -fx-padding: 11 10; -fx-alignment: center-left; }
+.dashboard-row-name { -fx-text-fill: #f0f5fc; -fx-font-weight: bold; }
+.dashboard-row-detail { -fx-text-fill: #b6c9dd; -fx-font-size: 12px; }
+.status-active, .status-paused, .status-idle { -fx-padding: 5 9; -fx-background-radius: 7; -fx-font-weight: bold; }
+.status-active { -fx-text-fill: #7be6a2; -fx-background-color: rgba(49,190,115,.2); }
+.status-paused { -fx-text-fill: #d6e4f5; -fx-background-color: rgba(111,143,177,.23); }
+.status-idle { -fx-text-fill: #b8c9dc; -fx-background-color: rgba(111,143,177,.14); }
+.dashboard-empty { -fx-text-fill: #b7c9dd; -fx-font-size: 14px; }
+.system-label { -fx-text-fill: #e4edf7; -fx-font-size: 14px; }
+.system-value { -fx-text-fill: #e1edf9; -fx-font-size: 13px; }
+.system-progress { -fx-accent: #399fe9; -fx-pref-height: 9; }
+.system-progress > .track { -fx-background-color: #263d55; -fx-background-radius: 8; }
+.system-progress > .bar { -fx-background-radius: 8; }
+
+
+/* SurvivalOps brand shell and navigation grouping */
+.survivalops-tagline { -fx-text-fill: #edf4fc; -fx-font-size: 13px; -fx-font-weight: bold; }
+.survivalops-motto { -fx-text-fill: #91b4d8; -fx-font-size: 12px; }
+.survivalops-hero {
+    -fx-background-color: linear-gradient(to right, #152d46, #24496a 48%, #0c1d31);
+    -fx-border-color: transparent transparent #28435c transparent;
+    -fx-border-width: 0 0 1 0;
+}
+.survivalops-hero-copy { -fx-padding: 24 34; }
+.survivalops-hero-title { -fx-text-fill: rgba(240,248,255,.96); -fx-font-size: 26px; -fx-font-weight: bold; }
+.survivalops-hero-subtitle { -fx-text-fill: #c3d8eb; -fx-font-size: 14px; }
+.nav-section-label {
+    -fx-text-fill: #7894b0; -fx-font-size: 10px; -fx-font-weight: bold;
+    -fx-padding: 12 10 3 12;
+}
+.survivalops-hero-tools { -fx-padding: 0 22 0 0; }
+.survivalops-hero-tools .search-field, .survivalops-hero-tools .combo-box {
+    -fx-background-color: rgba(8,22,37,.82); -fx-border-color: #486783;
+    -fx-border-radius: 8; -fx-background-radius: 8; -fx-text-fill: #f1f7ff;
+}
+.dashboard-activity-line {
+    -fx-text-fill: #dce9f7; -fx-font-size: 13px; -fx-padding: 6 8;
+    -fx-background-color: rgba(10,25,41,.48); -fx-background-radius: 6;
+}

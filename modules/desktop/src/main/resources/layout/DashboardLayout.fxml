@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.layout.*?>
+
+<ScrollPane xmlns="http://javafx.com/javafx/23.0.1" xmlns:fx="http://javafx.com/fxml/1"
+            fitToWidth="true" hbarPolicy="NEVER" styleClass="dashboard-scroll">
+    <content>
+        <VBox spacing="18" styleClass="dashboard-root">
+            <padding><Insets top="22" right="22" bottom="22" left="22"/></padding>
+            <VBox spacing="4">
+                <HBox spacing="12" alignment="CENTER_LEFT">
+                    <Label text="⌂" styleClass="dashboard-heading-icon"/>
+                    <Label text="Dashboard" styleClass="dashboard-heading"/>
+                </HBox>
+                <Label text="Overzicht van je accounts, taken en huidige status." styleClass="dashboard-subtitle"/>
+            </VBox>
+
+            <GridPane hgap="12" vgap="12">
+                <columnConstraints>
+                    <ColumnConstraints percentWidth="25" hgrow="ALWAYS"/>
+                    <ColumnConstraints percentWidth="25" hgrow="ALWAYS"/>
+                    <ColumnConstraints percentWidth="25" hgrow="ALWAYS"/>
+                    <ColumnConstraints percentWidth="25" hgrow="ALWAYS"/>
+                </columnConstraints>
+                <HBox styleClass="dashboard-metric-card" spacing="14" alignment="CENTER_LEFT" GridPane.columnIndex="0">
+                    <Label text="♟" styleClass="metric-icon metric-blue"/>
+                    <VBox spacing="4"><Label fx:id="accountCount" text="— Accounts" styleClass="metric-value"/><Label fx:id="accountDetail" text="Accounts worden geladen" styleClass="metric-detail"/></VBox>
+                </HBox>
+                <HBox styleClass="dashboard-metric-card" spacing="14" alignment="CENTER_LEFT" GridPane.columnIndex="1">
+                    <Label text="✓" styleClass="metric-icon metric-green"/>
+                    <VBox spacing="4"><Label fx:id="queueCount" text="— Actieve taken" styleClass="metric-value"/><Label fx:id="queueDetail" text="Wachtrijen worden geladen" styleClass="metric-detail"/></VBox>
+                </HBox>
+                <HBox styleClass="dashboard-metric-card" spacing="14" alignment="CENTER_LEFT" GridPane.columnIndex="2">
+                    <Label text="⟳" styleClass="metric-icon metric-blue"/>
+                    <VBox spacing="4"><Label text="Automatisering" styleClass="metric-value"/><Label fx:id="engineState" text="Status onbekend" styleClass="metric-detail"/></VBox>
+                </HBox>
+                <HBox styleClass="dashboard-metric-card" spacing="14" alignment="CENTER_LEFT" GridPane.columnIndex="3">
+                    <Label text="▥" styleClass="metric-icon metric-green"/>
+                    <VBox spacing="4"><Label text="Sessie" styleClass="metric-value"/><Label fx:id="uptimeValue" text="00:00:00" styleClass="metric-detail"/></VBox>
+                </HBox>
+            </GridPane>
+
+            <GridPane hgap="14" vgap="14">
+                <columnConstraints>
+                    <ColumnConstraints percentWidth="62" hgrow="ALWAYS"/>
+                    <ColumnConstraints percentWidth="38" hgrow="ALWAYS"/>
+                </columnConstraints>
+                <VBox styleClass="dashboard-panel" spacing="12" GridPane.columnIndex="0">
+                    <HBox alignment="CENTER_LEFT" spacing="10"><Label text="♟" styleClass="panel-icon"/><Label text="Accountstatus" styleClass="panel-title"/></HBox>
+                    <GridPane styleClass="dashboard-table-header" hgap="10">
+                        <columnConstraints><ColumnConstraints percentWidth="34"/><ColumnConstraints percentWidth="20"/><ColumnConstraints percentWidth="46"/></columnConstraints>
+                        <Label text="Account" GridPane.columnIndex="0"/><Label text="Status" GridPane.columnIndex="1"/><Label text="Emulator" GridPane.columnIndex="2"/>
+                    </GridPane>
+                    <VBox fx:id="accountRows" spacing="8"/>
+                    <Label fx:id="accountEmpty" text="Nog geen accounts beschikbaar." styleClass="dashboard-empty"/>
+                </VBox>
+                <VBox styleClass="dashboard-panel" spacing="12" GridPane.columnIndex="1">
+                    <HBox alignment="CENTER_LEFT" spacing="10"><Label text="⚙" styleClass="panel-icon"/><Label text="Systeemoverzicht" styleClass="panel-title"/></HBox>
+                    <HBox alignment="CENTER_LEFT"><Label text="CPU" styleClass="system-label"/><Region HBox.hgrow="ALWAYS"/><Label fx:id="cpuValue" text="Niet beschikbaar" styleClass="system-value"/></HBox>
+                    <ProgressBar fx:id="cpuBar" progress="0" maxWidth="Infinity" styleClass="system-progress"/>
+                    <HBox alignment="CENTER_LEFT"><Label text="Systeemgeheugen" styleClass="system-label"/><Region HBox.hgrow="ALWAYS"/><Label fx:id="memoryValue" text="Niet beschikbaar" styleClass="system-value"/></HBox>
+                    <ProgressBar fx:id="memoryBar" progress="0" maxWidth="Infinity" styleClass="system-progress"/>
+                    <HBox alignment="CENTER_LEFT"><Label text="ADB" styleClass="system-label"/><Region HBox.hgrow="ALWAYS"/><Label fx:id="adbValue" text="Niet gecontroleerd" styleClass="system-value"/></HBox>
+                    <HBox alignment="CENTER_LEFT"><Label text="OCR / Vision" styleClass="system-label"/><Region HBox.hgrow="ALWAYS"/><Label text="Beschikbaar via modules" styleClass="system-value"/></HBox>
+                </VBox>
+            </GridPane>
+
+            <GridPane hgap="14" vgap="14">
+                <columnConstraints><ColumnConstraints percentWidth="58" hgrow="ALWAYS"/><ColumnConstraints percentWidth="42" hgrow="ALWAYS"/></columnConstraints>
+                <VBox styleClass="dashboard-panel" spacing="12" GridPane.columnIndex="0">
+                    <HBox alignment="CENTER_LEFT" spacing="10"><Label text="⚙" styleClass="panel-icon"/><Label text="Automatisering" styleClass="panel-title"/></HBox>
+                    <Label fx:id="routineState" text="Er is nog geen actieve routine." styleClass="dashboard-empty"/>
+                    <Label text="Gebruik Automatisering of Taken &amp; Routines om je workflow te beheren." styleClass="metric-detail" wrapText="true"/>
+                </VBox>
+                <VBox styleClass="dashboard-panel" spacing="12" GridPane.columnIndex="1">
+                    <HBox alignment="CENTER_LEFT" spacing="10"><Label text="▤" styleClass="panel-icon"/><Label text="Recente activiteit" styleClass="panel-title"/></HBox>
+                    <VBox fx:id="activityRows" spacing="8" />
+                    <Label fx:id="activityEmpty" text="Nog geen activiteit geregistreerd." styleClass="dashboard-empty" wrapText="true"/>
+                </VBox>
+            </GridPane>
+        </VBox>
+    </content>
+</ScrollPane>

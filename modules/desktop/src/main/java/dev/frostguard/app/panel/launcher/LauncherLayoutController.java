@@ -220,6 +220,7 @@ public class LauncherLayoutController implements IProfileLoadListener, StaminaCh
     private int autoStartSecondsRemaining;
     private boolean isStartup = true;
     private NotificationCenterController notificationCenterController;
+    private DashboardLayoutController dashboardController;
     private final Consumer<List<ActionRequiredIncidentData>> notificationListener =
             this::onNotificationSnapshot;
 
@@ -271,9 +272,36 @@ public class LauncherLayoutController implements IProfileLoadListener, StaminaCh
         uptimeTimeline.play();
     }
 
+    private void refreshDashboard() { /* internal */
+        if (dashboardController == null) return;
+        List<ProfileAux> profiles = profileComboBox == null
+                ? List.of() : new ArrayList<>(profileComboBox.getItems());
+        Map<Long, String> currentTasks = new HashMap<>();
+        Map<Long, String> nextTasks = new HashMap<>();
+        activeQueueStates.keySet().forEach(profileId -> {
+            var queue = ScheduleService.obtain().getCoordinator().getQueue(profileId);
+            if (queue != null) {
+                for (var taskType : dev.frostguard.api.configs.TpDailyTaskEnum.values()) {
+                    if (queue.isExecutingTask(taskType)) {
+                        currentTasks.put(profileId, taskType.getLabel());
+                        break;
+                    }
+                }
+                if (!currentTasks.containsKey(profileId)) {
+                    var next = queue.getNextQueuedTaskTypes(1);
+                    if (!next.isEmpty()) nextTasks.put(profileId, next.get(0).getLabel());
+                }
+            }
+        });
+        dashboardController.updateSnapshot(profiles, new HashMap<>(activeQueueStates), currentTasks, nextTasks,
+                consoleLogLayoutController.getRecentActivity(5), estado, allQueuesPaused,
+                formatUptime((System.nanoTime() - uptimeStartedAtNanos) / 1_000_000_000L));
+    }
+
     private void updateUptimeLabel() { /* internal */
         long elapsedSeconds = (System.nanoTime() - uptimeStartedAtNanos) / 1_000_000_000L;
         labelRunTime.setText("Uptime: " + formatUptime(elapsedSeconds));
+        refreshDashboard();
     }
 
     static String formatUptime(long elapsedSeconds) {
@@ -387,7 +415,7 @@ public class LauncherLayoutController implements IProfileLoadListener, StaminaCh
     }
 
     private void showVersion() { /* internal */
-        labelVersion.setText("Version: " + BuildMetadata.current().version());
+        labelVersion.setText("SurvivalOps " + BuildMetadata.current().version());
     }
 
     private void initializeEmulatorController() { /* internal */
@@ -569,8 +597,12 @@ public class LauncherLayoutController implements IProfileLoadListener, StaminaCh
         Parent taskPane = loadNode("TaskManagerLayout", taskCtrl);
         Parent customTasksPane = loadNode("CustomTasksLayout", customTasksCtrl);
 
-        // Show Logs by default on startup
-        setMainContent(logsPane);
+        // Dashboard is the default landing page; operational screens remain available in navigation.
+        dashboardController = new DashboardLayoutController();
+        Parent dashboardPane = loadNode("DashboardLayout", dashboardController);
+        Button dashboardButton = addButton("DashboardLayout", "Dashboard", MaterialDesignH.HOME, dashboardController);
+        dashboardButton.getStyleClass().add("active");
+        setMainContent(dashboardPane);
 
         TabPane controlTabs = new TabPane();
         controlTabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
@@ -656,6 +688,7 @@ public class LauncherLayoutController implements IProfileLoadListener, StaminaCh
         profileComboBox.getItems().addAll(profiles);
         configureComboCells();
         updatingComboBox = false;
+        refreshDashboard();
     }
 
     private void configureComboCells() { /* internal */
@@ -741,7 +774,15 @@ public class LauncherLayoutController implements IProfileLoadListener, StaminaCh
         );
         //@formatter:on
 
+        String lastNavigationSection = "";
         for (ModuleDefinition module : modules) {
+            String navigationSection = navigationSectionFor(module.buttonTitle());
+            if (!navigationSection.equals(lastNavigationSection)) {
+                Label sectionLabel = new Label(navigationSection);
+                sectionLabel.getStyleClass().add("nav-section-label");
+                buttonsContainer.getChildren().add(sectionLabel);
+                lastNavigationSection = navigationSection;
+            }
             consoleLogLayoutController.appendMessage(
                     new LogMessageData(TpMessageSeverityEnum.INFO, "Loading module: " + module.buttonTitle(), "-", "-"));
 
@@ -762,6 +803,7 @@ public class LauncherLayoutController implements IProfileLoadListener, StaminaCh
         updateWindowTitle();
         selectProfileInComboBox(profile);
         refreshPauseMenuItems();
+        refreshDashboard();
     }
 
     @Override
@@ -821,6 +863,7 @@ public class LauncherLayoutController implements IProfileLoadListener, StaminaCh
                 isStartup = false;
                 scheduleAutoStart();
             }
+            refreshDashboard();
         }
     }
 
@@ -863,6 +906,7 @@ public class LauncherLayoutController implements IProfileLoadListener, StaminaCh
 
         refreshPauseMenuItems();
         updatePauseButtonState();
+        refreshDashboard();
     }
 
     // Changed by pernerch | Date: 2026-07-02 | Why: keep UI profile identity and title in sync
@@ -1453,6 +1497,15 @@ public class LauncherLayoutController implements IProfileLoadListener, StaminaCh
     }
 
     // ==================== BUTTON FACTORY ====================
+
+    private String navigationSectionFor(String title) { /* internal */
+        return switch (title) {
+            case "City Upgrades", "City Events", "Extra City Events", "Skip Tutorial", "Character" -> "STAD & ACCOUNTS";
+            case "Rally", "Bear Trap", "Beast Hunting", "Fishing Tournament", "Training", "Research", "Pets", "Events", "Experts", "Chief Order", "Intel" -> "TAKEN & ROUTINES";
+            case "Shop", "Gather", "Alliance", "Alliance Championship", "Alliance Shop", "Alliance Mobilization" -> "ECONOMIE & ALLIANTIE";
+            default -> "TOOLS & INZICHTEN";
+        };
+    }
 
     private Button createAndConfigureButton(String title, Ikon icon, Parent root) { /* internal */
         FontIcon btnIcon = new FontIcon(icon);

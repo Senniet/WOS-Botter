@@ -47,25 +47,17 @@
                 <!-- Logo -->
                 <VBox fx:id="logoContainer" alignment="CENTER"
                       style="-fx-cursor: hand; -fx-padding: 0;" maxWidth="Infinity">
-                    <ImageView preserveRatio="true" fitWidth="158">
+                    <ImageView preserveRatio="true" fitWidth="246">
                         <image>
                             <Image url="@../icons/logo.png" />
                         </image>
                     </ImageView>
                 </VBox>
+                <Label text="Whiteout Survival Automation Suite" styleClass="survivalops-tagline" />
+                <Label text="Command. Automate. Survive." styleClass="survivalops-motto" />
 
-                <!-- Search bar positioned before profile selector -->
-                <VBox maxWidth="Infinity">
-                    <TextField fx:id="navSearchField" promptText="Search activities..."
-                               styleClass="search-field" maxWidth="Infinity" />
-                </VBox>
+                <!-- Kept in the scene for keyboard/search and profile controller compatibility. -->
 
-                <!-- Profile selector below search -->
-                <VBox alignment="CENTER" spacing="8" maxWidth="Infinity">
-                    <Label text="Loaded profile"
-                           style="-fx-text-fill: #e2e8f0; -fx-font-size: 13px; -fx-font-weight: bold;" />
-                    <ComboBox fx:id="profileComboBox" maxWidth="Infinity" />
-                </VBox>
             </VBox>
 
             <Separator styleClass="sidebar-divider" />
@@ -85,9 +77,20 @@
     <!-- CENTER: Main content area -->
     <center>
         <StackPane fx:id="centerStack">
-            <AnchorPane fx:id="mainContentPane"
-                        style="-fx-background-color: #11141a;"
-                        BorderPane.alignment="CENTER" />
+            <VBox fx:id="centerContentShell" spacing="0">
+                <StackPane fx:id="heroBanner" styleClass="survivalops-hero" minHeight="180" prefHeight="180" maxHeight="180">
+                    <VBox alignment="CENTER_LEFT" spacing="5" styleClass="survivalops-hero-copy" StackPane.alignment="CENTER_LEFT">
+                        <Label text="SURVIVALOPS" styleClass="survivalops-hero-title" />
+                        <Label text="Command. Automate. Survive." styleClass="survivalops-hero-subtitle" />
+                    </VBox>
+                    <HBox alignment="CENTER_RIGHT" spacing="10" styleClass="survivalops-hero-tools" StackPane.alignment="CENTER_RIGHT">
+                        <TextField fx:id="navSearchField" promptText="Zoek functies..." styleClass="search-field" prefWidth="210" />
+                        <ComboBox fx:id="profileComboBox" promptText="Selecteer account" prefWidth="190" />
+                    </HBox>
+                </StackPane>
+                <AnchorPane fx:id="mainContentPane" VBox.vgrow="ALWAYS"
+                            style="-fx-background-color: #0c1929;" />
+            </VBox>
             <StackPane fx:id="notificationDrawerHost" visible="false" managed="false"
                        maxWidth="360" prefWidth="360"
                        StackPane.alignment="CENTER_RIGHT" />

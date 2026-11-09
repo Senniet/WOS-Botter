@@ -312,6 +312,13 @@ public class ConsoleLogLayoutController implements ProfileDataChangeListener {
 		});
 	}
 
+	public List<String> getRecentActivity(int limit) {
+		if (logMessages == null || limit <= 0) return List.of();
+		return logMessages.stream().limit(limit)
+				.map(row -> row.getTimeStamp() + "  " + row.getMessage())
+				.toList();
+	}
+
 	@Override
 	public void onAccountDataModified(AccountDescriptor profile) {
 		Platform.runLater(this::refreshProfileFilter);
