@@ -171,10 +171,10 @@ jobs:
           $payload = Join-Path $env:RUNNER_TEMP 'survivalops-manifest-payload.json'
           $envelope = Join-Path $env:RUNNER_TEMP 'survivalops-stable-manifest.json'
           $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $payload -Encoding utf8
-          java -Dfrostguard.brand.name=SurvivalOps -cp modules/update/target/classes dev.frostguard.update.ProjectManifestSigner sign $payload $envelope
+          java '-Dfrostguard.brand.name=SurvivalOps' -cp modules/update/target/classes dev.frostguard.update.ProjectManifestSigner sign $payload $envelope
           if ($LASTEXITCODE -ne 0) { throw 'Could not sign SurvivalOps update manifest' }
           $verificationClasspath = "modules/update/target/classes;modules/api/target/classes;packaging/desktop/target/input/lib/*"
-          java -Dfrostguard.brand.name=SurvivalOps -cp $verificationClasspath dev.frostguard.update.ProjectManifestSigner verify $envelope
+          java '-Dfrostguard.brand.name=SurvivalOps' -cp $verificationClasspath dev.frostguard.update.ProjectManifestSigner verify $envelope
           if ($LASTEXITCODE -ne 0) { throw 'Signed SurvivalOps update manifest failed verification' }
           "manifest=$envelope" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
