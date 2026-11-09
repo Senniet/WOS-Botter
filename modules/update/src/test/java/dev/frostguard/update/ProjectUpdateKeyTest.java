@@ -21,10 +21,13 @@ class ProjectUpdateKeyTest {
         System.setProperty("frostguard.brand.name", "SurvivalOps");
         ManifestVerificationKey survivalOps = ProjectUpdateKey.current();
         assertEquals("survivalops-update-2026-01", survivalOps.keyId());
-        assertFalse(survivalOps.isUsable());
+        assertTrue(survivalOps.isUsable());
+        String survivalOpsPublicKey = survivalOps.publicKeyBase64();
 
         System.setProperty("frostguard.brand.name", "Frostguard");
         assertTrue(ProjectUpdateKey.current().isUsable());
+        org.junit.jupiter.api.Assertions.assertNotEquals(
+                survivalOpsPublicKey, ProjectUpdateKey.current().publicKeyBase64());
     }
 
     @Test
