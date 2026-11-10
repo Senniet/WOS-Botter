@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -69,7 +70,14 @@ public final class BlueStacksEmulatorInstance extends EmulatorInstance {
             }
             if (found) {
                 int port = Integer.parseInt(match.group(1));
-                if (port > 0 && port <= 65535) return "127.0.0.1:" + port;
+                if (port > 0 && port <= 65535) {
+                    // BlueStacks ADB may expose the local port under Android's
+                    // emulator-5554 serial rather than 127.0.0.1:5555.
+                    String tcp = "127.0.0.1:" + port;
+                    String emulator = port % 2 == 1 ? "emulator-" + (port - 1) : null;
+                    if (emulator != null && adbDeviceOnline(emulator)) return emulator;
+                    return tcp;
+                }
             }
         } catch (IOException e) {
             LOG.warn("Cannot read BlueStacks ADB configuration at {}: {}", config, e.getMessage());
@@ -90,8 +98,37 @@ public final class BlueStacksEmulatorInstance extends EmulatorInstance {
     }
 
     @Override public boolean isRunning(String id) {
+        // Prefer live ADB discovery: Windows process arguments are not reliable
+        // for already running BlueStacks instances.
+        String serial = getDeviceSerial(id);
+        if (adbDeviceOnline(serial)) return true;
         String name = resolveInstance(id);
         return ProcessHandle.allProcesses().anyMatch(process -> isInstanceProcess(process, name));
+    }
+
+    private boolean adbDeviceOnline(String serial) {
+        Path adb = Path.of(consolePath, "HD-Adb.exe");
+        if (!Files.isRegularFile(adb)) return false;
+        try {
+            Process process = new ProcessBuilder(adb.toString(), "devices")
+                    .redirectErrorStream(true).start();
+            if (!process.waitFor(5, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                return false;
+            }
+            if (process.exitValue() != 0) return false;
+            String output = new String(process.getInputStream().readAllBytes());
+            for (String line : output.split("\\R")) {
+                String[] columns = line.trim().split("\\s+");
+                if (columns.length >= 2 && serial.equals(columns[0])
+                        && "device".equals(columns[1])) return true;
+            }
+        } catch (IOException e) {
+            LOG.debug("BlueStacks ADB device probe failed: {}", e.getMessage());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        return false;
     }
 
     @Override public void closeEmulator(String id) {
