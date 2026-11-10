@@ -797,7 +797,11 @@ public class GatherRoutine extends DelayedTask {
         }
         GatherHeroSelectionPolicy.Action heroAction = GatherHeroSelectionPolicy.select(
                 hero.isFound(), removeHeroes, noHeroFallback);
+        logInfo("Gather formation hero selection: action=" + heroAction
+                + " preferredHeroFound=" + hero.isFound());
         if (!applyHeroSelection(type, heroAction)) {
+            logWarning("Gather hero selection could not be verified; deployment stopped.");
+            saveGatherFormationScreenshot("hero-selection", type, level);
             return GatherDeployResult.BLOCKED;
         }
 
@@ -806,16 +810,22 @@ public class GatherRoutine extends DelayedTask {
             return GatherDeployResult.NO_TROOPS_AVAILABLE;
         }
 
-        ImageSearchResultData deploy = templateSearchHelper.locatePattern(TemplatesEnum.GATHER_DEPLOY_BUTTON,
-                SearchConfig.builder().build());
+        ImageSearchResultData deploy = locateConfirmedGatherDeployButton();
         if (!deploy.isFound()) {
             if (deploymentHelper.hasNoDeployableTroops()) {
-                logInfo("Gather deploy button is absent because no deployable troops are available.");
+                logInfo("Gather deploy button absent: no deployable troops available.");
+                saveGatherFormationScreenshot("no-troops", type, level);
                 return GatherDeployResult.NO_TROOPS_AVAILABLE;
             }
+            logWarning("Gather formation reached, but Deploy button was not recognized; "
+                    + "not treating this as a completed march.");
+            saveGatherFormationScreenshot("deploy-button", type, level);
             return GatherDeployResult.BLOCKED;
         }
 
+        logInfo(String.format(java.util.Locale.ROOT,
+                "Gather Deploy button verified at %s (score %.1f), tapping once.",
+                deploy.getPoint(), deploy.getMatchScore()));
         tapInside(deploy);
         sleepTask(1000);
 
@@ -829,6 +839,50 @@ public class GatherRoutine extends DelayedTask {
             return GatherDeployResult.SAME_TARGET;
         }
         return GatherDeployResult.DEPLOYED;
+    }
+
+    private ImageSearchResultData locateConfirmedGatherDeployButton() {
+        TemplatesEnum button = TemplatesEnum.GATHER_DEPLOY_BUTTON;
+        ImageSearchResultData exact = templateSearchHelper.locatePattern(button,
+                SearchConfig.builder().withMaxAttempts(2).build());
+        if (exact.isFound()) return exact;
+        ImageSearchResultData scaled = templateSearchHelper.locatePatternMultiScale(button,
+                SearchConfig.builder().withThreshold(90).withMaxAttempts(2).build());
+        if (scaled.isFound()) return scaled;
+        ImageSearchResultData first = templateSearchHelper.locatePatternMultiScale(button,
+                SearchConfig.builder().withThreshold(86).build());
+        if (first.isFound() && first.getPoint() != null) {
+            sleepTask(350);
+            ImageSearchResultData second = templateSearchHelper.locatePatternMultiScale(button,
+                    SearchConfig.builder().withThreshold(86).build());
+            if (second.isFound() && second.getPoint() != null
+                    && first.getPoint().manhattanDistanceTo(second.getPoint()) <= 20) {
+                logInfo(String.format(java.util.Locale.ROOT,
+                        "Gather Deploy button confirmed in two frames (%.1f / %.1f)",
+                        first.getMatchScore(), second.getMatchScore()));
+                return second;
+            }
+        }
+        return scaled;
+    }
+
+    private void saveGatherFormationScreenshot(String reason, GatherType type, int level) {
+        try {
+            Path folder = WorkspacePaths.current().root().resolve("temp");
+            Files.createDirectories(folder);
+            String profileName = profile.getName() == null ? "profile" : profile.getName();
+            String safeName = profileName.replaceAll("[^A-Za-z0-9._-]", "_");
+            Path output = folder.resolve("gather-formation-" + reason + "-"
+                    + safeName + "-latest.png");
+            RawImageData frame = emuManager.captureScreen(EMULATOR_NUMBER);
+            if (ImageIO.write(dev.frostguard.vision.convert.ImageConverter.toBufferedImage(frame),
+                    "png", output.toFile())) {
+                logWarning("Gather formation diagnostic saved: " + output
+                        + " (type=" + type + ", level=" + level + ")");
+            }
+        } catch (Exception e) {
+            logWarning("Could not capture Gather formation diagnostic: " + e.getMessage());
+        }
     }
 
     /**

@@ -663,6 +663,14 @@ private SpecialRewardsStatus inspectSpecialRewards() {
                 this::readVisibleSpecialRewardsCount,
                 () -> swipe(new PointData(363, 1088), new PointData(363, 1030)),
                 this::sleepTask);
+        if (result == PolarSpecialRewardsScanner.Result.NOT_FOUND) {
+            String snapshot = TaskDiagnosticSnapshots.capture(
+                    emuManager, EMULATOR_NUMBER, "polarterror", "special-rewards-unreadable");
+            logWarning(routineLogPolarTerrorHuntingLine(
+                    "Special rewards counter unreadable after "
+                    + PolarSpecialRewardsScanner.MAX_SWIPES + " swipes; "
+                    + snapshot + ". Skipping rally rather than assuming rewards remain."));
+        }
         tapNear(CommonGameAreas.POLAR_REWARD_DETAILS_CLOSE);
         sleepTask(500);
         return switch (result) {
