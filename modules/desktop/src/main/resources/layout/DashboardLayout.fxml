@@ -4,6 +4,8 @@
 <?import javafx.scene.control.ProgressBar?>
 <?import javafx.scene.control.ScrollPane?>
 <?import javafx.scene.control.Separator?>
+<?import javafx.scene.image.Image?>
+<?import javafx.scene.image.ImageView?>
 <?import javafx.scene.layout.*?>
 
 <ScrollPane xmlns="http://javafx.com/javafx/23.0.1" xmlns:fx="http://javafx.com/fxml/1"
@@ -12,6 +14,9 @@
         <VBox spacing="14" styleClass="dashboard-root">
             <padding><Insets top="10" right="22" bottom="14" left="22"/></padding>
 
+            <ImageView fitWidth="980" fitHeight="188" preserveRatio="false" smooth="true">
+                <image><Image url="@../icons/survivalops-banner.png"/></image>
+            </ImageView>
             <VBox spacing="5">
                 <HBox spacing="12" alignment="CENTER_LEFT">
                     <Label text="⌂" styleClass="dashboard-heading-icon"/>

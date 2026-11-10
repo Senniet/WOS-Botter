@@ -1,6 +1,6 @@
 /* =============================================================================
- * Frostguard desktop theme
- * AtlantaFX PrimerDark extension with original Frostguard interface tokens
+ * SurvivalOps desktop theme
+ * AtlantaFX PrimerDark extension with SurvivalOps interface tokens
  * ============================================================================= */
 
 /* ---------------------------------------------------------------------------
@@ -2230,3 +2230,30 @@
 .sidebar-status-title { -fx-text-fill: #54e77a; -fx-font-size: 17px; -fx-font-weight: bold; }
 .sidebar-status-copy { -fx-text-fill: #e1f4eb; -fx-font-size: 12px; }
 .title-bar-text { -fx-translate-x: 0; }
+
+
+/* SurvivalOps 1.0.7 visual refresh */
+.root {
+    -fg-bg-app: #0b1421;
+    -fg-bg-sidebar: #08111e;
+    -fg-bg-card: #132235;
+    -fg-bg-table-row: #101d2d;
+    -fg-bg-table-alt: #15253a;
+    -fg-blue: #169eff;
+    -fg-teal: #12c7f4;
+    -fg-border-subtle: #28415b;
+    -fg-input-bg: #0c1929;
+    -fg-text-primary: #f0f8ff;
+    -fg-text-secondary: #a3bbcf;
+}
+.dashboard-metric-card, .dashboard-panel {
+    -fx-background-color: linear-gradient(to bottom right, #162b42, #101e30);
+    -fx-background-radius: 14;
+    -fx-border-color: #294865;
+    -fx-border-width: 1;
+    -fx-border-radius: 14;
+    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.26), 12, 0, 0, 3);
+}
+.dashboard-metric-card:hover, .dashboard-panel:hover {
+    -fx-border-color: #287db3;
+}

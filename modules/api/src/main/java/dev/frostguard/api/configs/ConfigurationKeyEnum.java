@@ -294,6 +294,7 @@ public enum ConfigurationKeyEnum {
     STOP_BEHAVIOR_STRING                ("DO_NOTHING",  String.class,   ConfigCategory.SYSTEM),
     // Changed by pernerch | Date: 2026-07-04 | Why: separate Telegram stop behavior from local GUI stop behavior.
     STOP_BEHAVIOR_TELEGRAM_STRING       ("DO_NOTHING",  String.class,   ConfigCategory.SYSTEM),
+    BLUESTACKS_PATH_STRING              ("C:\\Program Files\\BlueStacks_nxt", String.class, ConfigCategory.SYSTEM),
     LDPLAYER_PATH_STRING                ("",            String.class,   ConfigCategory.SYSTEM),
     MAX_IDLE_TIME_INT                   ("15",          Integer.class,  ConfigCategory.SYSTEM),
     MAX_RUNNING_EMULATORS_INT           ("1",           Integer.class,  ConfigCategory.SYSTEM),

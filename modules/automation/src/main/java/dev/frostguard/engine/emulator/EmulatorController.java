@@ -78,6 +78,7 @@ public class EmulatorController {
             case MUMU     -> new MuMuEmulatorInstance(dir);
             case MEMU     -> new MEmuEmulatorInstance(dir);
             case LDPLAYER -> new LDPlayerEmulatorInstance(dir);
+            case BLUESTACKS -> new BlueStacksEmulatorInstance(dir);
         };
         LOG.info("Backend: {}", kind.getDisplayName());
 

@@ -13,6 +13,9 @@ public enum EmulatorType {
     MEMU("MEmu Player", ConfigurationKeyEnum.MEMU_PATH_STRING, "memuc.exe",
             "C:\\Program Files\\Microvirt\\MEmu"),
 
+    BLUESTACKS("BlueStacks 5", ConfigurationKeyEnum.BLUESTACKS_PATH_STRING, "HD-Player.exe",
+            "C:\\Program Files\\BlueStacks_nxt"),
+
     LDPLAYER("LDPlayer", ConfigurationKeyEnum.LDPLAYER_PATH_STRING, "ldconsole.exe",
             "C:\\LDPlayer\\LDPlayer9");
 

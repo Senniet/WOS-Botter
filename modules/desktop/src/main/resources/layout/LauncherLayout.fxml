@@ -48,7 +48,7 @@
                 <!-- Logo -->
                 <VBox fx:id="logoContainer" alignment="CENTER"
                       style="-fx-cursor: hand; -fx-padding: 0;" maxWidth="Infinity">
-                    <ImageView preserveRatio="true" fitWidth="246">
+                    <ImageView preserveRatio="true" fitWidth="166">
                         <image>
                             <Image url="@../icons/logo.png" />
                         </image>

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="840" height="210" viewBox="0 0 840 210">
+<defs><linearGradient id="g"><stop stop-color="#0ad8ff"/><stop offset="1" stop-color="#2580ff"/></linearGradient></defs>
+<rect width="840" height="210" fill="#0b1524" rx="22"/>
+<path d="M103 18 L173 46 L162 124 L103 182 L44 124 L33 46 Z" fill="#122b46" stroke="url(#g)" stroke-width="9"/>
+<path d="M135 63 L85 63 L70 86 L131 86 L140 99 L120 130 L68 130" fill="none" stroke="#e8f8ff" stroke-width="13" stroke-linejoin="round"/>
+<path d="M58 42 L154 42" stroke="#0ad8ff" stroke-width="8"/>
+<text x="204" y="117" font-family="DejaVu Sans" font-weight="bold" font-size="59" fill="#eaf7ff">SURVIVAL</text>
+<text x="574" y="117" font-family="DejaVu Sans" font-weight="bold" font-size="59" fill="#11bfff">OPS</text>
+<text x="207" y="154" font-family="DejaVu Sans" font-size="19" letter-spacing="5" fill="#8eb1cf">AUTOMATION CONTROL</text>
+</svg>

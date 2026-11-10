@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1450" height="300" viewBox="0 0 1450 300">
+<defs><linearGradient id="sky" x2="0" y2="1"><stop stop-color="#081426"/><stop offset=".6" stop-color="#153c5c"/><stop offset="1" stop-color="#102b43"/></linearGradient><linearGradient id="ice" x2="0" y2="1"><stop stop-color="#4c8ba9"/><stop offset="1" stop-color="#122a43"/></linearGradient></defs>
+<rect width="1450" height="300" fill="url(#sky)"/>
+<circle cx="1180" cy="77" r="47" fill="#b1e7fa" opacity=".65"/>
+<path d="M0 213 L170 72 L285 190 L425 42 L612 221 L745 108 L885 220 L1050 62 L1240 208 L1360 125 L1450 190 L1450 300 L0 300Z" fill="#254c69"/>
+<path d="M0 252 L200 139 L330 249 L475 89 L640 263 L835 143 L985 260 L1120 112 L1300 260 L1450 183 L1450 300 L0 300Z" fill="url(#ice)"/>
+<path d="M150 126 L170 72 L195 107 M444 127 L475 89 L510 130 M1080 155 L1120 112 L1158 162" fill="none" stroke="#d2effa" stroke-width="16"/>
+<path d="M0 267 L1450 267 L1450 300 L0 300Z" fill="#071827"/>
+<g fill="#061523"><path d="M1220 255 L1250 140 L1280 255Z M1205 211 L1250 113 L1295 211Z M1290 260 L1322 170 L1355 260Z M1330 250 L1360 135 L1390 250Z"/></g>
+<rect x="36" y="35" width="700" height="190" rx="20" fill="#071423" opacity=".80"/>
+<text x="74" y="112" font-family="DejaVu Sans" font-weight="bold" font-size="66" fill="#f2faff">SURVIVAL<tspan fill="#16c9ff">OPS</tspan></text>
+<text x="78" y="157" font-family="DejaVu Sans" font-size="25" fill="#a4d8f4">JOUW COMMANDOCENTRUM</text>
+<path d="M78 180 L610 180" stroke="#16c9ff" stroke-width="4"/>
+</svg>
