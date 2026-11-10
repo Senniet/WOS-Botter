@@ -1,6 +1,10 @@
 package dev.frostguard.engine.emulator.instance;
 
 import dev.frostguard.engine.emulator.EmulatorInstance;
+import dev.frostguard.engine.emulator.ScreenGeometry;
+import dev.frostguard.api.domain.PointData;
+import dev.frostguard.api.domain.RawImageData;
+import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -21,6 +25,34 @@ import java.util.regex.Pattern;
 public final class BlueStacksEmulatorInstance extends EmulatorInstance {
     private static final Logger LOG = LoggerFactory.getLogger(BlueStacksEmulatorInstance.class);
     private static final Pattern INSTANCE_NAME = Pattern.compile("[A-Za-z0-9_-]+");
+
+    private final ConcurrentHashMap<String, ScreenGeometry> screenGeometry = new ConcurrentHashMap<>();
+
+    @Override protected RawImageData prepareCapturedFrame(String id, RawImageData raw) {
+        ScreenGeometry geometry = ScreenGeometry.forPortraitCapture(raw);
+        if (geometry == null) {
+            screenGeometry.remove(id);
+            LOG.warn("BlueStacks capture {}x{} is not a 9:16 portrait frame; "
+                    + "coordinate normalization disabled for {}", raw.getWidth(), raw.getHeight(), id);
+            return raw;
+        }
+        screenGeometry.put(id, geometry);
+        if (geometry.needsResize()) {
+            LOG.debug("BlueStacks {} screenshot normalized {}x{} -> 720x1280",
+                    id, raw.getWidth(), raw.getHeight());
+        }
+        return geometry.normalize(raw);
+    }
+
+    @Override protected PointData mapScreenPoint(String id, PointData point) {
+        ScreenGeometry geometry = screenGeometry.get(id);
+        if (geometry == null) {
+            // Obtain a fresh capture before the first input so coordinates cannot be guessed.
+            captureScreenshot(id);
+            geometry = screenGeometry.get(id);
+        }
+        return geometry == null ? point : geometry.toDevice(point);
+    }
 
     public BlueStacksEmulatorInstance(String path) { super(path); }
 

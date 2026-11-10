@@ -112,6 +112,7 @@ public class InitializeRoutine extends DelayedTask {
 	private int closeableOverlayDismissals = 0;
 	private int trekExitHintDismissals = 0;
 	private String lastVerifiedStartupState = "initialization started";
+	private String lastHomePatternEvidence = "not yet inspected";
 	private RawImageData lastStartupFrame;
 	private final DiagnosticSnapshotStore startupSnapshots = DiagnosticSnapshotStore.forCurrentWorkspace();
 
@@ -369,8 +370,8 @@ public class InitializeRoutine extends DelayedTask {
 			}
 
 			// Passive checks and later recoveries do not retain a screenshot.
-			logWarning("Home screen not found on an unsupported startup screen. "
-					+ "Waiting 5 seconds for a passive state change before retrying...");
+			logWarning("Home screen not found on an unsupported startup screen ("
+					+ lastHomePatternEvidence + "). Waiting 5 seconds for a passive state change before retrying...");
 			sleepTask(5000);
 			attempts++;
 		}
@@ -708,6 +709,10 @@ public class InitializeRoutine extends DelayedTask {
 		ImageSearchResultData world = emuManager.locatePattern(
 				EMULATOR_NUMBER, frame, TemplatesEnum.GAME_HOME_WORLD, STARTUP_PATTERN_THRESHOLD);
 
+		lastHomePatternEvidence = "capture=" + frame.getWidth() + "x" + frame.getHeight()
+				+ ", furnaceScore=" + String.format(java.util.Locale.ROOT, "%.1f", home.getMatchScore())
+				+ ", worldScore=" + String.format(java.util.Locale.ROOT, "%.1f", world.getMatchScore())
+				+ ", threshold=" + STARTUP_PATTERN_THRESHOLD;
 		return home.isFound() || world.isFound();
 	}
 

@@ -282,7 +282,7 @@ public abstract class EmulatorInstance {
             d.executeShellCommand("screencap", new CollectingOutputReceiver() {
                 @Override public void addOutput(byte[] data, int off, int len) { buf.write(data, off, len); }
             }, 2000, TimeUnit.MILLISECONDS);
-            RawImageData frame = decodeScreenshotPayload(buf.toByteArray());
+            RawImageData frame = prepareCapturedFrame(idx, decodeScreenshotPayload(buf.toByteArray()));
             lastFrame.put(idx, frame);
             return frame;
         } catch (Exception e) {
@@ -336,6 +336,12 @@ public abstract class EmulatorInstance {
         return frame;
     }
 
+    /** Per-emulator capture preparation; all existing backends remain unchanged. */
+    protected RawImageData prepareCapturedFrame(String idx, RawImageData raw) { return raw; }
+
+    /** Translate reference-space coordinates only for backends that normalize screenshots. */
+    protected PointData mapScreenPoint(String idx, PointData point) { return point; }
+
     private static int le32(byte[] b, int o) {
         return (b[o]&0xFF) | ((b[o+1]&0xFF)<<8) | ((b[o+2]&0xFF)<<16) | ((b[o+3]&0xFF)<<24);
     }
@@ -355,7 +361,8 @@ public abstract class EmulatorInstance {
         for (int t = 0; t < reps; t++) {
             int tx = x0 + rng.nextInt(Math.max(1, x1 - x0 + 1));
             int ty = y0 + rng.nextInt(Math.max(1, y1 - y0 + 1));
-            dispatchInputCommand(idx, "input tap " + tx + " " + ty, "tap");
+            PointData target = mapScreenPoint(idx, new PointData(tx, ty));
+            dispatchInputCommand(idx, "input tap " + target.getX() + " " + target.getY(), "tap");
             sleep(delMs);
         }
         return true;
@@ -373,7 +380,7 @@ public abstract class EmulatorInstance {
     }
 
     private void swipe(String idx, PointData from, PointData to, Integer durationMs) {
-        dispatchInputCommand(idx, swipeCommand(from, to, durationMs), "swipe");
+        dispatchInputCommand(idx, swipeCommand(mapScreenPoint(idx, from), mapScreenPoint(idx, to), durationMs), "swipe");
     }
 
     static String swipeCommand(PointData from, PointData to, Integer durationMs) {
