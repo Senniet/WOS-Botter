@@ -74,6 +74,11 @@ public abstract class EmulatorInstance {
     }
 
     private String adbPath() {
+        // BlueStacks 5 ships HD-Adb.exe, not adb.exe. Prefer its own ADB binary
+        // so the ddmlib bridge and instance discovery use the same ADB server.
+        File blueStacksAdb = new File(consolePath, "HD-Adb.exe");
+        if (blueStacksAdb.isFile()) return blueStacksAdb.getAbsolutePath();
+
         String wd = System.getProperty("user.dir");
         for (String sub : new String[]{"tools", "packaging/desktop/target/input/lib"}) {
             File f = new File(wd, sub + File.separator + "adb" + File.separator + "adb.exe");
