@@ -33,6 +33,10 @@ class UpdateEndpointResolverTest {
 
     @Test
     void survivalOpsUsesDedicatedStableReleaseFeedAndHasNoNightlyFallback() throws Exception {
+        // A packaged test-feed URL may be supplied to the whole Maven process.
+        // This test verifies the production fallback, so isolate it explicitly.
+        System.clearProperty(UpdateEndpointResolver.STABLE_PROPERTY);
+        System.clearProperty("survivalops.update.manifest.stable");
         System.setProperty("frostguard.brand.name", "SurvivalOps");
         assertEquals("https://github.com/Senniet/WOS-Botter/releases/download/survivalops-stable/survivalops-stable-manifest.json",
                 resolver.resolve(RuntimeChannel.STABLE).orElseThrow().toString());
