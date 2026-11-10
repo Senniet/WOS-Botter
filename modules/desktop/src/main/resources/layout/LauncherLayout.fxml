@@ -7,7 +7,7 @@
 
 <BorderPane xmlns="http://javafx.com/javafx/23.0.1" xmlns:fx="http://javafx.com/fxml/1"
             maxHeight="Infinity" maxWidth="Infinity"
-            style="-fx-background-color: #11141a; -fx-border-color: #30363d; -fx-border-width: 1;">
+            styleClass="app-shell">
 
     <!-- TOP: Title bar using BorderPane instead of StackPane for different hierarchy -->
     <top>
@@ -42,27 +42,26 @@
     <left>
         <VBox styleClass="nav-sidebar">
 
-            <VBox fx:id="sidebarHeader" alignment="CENTER" spacing="14"
-                  style="-fx-padding: 20 16 16 16;">
 
-                <!-- Logo -->
-                <VBox fx:id="logoContainer" alignment="CENTER"
-                      style="-fx-cursor: hand; -fx-padding: 0;" maxWidth="Infinity">
-                    <ImageView preserveRatio="true" fitWidth="166">
-                        <image>
-                            <Image url="@../icons/logo.png" />
-                        </image>
-                    </ImageView>
-                </VBox>
-                <Label text="Whiteout Survival Automation Suite" styleClass="survivalops-tagline" />
-                <Label text="Command. Automate. Survive." styleClass="survivalops-motto" />
-
-                <!-- Kept in the scene for keyboard/search and profile controller compatibility. -->
-
-            </VBox>
-
-            <Separator styleClass="sidebar-divider" />
-
+<VBox fx:id="sidebarHeader" alignment="CENTER_LEFT" spacing="7" styleClass="sidebar-brand">
+    <VBox fx:id="logoContainer" spacing="0" style="-fx-cursor: hand;">
+    <HBox alignment="CENTER_LEFT" spacing="11">
+        <ImageView fitWidth="46" fitHeight="46" preserveRatio="true">
+            <image><Image url="@../icons/appIcon.png" /></image>
+        </ImageView>
+        <VBox spacing="2" alignment="CENTER_LEFT">
+            <Label text="SURVIVALOPS" styleClass="brand-wordmark"/>
+            <Label text="AUTOMATION CONTROL" styleClass="brand-caption"/>
+        </VBox>
+    </HBox>
+    </VBox>
+</VBox>
+<Separator styleClass="sidebar-divider"/>
+<VBox styleClass="sidebar-utility" spacing="8">
+    <TextField fx:id="navSearchField" promptText="Zoek een functie..." styleClass="search-field" />
+    <ComboBox fx:id="profileComboBox" promptText="Selecteer account" maxWidth="Infinity" styleClass="profile-picker"/>
+</VBox>
+<Label text="NAVIGATIE" styleClass="sidebar-nav-caption"/>
             <!-- Scrollable navigation buttons -->
             <ScrollPane hbarPolicy="NEVER" vbarPolicy="AS_NEEDED" fitToWidth="true"
                         VBox.vgrow="ALWAYS"
@@ -72,34 +71,26 @@
 
             <!-- Pinned buttons at sidebar bottom -->
             <VBox fx:id="pinnedButtonsContainer" styleClass="sidebar-footer" spacing="8" />
-            <VBox styleClass="sidebar-automation-status" spacing="4">
-                <HBox alignment="CENTER_LEFT" spacing="9">
-                    <Label text="●" styleClass="sidebar-status-check"/>
-                    <Label text="Actief" styleClass="sidebar-status-title"/>
-                </HBox>
-                <Label text="Automatisering draait" styleClass="sidebar-status-copy"/>
-                <Label text="Uptime wordt bijgewerkt" styleClass="sidebar-status-copy"/>
-            </VBox>
+
+<VBox fx:id="sidebarStatusBox" styleClass="sidebar-automation-status, state-idle" spacing="5">
+    <HBox alignment="CENTER_LEFT" spacing="9">
+        <Label text="●" styleClass="sidebar-status-check"/>
+        <Label fx:id="sidebarStatusTitle" text="Gereed" styleClass="sidebar-status-title"/>
+    </HBox>
+    <Label fx:id="sidebarStatusDetail" text="Automatisering gestopt" styleClass="sidebar-status-copy"/>
+    <Label fx:id="sidebarStatusSubDetail" text="Geen actieve wachtrijen" styleClass="sidebar-status-secondary"/>
+</VBox>
         </VBox>
     </left>
 
     <!-- CENTER: Main content area -->
     <center>
         <StackPane fx:id="centerStack">
-            <VBox fx:id="centerContentShell" spacing="0">
-                <StackPane fx:id="heroBanner" styleClass="survivalops-hero" minHeight="180" prefHeight="180" maxHeight="180">
-                    <VBox visible="false" managed="false" alignment="CENTER_LEFT" spacing="5" styleClass="survivalops-hero-copy" StackPane.alignment="CENTER_LEFT">
-                        <Label text="SURVIVALOPS" styleClass="survivalops-hero-title" />
-                        <Label text="Command. Automate. Survive." styleClass="survivalops-hero-subtitle" />
-                    </VBox>
-                    <HBox visible="false" managed="false" alignment="CENTER_RIGHT" spacing="10" styleClass="survivalops-hero-tools" StackPane.alignment="CENTER_RIGHT">
-                        <TextField fx:id="navSearchField" promptText="Zoek functies..." styleClass="search-field" prefWidth="210" />
-                        <ComboBox fx:id="profileComboBox" promptText="Selecteer account" prefWidth="190" />
-                    </HBox>
-                </StackPane>
-                <AnchorPane fx:id="mainContentPane" VBox.vgrow="ALWAYS"
-                            style="-fx-background-color: #0c1929;" />
-            </VBox>
+
+<VBox fx:id="centerContentShell" spacing="0">
+    <AnchorPane fx:id="mainContentPane" VBox.vgrow="ALWAYS"
+                styleClass="main-content-pane"/>
+</VBox>
             <StackPane fx:id="notificationDrawerHost" visible="false" managed="false"
                        maxWidth="360" prefWidth="360"
                        StackPane.alignment="CENTER_RIGHT" />
@@ -113,7 +104,7 @@
             <!-- Left cluster: branding + social -->
             <VBox alignment="CENTER_LEFT" spacing="2">
                 <HBox alignment="CENTER_LEFT" spacing="12">
-                    <Label fx:id="labelVersion" text="Whiteout Survival Bot" styleClass="app-version"
+                    <Label fx:id="labelVersion" text="SurvivalOps" styleClass="app-version"
                            style="-fx-text-fill: #e6edf3; -fx-font-weight: bold; -fx-font-size: 13px;" />
                     <org.kordamp.ikonli.javafx.FontIcon fx:id="iconDiscord" visible="false" managed="false" iconSize="18"
                         iconColor="#e6edf3" styleClass="social-icon"
@@ -165,24 +156,24 @@
 
                 <Label fx:id="labelRunTime" text="Uptime: 00:00:00"
                        style="-fx-text-fill: #e6edf3; -fx-font-size: 13px;" />
-                <Label text="●  Alle systemen operationeel" style="-fx-text-fill: #e5f2ff; -fx-font-size: 12px;"/>
-                <Label text="▮▮  ADB: Verbonden" style="-fx-text-fill: #d7eaff; -fx-font-size: 12px;"/>
-                <Label text="✓  Updates: beschikbaar" style="-fx-text-fill: #e5f2ff; -fx-font-size: 12px;"/>
+                <Label fx:id="footerBotStatus" text="Automatisering gestopt" styleClass="footer-engine-status"/>
 
-                <SplitMenuButton fx:id="buttonPauseResume" visible="false" managed="false" disable="true" mnemonicParsing="false"
-                                 onAction="#handleButtonPauseResume" text="Pause"
+
+
+                <SplitMenuButton fx:id="buttonPauseResume" disable="true" mnemonicParsing="false"
+                                 onAction="#handleButtonPauseResume" text="Pauzeren"
                                  styleClass="action-button-pause" prefHeight="38" prefWidth="140"
                                  minWidth="-Infinity">
                     <items>
                         <MenuItem fx:id="menuToggleCurrentQueue" onAction="#handleToggleCurrentQueue"
-                                  text="Pause current queue" />
+                                  text="Huidige wachtrij pauzeren" />
                         <MenuItem fx:id="menuToggleAllQueues" onAction="#handleToggleAllQueues"
-                                  text="Pause all queues" />
+                                  text="Alle wachtrijen pauzeren" />
                     </items>
                 </SplitMenuButton>
 
-                <Button fx:id="buttonStartStop" visible="false" managed="false" disable="true" mnemonicParsing="false"
-                        onAction="#handleButtonStartStop" text="Start Bot"
+                <Button fx:id="buttonStartStop" disable="true" mnemonicParsing="false"
+                        onAction="#handleButtonStartStop" text="Start"
                         styleClass="action-button-start" prefHeight="38" prefWidth="140"
                         minWidth="-Infinity" />
             </HBox>

@@ -1,139 +1,180 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <?import javafx.geometry.Insets?>
-<?import javafx.scene.control.Label?>
-<?import javafx.scene.control.ProgressBar?>
-<?import javafx.scene.control.ScrollPane?>
-<?import javafx.scene.control.Separator?>
-<?import javafx.scene.image.Image?>
-<?import javafx.scene.image.ImageView?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.image.*?>
 <?import javafx.scene.layout.*?>
 
 <ScrollPane xmlns="http://javafx.com/javafx/23.0.1" xmlns:fx="http://javafx.com/fxml/1"
             fitToWidth="true" hbarPolicy="NEVER" styleClass="dashboard-scroll">
     <content>
-        <VBox spacing="14" styleClass="dashboard-root">
-            <padding><Insets top="10" right="22" bottom="14" left="22"/></padding>
+        <VBox fx:id="dashboardRoot" spacing="17" minWidth="0" styleClass="dashboard-root">
+            <padding><Insets top="20" right="24" bottom="28" left="24"/></padding>
 
-            <ImageView fitWidth="980" fitHeight="188" preserveRatio="false" smooth="true">
-                <image><Image url="@../icons/survivalops-banner.png"/></image>
-            </ImageView>
-            <VBox spacing="5">
-                <HBox spacing="12" alignment="CENTER_LEFT">
-                    <Label text="⌂" styleClass="dashboard-heading-icon"/>
-                    <Label text="Dashboard" styleClass="dashboard-heading"/>
-                    <Region HBox.hgrow="ALWAYS"/>
-                </HBox>
-                <Label text="Overzicht van je accounts, taken, automatisering en systeemstatus." styleClass="dashboard-subtitle"/>
-            </VBox>
+            <StackPane fx:id="dashboardHero" minHeight="172" prefHeight="172" maxHeight="172"
+                       maxWidth="Infinity" styleClass="dashboard-hero">
+                <ImageView fx:id="dashboardHeroImage" fitHeight="172" preserveRatio="false" smooth="true">
+                    <image><Image url="@../icons/survivalops-banner.png"/></image>
+                </ImageView>
+                <BorderPane mouseTransparent="true" styleClass="dashboard-hero-content">
+                    <left>
+                        <VBox alignment="CENTER_LEFT" spacing="8" maxWidth="740">
+                            <Label text="SURVIVALOPS   /   COMMAND CENTER" styleClass="hero-eyebrow"/>
+                            <Label text="Alles onder controle." styleClass="hero-title"/>
+                            <Label text="Je accounts, taken en emulators. Eén helder overzicht."
+                                   styleClass="hero-subtitle" wrapText="true"/>
+                        </VBox>
+                    </left>
+                    <right>
+                        <VBox alignment="CENTER_RIGHT" spacing="7">
+                            <Label text="WHITEOUT SURVIVAL" styleClass="hero-side-label"/>
+                            <Label text="AUTOMATION SUITE" styleClass="hero-side-caption"/>
+                        </VBox>
+                    </right>
+                </BorderPane>
+            </StackPane>
 
-            <GridPane hgap="10" vgap="10" styleClass="dashboard-metrics">
+            <HBox alignment="CENTER_LEFT" spacing="12" styleClass="dashboard-section-heading">
+                <VBox spacing="4">
+                    <Label text="Overzicht" styleClass="dashboard-heading"/>
+                    <Label text="Realtime status van je automatisering en aangesloten accounts."
+                           styleClass="dashboard-subtitle" wrapText="true"/>
+                </VBox>
+                <Region HBox.hgrow="ALWAYS"/>
+                <Label fx:id="headerState" text="GESTOPT" styleClass="dashboard-state-pill, state-idle"/>
+                <Button text="Emulators instellen" styleClass="dashboard-secondary-button"
+                        onAction="#openEmulators"/>
+            </HBox>
+
+            <GridPane hgap="12" vgap="12" minWidth="0" styleClass="dashboard-metrics">
                 <columnConstraints>
-                    <ColumnConstraints percentWidth="25" hgrow="ALWAYS"/>
-                    <ColumnConstraints percentWidth="25" hgrow="ALWAYS"/>
-                    <ColumnConstraints percentWidth="25" hgrow="ALWAYS"/>
-                    <ColumnConstraints percentWidth="25" hgrow="ALWAYS"/>
+                    <ColumnConstraints percentWidth="25"/>
+                    <ColumnConstraints percentWidth="25"/>
+                    <ColumnConstraints percentWidth="25"/>
+                    <ColumnConstraints percentWidth="25"/>
                 </columnConstraints>
-                <HBox styleClass="dashboard-metric-card" spacing="14" alignment="CENTER_LEFT" GridPane.columnIndex="0">
-                    <Label text="♟" styleClass="metric-icon metric-blue"/>
-                    <VBox spacing="4"><Label fx:id="accountCount" text="— Accounts" styleClass="metric-value"/><Label fx:id="accountDetail" text="Accounts worden geladen" styleClass="metric-detail"/></VBox>
-                </HBox>
-                <HBox styleClass="dashboard-metric-card" spacing="14" alignment="CENTER_LEFT" GridPane.columnIndex="1">
-                    <Label text="✓" styleClass="metric-icon metric-green"/>
-                    <VBox spacing="4"><Label fx:id="queueCount" text="— Wachtrijen" styleClass="metric-value"/><Label fx:id="queueDetail" text="Wachtrijen worden geladen" styleClass="metric-detail"/></VBox>
-                </HBox>
-                <HBox styleClass="dashboard-metric-card" spacing="14" alignment="CENTER_LEFT" GridPane.columnIndex="2">
-                    <Label text="⟳" styleClass="metric-icon metric-blue"/>
-                    <VBox spacing="4"><Label text="Volgende actie" styleClass="metric-caption"/><Label fx:id="nextActionValue" text="Nog geen actie" styleClass="metric-value"/><Label fx:id="engineState" text="Automatisering gestopt" styleClass="metric-detail"/></VBox>
-                </HBox>
-                <HBox styleClass="dashboard-metric-card" spacing="14" alignment="CENTER_LEFT" GridPane.columnIndex="3">
-                    <Label text="◷" styleClass="metric-icon metric-green"/>
-                    <VBox spacing="4"><Label text="Sessie" styleClass="metric-caption"/><Label fx:id="uptimeValue" text="00:00:00" styleClass="metric-value"/><Label text="Actieve runtime" styleClass="metric-detail"/></VBox>
-                </HBox>
+                <VBox minWidth="0" spacing="6" styleClass="dashboard-metric-card" GridPane.columnIndex="0">
+                    <Label text="ACCOUNTS" styleClass="metric-caption"/>
+                    <Label fx:id="accountCount" text="0 Accounts" styleClass="metric-value"/>
+                    <Label fx:id="accountDetail" text="Nog geen accounts ingesteld"
+                           wrapText="true" styleClass="metric-detail"/>
+                </VBox>
+                <VBox minWidth="0" spacing="6" styleClass="dashboard-metric-card" GridPane.columnIndex="1">
+                    <Label text="WACHTRIJEN" styleClass="metric-caption"/>
+                    <Label fx:id="queueCount" text="0 Wachtrijen" styleClass="metric-value"/>
+                    <Label fx:id="queueDetail" text="0 actief · 0 gepauzeerd"
+                           wrapText="true" styleClass="metric-detail"/>
+                </VBox>
+                <VBox minWidth="0" spacing="6" styleClass="dashboard-metric-card" GridPane.columnIndex="2">
+                    <Label text="VOLGENDE ACTIE" styleClass="metric-caption"/>
+                    <Label fx:id="nextActionValue" text="Geen ingepland"
+                           wrapText="true" styleClass="metric-value"/>
+                    <Label fx:id="engineState" text="Automatisering gestopt"
+                           wrapText="true" styleClass="metric-detail"/>
+                </VBox>
+                <VBox minWidth="0" spacing="6" styleClass="dashboard-metric-card" GridPane.columnIndex="3">
+                    <Label text="SESSIEDUUR" styleClass="metric-caption"/>
+                    <Label fx:id="uptimeValue" text="00:00:00" styleClass="metric-value"/>
+                    <Label text="Sinds SurvivalOps is geopend" styleClass="metric-detail"/>
+                </VBox>
             </GridPane>
 
-            <GridPane hgap="16" vgap="12" styleClass="dashboard-main-grid">
+            <GridPane hgap="14" vgap="14" minWidth="0" styleClass="dashboard-main-grid">
                 <columnConstraints>
-                    <ColumnConstraints percentWidth="62" hgrow="ALWAYS"/>
-                    <ColumnConstraints percentWidth="38" hgrow="ALWAYS"/>
+                    <ColumnConstraints percentWidth="60"/>
+                    <ColumnConstraints percentWidth="40"/>
                 </columnConstraints>
-                <VBox styleClass="dashboard-panel" spacing="13" GridPane.columnIndex="0">
-                    <HBox alignment="CENTER_LEFT" spacing="10">
-                        <Label text="♟" styleClass="panel-icon"/><Label text="Accountstatus" styleClass="panel-title"/>
+                <VBox minWidth="0" spacing="14" styleClass="dashboard-panel, account-panel" GridPane.columnIndex="0">
+                    <HBox alignment="CENTER_LEFT" spacing="12">
+                        <VBox spacing="4">
+                            <Label text="Accountstatus" styleClass="panel-title"/>
+                            <Label text="Bekijk actieve profielen en huidige taken" styleClass="panel-subtitle"/>
+                        </VBox>
                         <Region HBox.hgrow="ALWAYS"/>
-                        <Label text="+  Account toevoegen" styleClass="dashboard-add-button"/>
+                        <Button text="+  Profiel toevoegen" styleClass="dashboard-primary-button"
+                                onAction="#openProfiles"/>
                     </HBox>
-                    <GridPane styleClass="dashboard-table-header" hgap="10">
-                        <columnConstraints><ColumnConstraints percentWidth="31"/><ColumnConstraints percentWidth="18"/><ColumnConstraints percentWidth="27"/><ColumnConstraints percentWidth="24"/></columnConstraints>
-                        <Label text="Account" GridPane.columnIndex="0"/><Label text="Status" GridPane.columnIndex="1"/><Label text="Huidige taak" GridPane.columnIndex="2"/><Label text="Volgende actie" GridPane.columnIndex="3"/>
+                    <GridPane minWidth="0" styleClass="dashboard-table-header">
+                        <columnConstraints>
+                            <ColumnConstraints percentWidth="31"/>
+                            <ColumnConstraints percentWidth="18"/>
+                            <ColumnConstraints percentWidth="27"/>
+                            <ColumnConstraints percentWidth="24"/>
+                        </columnConstraints>
+                        <Label text="ACCOUNT" GridPane.columnIndex="0"/>
+                        <Label text="STATUS" GridPane.columnIndex="1"/>
+                        <Label text="HUIDIGE TAAK" GridPane.columnIndex="2"/>
+                        <Label text="VOLGENDE" GridPane.columnIndex="3"/>
                     </GridPane>
-                    <VBox fx:id="accountRows" spacing="8"/>
-                    <Label fx:id="accountEmpty" text="Nog geen accounts beschikbaar. Voeg een account toe om hier de status te zien." styleClass="dashboard-empty" wrapText="true"/>
+                    <VBox fx:id="accountRows" spacing="6" minWidth="0"/>
+                    <Label fx:id="accountEmpty" text="Nog geen accounts. Voeg een profiel toe om te beginnen."
+                           wrapText="true" styleClass="dashboard-empty, dashboard-empty-state"/>
                 </VBox>
-                <VBox styleClass="dashboard-panel" spacing="12" GridPane.columnIndex="1">
-                    <HBox alignment="CENTER_LEFT" spacing="10"><Label text="⚙" styleClass="panel-icon"/><Label text="Systeemoverzicht" styleClass="panel-title"/></HBox>
-                    <HBox alignment="CENTER_LEFT"><Label text="CPU" styleClass="system-label"/><Region HBox.hgrow="ALWAYS"/><Label fx:id="cpuValue" text="Niet beschikbaar" styleClass="system-value"/></HBox>
+                <VBox minWidth="0" spacing="12" styleClass="dashboard-panel, system-panel" GridPane.columnIndex="1">
+                    <VBox spacing="4">
+                        <Label text="Systeemoverzicht" styleClass="panel-title"/>
+                        <Label text="Actuele gegevens van deze computer" styleClass="panel-subtitle"/>
+                    </VBox>
+                    <HBox alignment="CENTER_LEFT">
+                        <Label text="CPU-belasting" styleClass="system-label"/>
+                        <Region HBox.hgrow="ALWAYS"/>
+                        <Label fx:id="cpuValue" text="Niet beschikbaar" styleClass="system-value"/>
+                    </HBox>
                     <ProgressBar fx:id="cpuBar" progress="0" maxWidth="Infinity" styleClass="system-progress"/>
-                    <HBox alignment="CENTER_LEFT"><Label text="Geheugen" styleClass="system-label"/><Region HBox.hgrow="ALWAYS"/><Label fx:id="memoryValue" text="Niet beschikbaar" styleClass="system-value"/></HBox>
+                    <HBox alignment="CENTER_LEFT">
+                        <Label text="Geheugengebruik" styleClass="system-label"/>
+                        <Region HBox.hgrow="ALWAYS"/>
+                        <Label fx:id="memoryValue" text="Niet beschikbaar" styleClass="system-value"/>
+                    </HBox>
                     <ProgressBar fx:id="memoryBar" progress="0" maxWidth="Infinity" styleClass="system-progress"/>
-                    <HBox alignment="CENTER_LEFT"><Label text="Opslag" styleClass="system-label"/><Region HBox.hgrow="ALWAYS"/><Label text="—" styleClass="system-value"/></HBox>
-                    <ProgressBar progress="0.24" maxWidth="Infinity" styleClass="system-progress"/>
                     <Separator styleClass="dashboard-separator"/>
-                    <HBox alignment="CENTER_LEFT" spacing="8"><Label text="▣" styleClass="system-symbol"/><Label text="ADB" styleClass="system-label"/><Region HBox.hgrow="ALWAYS"/><Label fx:id="adbValue" text="Niet gecontroleerd" styleClass="system-value"/></HBox>
-                    <HBox alignment="CENTER_LEFT" spacing="8"><Label text="◈" styleClass="system-symbol"/><Label text="OCR" styleClass="system-label"/><Region HBox.hgrow="ALWAYS"/><Label text="Actief" styleClass="system-ok"/></HBox>
-                    <HBox alignment="CENTER_LEFT" spacing="8"><Label text="▧" styleClass="system-symbol"/><Label text="Screenshot" styleClass="system-label"/><Region HBox.hgrow="ALWAYS"/><Label text="OK" styleClass="system-ok"/></HBox>
+                    <HBox alignment="CENTER_LEFT" spacing="10">
+                        <Label text="ADB-verbinding" styleClass="system-label"/>
+                        <Region HBox.hgrow="ALWAYS"/>
+                        <Label fx:id="adbValue" text="Niet gecontroleerd" styleClass="system-value"/>
+                    </HBox>
+                    <Label text="ADB wordt hier pas als verbonden getoond na een echte controle."
+                           wrapText="true" styleClass="system-footnote"/>
                 </VBox>
             </GridPane>
 
-            <GridPane hgap="16" vgap="12" styleClass="dashboard-lower-grid">
-                <columnConstraints><ColumnConstraints percentWidth="58" hgrow="ALWAYS"/><ColumnConstraints percentWidth="42" hgrow="ALWAYS"/></columnConstraints>
-                <VBox styleClass="dashboard-panel" spacing="13" GridPane.columnIndex="0">
-                    <HBox alignment="CENTER_LEFT" spacing="10"><Label text="⚙" styleClass="panel-icon"/><Label text="Actieve routine" styleClass="panel-title"/><Region HBox.hgrow="ALWAYS"/><Label fx:id="routineBadge" text="GESTOPT" styleClass="routine-state-pill"/></HBox>
-                    <Label text="Standaard WOS Routine" styleClass="routine-name"/>
-                    <HBox fx:id="routineSteps" alignment="CENTER" spacing="0" styleClass="routine-stepper">
-                        <VBox alignment="CENTER" spacing="5" styleClass="routine-step routine-step-done"><Label text="✓" styleClass="routine-step-number"/><Label text="Verzamelen" styleClass="routine-step-label"/></VBox>
-                        <Region HBox.hgrow="ALWAYS" styleClass="routine-step-line routine-line-done"/>
-                        <VBox alignment="CENTER" spacing="5" styleClass="routine-step routine-step-done"><Label text="✓" styleClass="routine-step-number"/><Label text="Bouw" styleClass="routine-step-label"/></VBox>
-                        <Region HBox.hgrow="ALWAYS" styleClass="routine-step-line routine-line-done"/>
-                        <VBox alignment="CENTER" spacing="5" styleClass="routine-step routine-step-done"><Label text="✓" styleClass="routine-step-number"/><Label text="Onderzoek" styleClass="routine-step-label"/></VBox>
-                        <Region HBox.hgrow="ALWAYS" styleClass="routine-step-line routine-line-active"/>
-                        <VBox alignment="CENTER" spacing="5" styleClass="routine-step routine-step-current"><Label text="●" styleClass="routine-step-number"/><Label text="Training" styleClass="routine-step-label"/></VBox>
-                        <Region HBox.hgrow="ALWAYS" styleClass="routine-step-line"/>
-                        <VBox alignment="CENTER" spacing="5" styleClass="routine-step"><Label text="5" styleClass="routine-step-number"/><Label text="Marsen" styleClass="routine-step-label"/></VBox>
-                        <Region HBox.hgrow="ALWAYS" styleClass="routine-step-line"/>
-                        <VBox alignment="CENTER" spacing="5" styleClass="routine-step"><Label text="6" styleClass="routine-step-number"/><Label text="Beloningen" styleClass="routine-step-label"/></VBox>
-                        <Region HBox.hgrow="ALWAYS" styleClass="routine-step-line"/>
-                        <VBox alignment="CENTER" spacing="5" styleClass="routine-step"><Label text="7" styleClass="routine-step-number"/><Label text="Events" styleClass="routine-step-label"/></VBox>
-                    </HBox>
-                    <Separator styleClass="dashboard-separator"/>
-                    <HBox spacing="14" alignment="CENTER_LEFT" styleClass="routine-summary">
-                        <VBox spacing="3" HBox.hgrow="ALWAYS"><Label text="HUIDIGE ACTIE" styleClass="panel-overline"/><Label fx:id="routineState" text="Geen actieve routine." styleClass="routine-current-value" wrapText="true"/></VBox>
-                        <Separator orientation="VERTICAL"/>
-                        <VBox spacing="3"><Label text="VOLGENDE ACTIE" styleClass="panel-overline"/><Label fx:id="routineNextAction" text="—" styleClass="routine-current-value" wrapText="true"/></VBox>
-                    </HBox>
-                </VBox>
-                <VBox styleClass="dashboard-panel" spacing="12" GridPane.columnIndex="1">
-                    <HBox alignment="CENTER_LEFT" spacing="10"><Label text="▤" styleClass="panel-icon"/><Label text="Recente activiteit" styleClass="panel-title"/><Region HBox.hgrow="ALWAYS"/><Label text="Alles tonen" styleClass="activity-filter"/></HBox>
-                    <VBox fx:id="activityRows" spacing="8" />
-                    <Label fx:id="activityEmpty" text="Nog geen activiteit geregistreerd." styleClass="dashboard-empty" wrapText="true"/>
-                </VBox>
-            </GridPane>
-
-            <GridPane hgap="10" vgap="0" styleClass="dashboard-quick-actions">
+            <GridPane hgap="14" vgap="14" minWidth="0" styleClass="dashboard-lower-grid">
                 <columnConstraints>
-                    <ColumnConstraints percentWidth="16.66" hgrow="ALWAYS"/>
-                    <ColumnConstraints percentWidth="16.66" hgrow="ALWAYS"/>
-                    <ColumnConstraints percentWidth="16.66" hgrow="ALWAYS"/>
-                    <ColumnConstraints percentWidth="16.66" hgrow="ALWAYS"/>
-                    <ColumnConstraints percentWidth="16.66" hgrow="ALWAYS"/>
-                    <ColumnConstraints percentWidth="16.66" hgrow="ALWAYS"/>
+                    <ColumnConstraints percentWidth="50"/>
+                    <ColumnConstraints percentWidth="50"/>
                 </columnConstraints>
-                <VBox styleClass="quick-action-card" GridPane.columnIndex="0"><Label text="▶" styleClass="quick-action-icon"/><VBox spacing="2"><Label text="Automatisering" styleClass="quick-action-title"/><Label text="Start / Stop" styleClass="quick-action-detail"/></VBox></VBox>
-                <VBox styleClass="quick-action-card" GridPane.columnIndex="1"><Label text="▦" styleClass="quick-action-icon"/><VBox spacing="2"><Label text="Planning" styleClass="quick-action-title"/><Label text="Schema's" styleClass="quick-action-detail"/></VBox></VBox>
-                <VBox styleClass="quick-action-card" GridPane.columnIndex="2"><Label text="▱" styleClass="quick-action-icon"/><VBox spacing="2"><Label text="Profielen" styleClass="quick-action-title"/><Label text="Per account" styleClass="quick-action-detail"/></VBox></VBox>
-                <VBox styleClass="quick-action-card" GridPane.columnIndex="3"><Label text="⇩" styleClass="quick-action-icon"/><VBox spacing="2"><Label text="Downloads" styleClass="quick-action-title"/><Label text="Assets &amp; updates" styleClass="quick-action-detail"/></VBox></VBox>
-                <VBox styleClass="quick-action-card" GridPane.columnIndex="4"><Label text="⟳" styleClass="quick-action-icon"/><VBox spacing="2"><Label text="Updates" styleClass="quick-action-title"/><Label text="Nieuwe versie" styleClass="quick-action-detail"/></VBox></VBox>
-                <VBox styleClass="quick-action-card" GridPane.columnIndex="5"><Label text="🔧" styleClass="quick-action-icon"/><VBox spacing="2"><Label text="Tools" styleClass="quick-action-title"/><Label text="Hulpprogramma's" styleClass="quick-action-detail"/></VBox></VBox>
+                <VBox spacing="13" minWidth="0" styleClass="dashboard-panel" GridPane.columnIndex="0">
+                    <HBox alignment="CENTER_LEFT" spacing="10">
+                        <Label text="Automatisering" styleClass="panel-title"/>
+                        <Region HBox.hgrow="ALWAYS"/>
+                        <Label fx:id="routineBadge" text="GESTOPT" styleClass="routine-state-pill, routine-state-stopped"/>
+                    </HBox>
+                    <Label fx:id="routineState"
+                           text="Er draait nog geen routine. Start de automatisering om taken uit te voeren."
+                           styleClass="routine-current-value" wrapText="true"/>
+                    <Separator styleClass="dashboard-separator"/>
+                    <Label text="VOLGENDE ACTIE" styleClass="panel-overline"/>
+                    <Label fx:id="routineNextAction" text="Nog geen actie gepland"
+                           styleClass="routine-current-value" wrapText="true"/>
+                </VBox>
+                <VBox spacing="13" minWidth="0" styleClass="dashboard-panel" GridPane.columnIndex="1">
+                    <HBox alignment="CENTER_LEFT" spacing="10">
+                        <Label text="Recente activiteit" styleClass="panel-title"/>
+                        <Region HBox.hgrow="ALWAYS"/>
+                        <Button text="Logboek openen" styleClass="dashboard-text-button" onAction="#openLogs"/>
+                    </HBox>
+                    <VBox fx:id="activityRows" spacing="7" />
+                    <Label fx:id="activityEmpty" text="Nog geen activiteit geregistreerd."
+                           wrapText="true" styleClass="dashboard-empty"/>
+                </VBox>
             </GridPane>
+
+            <HBox alignment="CENTER_LEFT" spacing="12" styleClass="dashboard-shortcuts">
+                <Label text="SNELLE ACTIES" styleClass="metric-caption"/>
+                <Region HBox.hgrow="ALWAYS"/>
+                <Button text="Profielen beheren" styleClass="dashboard-shortcut-button" onAction="#openProfiles"/>
+                <Button text="Taken bekijken" styleClass="dashboard-shortcut-button" onAction="#openTasks"/>
+                <Button text="Emulators beheren" styleClass="dashboard-shortcut-button" onAction="#openEmulators"/>
+            </HBox>
         </VBox>
     </content>
 </ScrollPane>
