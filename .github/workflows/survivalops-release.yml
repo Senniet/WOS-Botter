@@ -83,6 +83,7 @@ jobs:
             '-Dfrostguard.product.identifier=dev.survivalops.desktop',
             '-Dfrostguard.product.description=SurvivalOps Whiteout Survival Automation Suite',
             '-Dfrostguard.product.install-dir=SurvivalOps',
+            '-Dfrostguard.update.manifest.stable=https://github.com/Senniet/WOS-Botter/releases/download/survivalops-stable/survivalops-stable-manifest.json',
             '-Dfrostguard.watcher.name=SurvivalOpsWatcher',
             '-Dfrostguard.product.upgrade-uuid=6d5b2a7e-9b3a-4f2a-8c1d-0e7f6a5b4c31',
             '-Dfrostguard.pull-request-build=false', '-Pwindows-app-image', 'package'
@@ -107,6 +108,7 @@ jobs:
             '-Dfrostguard.product.identifier=dev.survivalops.desktop',
             '-Dfrostguard.product.description=SurvivalOps Whiteout Survival Automation Suite',
             '-Dfrostguard.product.install-dir=SurvivalOps',
+            '-Dfrostguard.update.manifest.stable=https://github.com/Senniet/WOS-Botter/releases/download/survivalops-stable/survivalops-stable-manifest.json',
             '-Dfrostguard.watcher.name=SurvivalOpsWatcher',
             '-Dfrostguard.product.upgrade-uuid=6d5b2a7e-9b3a-4f2a-8c1d-0e7f6a5b4c31',
             '-Dfrostguard.pull-request-build=false', '-Pwindows-installer', '-DskipTests', 'package'
