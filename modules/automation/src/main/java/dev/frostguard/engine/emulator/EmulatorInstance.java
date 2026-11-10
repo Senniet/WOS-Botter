@@ -125,14 +125,36 @@ public abstract class EmulatorInstance {
     }
 
     private IDevice scan(String serial) {
-        for (IDevice d : bridge.getDevices()) if (serial.equals(d.getSerialNumber())) return d;
+        if (bridge == null) return null;
+        for (IDevice d : bridge.getDevices()) {
+            if (serial.equals(d.getSerialNumber()) && d.isOnline()) return d;
+        }
+        // The same local Android emulator can appear as emulator-5554 or
+        // 127.0.0.1:5555, depending on how the ADB server discovered it.
+        if (serial.startsWith("emulator-")) {
+            try {
+                int consolePort = Integer.parseInt(serial.substring("emulator-".length()));
+                String tcpSerial = "127.0.0.1:" + (consolePort + 1);
+                for (IDevice d : bridge.getDevices()) {
+                    if (tcpSerial.equals(d.getSerialNumber()) && d.isOnline()) return d;
+                }
+            } catch (NumberFormatException ignored) {
+                // Other serial formats must retain exact-match discovery.
+            }
+        }
         return null;
     }
 
     private boolean adbConnect(String serial) {
         if (Thread.currentThread().isInterrupted()) return false;
         try {
-            String ep = serial.startsWith("emulator-") ? "127.0.0.1:" + serial.substring(9) : serial;
+            // emulator-5554 is an ADB serial, not a TCP endpoint.
+            // The corresponding local ADB port is the console port + 1.
+            String ep = serial;
+            if (serial.startsWith("emulator-")) {
+                int consolePort = Integer.parseInt(serial.substring("emulator-".length()));
+                ep = "127.0.0.1:" + (consolePort + 1);
+            }
             BoundedProcessRunner.ProcessResult result = BoundedProcessRunner.run(
                     new ProcessBuilder(adbPath(), "connect", ep)
                             .directory(new File(adbPath()).getParentFile()),
