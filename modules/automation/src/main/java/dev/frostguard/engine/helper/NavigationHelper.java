@@ -656,7 +656,22 @@ public class NavigationHelper {
                 }
             }
 
-            // unknown screen - go back
+            // A recognised Rewards overlay says "Tap anywhere to exit". Do
+            // not use ten blind Android Back events for this known screen.
+            if (!atHome && !atWorld && pass <= 2
+                    && searcher.locateAction(TemplatesEnum.ARENA_REWARDS_BANNER,
+                            TemplateSearchHelper.SearchConfig.builder()
+                                    .withMaxAttempts(1).withThreshold(85)
+                                    .withArea(AreaData.of(30, 245, 690, 400)).build()).isFound()) {
+                broadcastDebug("Recognised Rewards overlay; dismissing with one verified tap");
+                checkpoint.run();
+                taps.tapInside(AreaData.of(340, 1125, 385, 1185));
+                interruptibleWait(600);
+                pass++;
+                continue;
+            }
+            // Unknown, not a known reward overlay: Android Back is an input
+            // action, not a missing on-screen Back button.
             if (!atHome && !atWorld) {
                 broadcastDebug("Unknown screen - back (" + pass + "/" + budget + ")");
                 checkpoint.run();

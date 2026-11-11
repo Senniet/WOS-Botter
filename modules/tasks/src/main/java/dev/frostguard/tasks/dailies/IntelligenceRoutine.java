@@ -59,6 +59,13 @@ private static final long JOURNEY_RESULT_POLL_MILLIS = 1_000L;
 
 private static final AreaData JOURNEY_VICTORY_CONTINUE_AREA = AreaData.of(400, 990, 658, 1038);
 
+// View is confined to the Intel mission modal. A real saved frame from
+// 2026-11-11 scored 89.56%, below the old default of 90.
+static final SearchConfig INTEL_VIEW_ACTION_SEARCH = SearchConfig.builder()
+        .withMaxAttempts(3).withDelay(300L).withThreshold(88)
+        .withArea(AreaData.of(205, 850, 535, 1015))
+        .build();
+
 private static final SearchConfig INTEL_CLAIM_ALL_SEARCH = SearchConfig.builder()
 		.withMaxAttempts(2)
 		.withDelay(500L)
@@ -1181,7 +1188,7 @@ private void handleSurvivor(ImageSearchResultData result) {
 		tapInside(result);
 		sleepTask(2000);
 
-		ImageSearchResultData view = templateSearchHelper.locatePattern(TemplatesEnum.INTEL_VIEW, SearchConfigConstants.SINGLE_WITH_RETRIES);
+		ImageSearchResultData view = templateSearchHelper.locateAction(TemplatesEnum.INTEL_VIEW, INTEL_VIEW_ACTION_SEARCH);
 		if (!view.isFound()) {
 			logWarning(routineLogIntelligenceLine("Could not find the 'View' button for the survivor. Going back."));
 			pressBack();
@@ -1212,7 +1219,7 @@ private void handleJourney(ImageSearchResultData result) {
 		tapInside(result);
 		sleepTask(2000);
 
-		ImageSearchResultData view = templateSearchHelper.locatePattern(TemplatesEnum.INTEL_VIEW, SearchConfigConstants.SINGLE_WITH_RETRIES);
+		ImageSearchResultData view = templateSearchHelper.locateAction(TemplatesEnum.INTEL_VIEW, INTEL_VIEW_ACTION_SEARCH);
 		if (!view.isFound()) {
 			logWarning(routineLogIntelligenceLine("Could not find the 'View' button for the journey. Going back."));
 			pressBack();
@@ -1276,7 +1283,7 @@ private void handleBeast(ImageSearchResultData beast) {
 		tapInside(beast);
 		sleepTask(2000);
 
-		ImageSearchResultData view = templateSearchHelper.locatePattern(TemplatesEnum.INTEL_VIEW, SearchConfigConstants.SINGLE_WITH_RETRIES);
+		ImageSearchResultData view = templateSearchHelper.locateAction(TemplatesEnum.INTEL_VIEW, INTEL_VIEW_ACTION_SEARCH);
 		if (!view.isFound()) {
 			logWarning(routineLogIntelligenceLine("Could not find the 'View' button for the beast. Going back."));
 			pressBack();

@@ -118,6 +118,27 @@ public class ArenaRoutine extends DelayedTask {
             .withDelay(500)
             .build();
     private static final int[] ATTEMPT_PRICES = { 100, 200, 400, 600, 800 };
+    // Rewards panel after a Daily Challenges chest claim.
+    private static final int REWARDS_BANNER_THRESHOLD = 85;
+    private static final int REWARDS_PANEL_TIMEOUT_MS = 6_000;
+    private static final int REWARDS_PANEL_POLL_MS = 400;
+    private static final int REWARDS_PANEL_SETTLE_MS = 1_200;
+    private static final PointData REWARDS_DISMISS_POINT = new PointData(360, 1150);
+
+    // ========== Daily Challenges chest ==========
+    // The Challenge List carries its own chest, with a count under it that runs
+    // 0/5 to 5/5. Only the leading digit of a finished count is drawn green;
+    // measured on the live screen it gives 98 green pixels at 5/5 and none at
+    // 0/5 through 4/5, while the chest art above it pulses and cannot be matched.
+    private static final PointData DAILY_CHEST_POINT = new PointData(115, 985);
+    private static final AreaData DAILY_CHEST_COUNT_LEADING_DIGIT = new AreaData(
+            new PointData(99, 1071),
+            new PointData(115, 1093));
+    private static final int MIN_DAILY_CHEST_GREEN_PIXELS = 40;
+    private static final int DAILY_CHEST_GREEN_MARGIN = 30;
+    // The list is still fading back in when the last battle's result closes.
+    private static final int DAILY_CHEST_CHECK_ATTEMPTS = 4;
+    private static final int DAILY_CHEST_CHECK_DELAY_MS = 700;
     private static final int MIN_COLORED_PIXELS_THRESHOLD = 10;
     private static final double GREEN_DOMINANCE_RATIO = 1.5;
     private static final double RED_DOMINANCE_RATIO = 1.5;
@@ -285,6 +306,7 @@ public class ArenaRoutine extends DelayedTask {
         // become claimable once the daily attempts have been exhausted.
         logInfo("Arena Daily Challenges chest after challenge attempts: "
                 + captureArenaDiagnostic("daily-chest-after-challenges"));
+        claimDailyChallengesChest();
 
         rescheduleWithActivationHour();
     }
@@ -504,6 +526,86 @@ public class ArenaRoutine extends DelayedTask {
         } else {
             logInfo("Arena run finished after using available eligible attempts.");
         }
+    }
+
+    /**
+     * Claims the Daily Challenges chest from the Challenge List, where the run
+     * is still standing when its last attempt ends.
+     *
+     * <p>This is the dependable route to the day's reward. The same chest also
+     * floats over the Arena building, but the city camera pans freely and a
+     * building scrolled off screen reads exactly like a chest already taken.</p>
+     */
+    private void claimDailyChallengesChest() {
+        if (!isDailyChestReady()) {
+            logInfo("Daily Challenges chest is not ready in the Challenge List.");
+            return;
+        }
+
+        logInfo("Daily Challenges chest is ready. Opening it.");
+        tapNear(DAILY_CHEST_POINT);
+
+        if (!waitForRewardsPanel()) {
+            logWarning("Daily Challenges chest tapped but no Rewards panel appeared. Leaving it for the next run.");
+            pressBack();
+            return;
+        }
+
+        tapNear(REWARDS_DISMISS_POINT);
+        sleepTask(REWARDS_PANEL_SETTLE_MS);
+        if (rewardsPanelVisible()) {
+            logWarning("Daily Challenges chest reward was displayed, but the panel did not close; "
+                    + captureArenaDiagnostic("daily-chest-reward-overlay-stuck"));
+        }
+
+        StatisticsService.obtain().addToCounter(profile, "Arena Chests", 1);
+        logInfo("Daily Challenges chest claimed.");
+    }
+
+    private boolean isDailyChestReady() {
+        for (int attempt = 1; attempt <= DAILY_CHEST_CHECK_ATTEMPTS; attempt++) {
+            BufferedImage image = captureFrameForPixelScan("arena daily chest");
+            if (image != null && showsFinishedDailyChestCount(image)) {
+                sleepTask(250);
+                BufferedImage second = captureFrameForPixelScan("arena daily chest confirmation");
+                if (second != null && showsFinishedDailyChestCount(second)) return true;
+            }
+            if (attempt < DAILY_CHEST_CHECK_ATTEMPTS) {
+                sleepTask(DAILY_CHEST_CHECK_DELAY_MS);
+            }
+        }
+        return false;
+    }
+
+    static boolean showsFinishedDailyChestCount(BufferedImage image) {
+        int green = PixelStats.count(image, DAILY_CHEST_COUNT_LEADING_DIGIT, ArenaRoutine::isDailyChestCountGreen);
+        return green >= MIN_DAILY_CHEST_GREEN_PIXELS;
+    }
+
+    private static boolean isDailyChestCountGreen(int rgb) {
+        int red = (rgb >> 16) & 0xFF;
+        int green = (rgb >> 8) & 0xFF;
+        int blue = rgb & 0xFF;
+        return green > red + DAILY_CHEST_GREEN_MARGIN && green > blue + DAILY_CHEST_GREEN_MARGIN;
+    }
+
+    private boolean waitForRewardsPanel() {
+        int waited = 0;
+        while (waited < REWARDS_PANEL_TIMEOUT_MS) {
+            if (rewardsPanelVisible()) {
+                return true;
+            }
+            sleepTask(REWARDS_PANEL_POLL_MS);
+            waited += REWARDS_PANEL_POLL_MS;
+        }
+        return false;
+    }
+
+    private boolean rewardsPanelVisible() {
+        return templateSearchHelper.locatePattern(TemplatesEnum.ARENA_REWARDS_BANNER,
+                SearchConfig.builder().withMaxAttempts(1)
+                        .withThreshold(REWARDS_BANNER_THRESHOLD)
+                        .withArea(AreaData.of(30, 245, 690, 400)).build()).isFound();
     }
 
     static boolean shouldRefreshAfterDefeat(int remainingAttempts) {

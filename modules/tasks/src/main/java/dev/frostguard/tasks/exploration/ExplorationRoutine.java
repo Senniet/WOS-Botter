@@ -22,8 +22,8 @@ public class ExplorationRoutine extends DelayedTask {
 
 	private static final PointData EXPLORATION_ENTRY_TOP_LEFT = new PointData(40, 1190);
 	private static final PointData EXPLORATION_ENTRY_BOTTOM_RIGHT = new PointData(100, 1250);
-	private static final PointData REWARD_POPUP_TOP_LEFT = new PointData(230, 890);
-	private static final PointData REWARD_POPUP_BOTTOM_RIGHT = new PointData(490, 960);
+    private static final PointData REWARD_POPUP_TOP_LEFT = new PointData(340, 1125);
+    private static final PointData REWARD_POPUP_BOTTOM_RIGHT = new PointData(385, 1185);
 	private static final int MAX_OPEN_ATTEMPTS = 2;
 
 	public ExplorationRoutine(AccountDescriptor profile, TpDailyTaskEnum tpDailyTask) {
@@ -107,17 +107,24 @@ public class ExplorationRoutine extends DelayedTask {
 		logInfo(routineLogExplorationLine(String.format(
 				"Enabled claim detected at %s (score %.2f). Tapping once and verifying state.",
 				claim.getPoint(), claim.getMatchPercentage())));
-		tapClaimButton(claim);
-		sleepTask(800);
-		if (locateDisabledClaimButton().isFound()
-				&& !locateEnabledClaimButton().isFound()) {
-			return true;
-		}
+        tapClaimButton(claim);
+        sleepTask(800);
+        // A successful claim opens a Rewards overlay. Detect that before trying
+        // to inspect the controls hidden behind it (the previous false failure).
+        if (rewardOverlayAppeared()) {
+            logInfo(routineLogExplorationLine("Rewards overlay confirmed; chest claim succeeded."));
+            dismissRewardPopup();
+            if (rewardsOverlayVisible()) {
+                logWarning(routineLogExplorationLine("Rewards claimed but overlay is still visible; "
+                        + captureDiagnostic("reward-overlay-still-open")));
+            }
+            return true;
+        }
+        if (locateDisabledClaimButton().isFound()
+                && !locateEnabledClaimButton().isFound()) return true;
 
-		// The reward overlay often hides the claim controls. Preserve the existing
-		// dismissal step, but never infer success from a vanished button alone.
-		dismissRewardPopup();
-		boolean disabled = locateDisabledClaimButton().isFound();
+        // Neither claim state nor reward overlay is confirmed; do not tap again.
+        boolean disabled = locateDisabledClaimButton().isFound();
 		boolean enabled = locateEnabledClaimButton().isFound();
 		if (claimConfirmed(disabled, enabled)) {
 			logInfo(routineLogExplorationLine("Claim verified by disabled claim control."));
@@ -182,9 +189,26 @@ public class ExplorationRoutine extends DelayedTask {
 		tapInside(topLeft, bottomRight);
 	}
 
+    private boolean rewardsOverlayVisible() {
+        return templateSearchHelper.locatePattern(TemplatesEnum.ARENA_REWARDS_BANNER,
+                dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig.builder()
+                        .withMaxAttempts(1).withThreshold(85)
+                        .withArea(AreaData.of(30, 245, 690, 400)).build()).isFound();
+    }
+
+    private boolean rewardOverlayAppeared() {
+        for (int attempt = 0; attempt < 3; attempt++) {
+            if (rewardsOverlayVisible()) return true;
+            if (attempt < 2) sleepTask(300);
+        }
+        return false;
+    }
+
 	private void dismissRewardPopup() {
-		tapInside(REWARD_POPUP_TOP_LEFT, REWARD_POPUP_BOTTOM_RIGHT);
-		sleepTask(500);
+        // The Rewards panel explicitly says "Tap anywhere to exit". Tap its
+        // empty lower area *only after* its banner has been identified.
+        tapInside(REWARD_POPUP_TOP_LEFT, REWARD_POPUP_BOTTOM_RIGHT);
+        sleepTask(750);
 	}
 
 	private void rescheduleFromConfiguredOffset() {
