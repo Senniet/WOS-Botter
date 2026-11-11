@@ -261,6 +261,11 @@ public class ArenaRoutine extends DelayedTask {
             return;
         }
 
+        // Arena now has a Daily Challenges chest near the bottom-left of the
+        // challenge entry. Save this panel even if the chest was already claimed,
+        // so its eligible/claimed states can be distinguished before clicks.
+        logInfo("Arena Daily Challenges chest layout evidence: "
+                + captureArenaDiagnostic("daily-chest-entry-layout"));
         firstRun = detectFirstRun();
 
         if (!openChallengeList()) {
@@ -276,6 +281,10 @@ public class ArenaRoutine extends DelayedTask {
         }
 
         processChallenges();
+        // Retain the state after free challenges too: the daily chest may only
+        // become claimable once the daily attempts have been exhausted.
+        logInfo("Arena Daily Challenges chest after challenge attempts: "
+                + captureArenaDiagnostic("daily-chest-after-challenges"));
 
         rescheduleWithActivationHour();
     }

@@ -8,8 +8,12 @@ import dev.frostguard.api.configs.TpDailyTaskEnum;
 import dev.frostguard.api.domain.ImageSearchResultData;
 import dev.frostguard.api.domain.PointData;
 import dev.frostguard.api.domain.AccountDescriptor;
+import dev.frostguard.api.domain.AreaData;
 import dev.frostguard.api.domain.SizeData;
 import dev.frostguard.engine.nav.SearchConfigConstants;
+import dev.frostguard.engine.helper.GreenLabelActionDetector;
+import dev.frostguard.engine.helper.RecognitionConsensus;
+import dev.frostguard.vision.convert.ImageConverter;
 import dev.frostguard.tasks.diagnostics.TaskDiagnosticSnapshots;
 import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.schedule.LaunchPoint;
@@ -133,9 +137,27 @@ public class ExplorationRoutine extends DelayedTask {
 		return TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER, "exploration-chest", kind);
 	}
 
+    private static final GreenLabelActionDetector.Region EXPLORATION_CLAIM_REGION =
+            new GreenLabelActionDetector.Region(535, 830, 701, 909);
+
 	private ImageSearchResultData locateEnabledClaimButton() {
-		return templateSearchHelper.locatePattern(
-				TemplatesEnum.EXPLORATION_CLAIM, SearchConfigConstants.STRICT_MATCHING);
+        // The saved 2026-11-11 frame scored 94.1%, just shy of the old 95%.
+        // Restrict the modest threshold adjustment to the observed location.
+		ImageSearchResultData matched = templateSearchHelper.locatePattern(
+				TemplatesEnum.EXPLORATION_CLAIM,
+                dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig.builder()
+                    .withMaxAttempts(2).withDelay(250).withThreshold(92)
+                    .withArea(AreaData.of(525, 804, 710, 926)).build());
+        if (matched.isFound()) return matched;
+        // No blind coordinate taps: require green body and white label on two
+        // independently captured frames of the verified Exploration screen.
+        ImageSearchResultData first = GreenLabelActionDetector.detect(
+                ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER)), EXPLORATION_CLAIM_REGION);
+        if (!first.isFound()) return ImageSearchResultData.miss();
+        sleepTask(250);
+        ImageSearchResultData second = GreenLabelActionDetector.detect(
+                ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER)), EXPLORATION_CLAIM_REGION);
+        return RecognitionConsensus.agrees(first, second, 8) ? second : ImageSearchResultData.miss();
 	}
 
 	private ImageSearchResultData locateDisabledClaimButton() {

@@ -66,7 +66,22 @@ public class IntelScreenHelper {
             log.info("Daily Intel availability evidence: greenGainPattern=true, greenPixels=" + greenPixels
                     + ", available=" + available);
         } else {
-            log.info("Daily Intel availability evidence: greenGainPattern=false, available=false");
+            // The fixed "Intel Gain" template changes with localization, font,
+            // and the numeric count. A Lighthouse-row anchored positive-green
+            // status on TWO fresh frames is accepted as availability evidence.
+            BufferedImage first = ImageConverter.toBufferedImage(emu.captureScreen(dev));
+            int firstGreen = availableGreenPixels(first, intelGainStatusArea(lighthouseRow));
+            if (firstGreen >= INTEL_AVAILABLE_GREEN_MIN) {
+                pause(250);
+                BufferedImage second = ImageConverter.toBufferedImage(emu.captureScreen(dev));
+                int secondGreen = availableGreenPixels(second, intelGainStatusArea(lighthouseRow));
+                available = secondGreen >= INTEL_AVAILABLE_GREEN_MIN;
+                log.info("Daily Intel anchored green status: first=" + firstGreen + " second=" + secondGreen
+                        + " confirmed=" + available);
+            } else {
+                log.info("Daily Intel availability evidence: template=false, anchoredGreenPixels="
+                        + firstGreen + ", available=false");
+            }
         }
 
         if (!nav.closeSidebar()) {
@@ -126,6 +141,18 @@ public class IntelScreenHelper {
 
     static int availableGreenPixels(BufferedImage frame, ImageSearchResultData gainPattern) {
         return PixelStats.count(frame, availabilityAreaFor(gainPattern), GameColors::isVividGreen);
+    }
+
+    static AreaData intelGainStatusArea(ImageSearchResultData lighthouseRow) {
+        PointData point = lighthouseRow.getPoint();
+        if (point == null) throw new IllegalArgumentException("Lighthouse row must be visible");
+        // Restrict to the *status line*, not the row's arrow or nearby entries.
+        return AreaData.of(105, Math.max(300, point.getY() + 8),
+                325, Math.min(885, point.getY() + 48));
+    }
+
+    static int availableGreenPixels(BufferedImage frame, AreaData status) {
+        return PixelStats.count(frame, status, GameColors::isVividGreen);
     }
 
     static AreaData intelGainRowArea(ImageSearchResultData lighthouseRow) {

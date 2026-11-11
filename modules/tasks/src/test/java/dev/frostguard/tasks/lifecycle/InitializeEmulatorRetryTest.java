@@ -13,6 +13,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class InitializeEmulatorRetryTest {
 
     @Test
+    void disconnectedEmulatorDefersAfterFourProbesWithoutRepeatedLaunches() {
+        AtomicInteger probes = new AtomicInteger();
+        AtomicInteger launches = new AtomicInteger();
+        AtomicInteger waits = new AtomicInteger();
+        assertThrows(IllegalStateException.class, () -> InitializeRoutine.awaitEmulatorRunning(
+                () -> { probes.incrementAndGet(); return false; },
+                launches::incrementAndGet,
+                waits::incrementAndGet,
+                () -> {}));
+        org.junit.jupiter.api.Assertions.assertEquals(4, probes.get());
+        org.junit.jupiter.api.Assertions.assertEquals(1, launches.get());
+        org.junit.jupiter.api.Assertions.assertEquals(3, waits.get());
+    }
+
+    @Test
     void cancellationAfterStateProbePreventsLaunch() {
         AtomicInteger checks = new AtomicInteger();
         AtomicBoolean launched = new AtomicBoolean();

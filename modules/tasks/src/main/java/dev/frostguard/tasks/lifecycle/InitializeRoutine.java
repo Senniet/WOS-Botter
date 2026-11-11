@@ -72,6 +72,7 @@ public class InitializeRoutine extends DelayedTask {
 
 	// ========== Home Screen Detection Constants ==========
 	private static final int MAX_HOME_SCREEN_ATTEMPTS = 10;
+    private static final int MAX_EMULATOR_READY_PROBES = 4;
 	private static final int RESOURCE_DOWNLOAD_TIMEOUT_MINUTES = 10;
 	private static final int RESOURCE_DOWNLOAD_POLL_DELAY_MS = 5000;
 	private static final int MAX_RESOURCE_DOWNLOAD_ATTEMPTS =
@@ -198,17 +199,26 @@ public class InitializeRoutine extends DelayedTask {
 		logInfo("Checking emulator status...");
 
 		if (!isStarted) {
-			awaitEmulatorRunning(
-					() -> emuManager.isRunning(EMULATOR_NUMBER),
-					() -> {
-						logInfo("Emulator not found. Attempting to start it...");
-						emuManager.launchEmulator(EMULATOR_NUMBER);
-					},
-					() -> {
-						logInfo("Waiting 10 seconds before checking again.");
-						sleepTask(10000); // Wait for emulator to start
-					},
-					this::checkPreemption);
+            try {
+                awaitEmulatorRunning(
+                        () -> emuManager.isRunning(EMULATOR_NUMBER),
+                        () -> {
+                            logInfo("Emulator not found. Attempting to start it once...");
+                            emuManager.launchEmulator(EMULATOR_NUMBER);
+                        },
+                        () -> {
+                            logInfo("Waiting 10 seconds before checking ADB again.");
+                            sleepTask(10000);
+                        },
+                        this::checkPreemption);
+            } catch (IllegalStateException unavailable) {
+                dev.frostguard.engine.diagnostics.LanDiagnosticReporter.failure(
+                        "initialize", "emulator-adb-not-ready");
+                LocalDateTime retry = LocalDateTime.now().plusMinutes(5);
+                logWarning("Initialize: emulator/ADB not ready after " + MAX_EMULATOR_READY_PROBES
+                        + " probes; deferring instead of remaining in Executing. Retry at " + retry);
+                throw new ProfileCooldownException("Emulator is not yet reachable over ADB", retry);
+            }
 			isStarted = true;
 			lastVerifiedStartupState = "emulator running";
 			logInfo("Emulator is running.");
@@ -216,19 +226,22 @@ public class InitializeRoutine extends DelayedTask {
 	}
 
 	static void awaitEmulatorRunning(BooleanSupplier isRunning, Runnable launch,
-			Runnable retryDelay, Runnable checkPreemption) {
-		while (true) {
-			checkPreemption.run();
-			boolean running = isRunning.getAsBoolean();
-			checkPreemption.run();
-			if (running) {
-				return;
-			}
-			launch.run();
-			checkPreemption.run();
-			retryDelay.run();
-		}
-	}
+            Runnable retryDelay, Runnable checkPreemption) {
+        for (int probe = 0; probe < MAX_EMULATOR_READY_PROBES; probe++) {
+            checkPreemption.run();
+            boolean running = isRunning.getAsBoolean();
+            checkPreemption.run();
+            if (running) return;
+            // Launch only once: additional launches while ADB is disconnected
+            // risk spawning duplicate emulator instances.
+            if (probe == 0) {
+                launch.run();
+                checkPreemption.run();
+            }
+            if (probe + 1 < MAX_EMULATOR_READY_PROBES) retryDelay.run();
+        }
+        throw new IllegalStateException("Emulator/ADB did not become ready after bounded probes");
+    }
 
 	/**
 	 * Verifies that Whiteout Survival is installed on the emulator.
