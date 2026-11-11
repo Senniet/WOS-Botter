@@ -148,13 +148,43 @@ public class FishingMinigameRoutine extends DelayedTask {
             Thread.currentThread().interrupt();
             checkPreemption();
         } catch (java.io.IOException error) {
-            throw new IllegalStateException("Fishing video/input transport failed", error);
+            deferTransportFailure(error);
+        } catch (IllegalStateException error) {
+            if (!isTransportFailure(error)) throw error;
+            deferTransportFailure(error);
         } finally {
             stream = null;
             realtimeInput = null;
             observation = null;
             steering = null;
         }
+    }
+
+    /**
+     * Failed video/control pipes leave the current screen unverified. Do not
+     * reconnect and cast again in the same execution: a paid bait or item may
+     * already be in use. A later run inspects any existing cast first.
+     */
+    private void deferTransportFailure(Exception error) {
+        String type = error.getClass().getSimpleName();
+        String detail = error.getMessage() == null ? "" : error.getMessage();
+        if (detail.length() > 160) detail = detail.substring(0, 160);
+        logWarning("Fishing transport unavailable; " + type + ": "
+                + detail.replaceAll("[\r\n]+", " ")
+                + "; next run will inspect existing cast before any new bait is used.");
+        String snapshot = TaskDiagnosticSnapshots.capture(
+                emuManager, EMULATOR_NUMBER, "fishing", "transport-failure");
+        logInfo("Fishing transport recovery scheduled; " + snapshot);
+        defer(5, "Video/input channel not verified; no additional cast authorized");
+    }
+
+    static boolean isTransportFailure(IllegalStateException error) {
+        if (error == null || error.getMessage() == null) return false;
+        String message = error.getMessage();
+        return message.startsWith("Android video stream ended")
+                || message.startsWith("No fresh Fishing frame within")
+                || message.startsWith("Fishing observation stale")
+                || message.startsWith("Android touch session unavailable");
     }
 
     private void defer(int minutes, String reason) {
