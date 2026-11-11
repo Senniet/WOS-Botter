@@ -3,6 +3,13 @@ package dev.frostguard.app.panel.emulator;
 import java.io.File;
 import java.util.HashMap;
 import java.util.Map;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.io.IOException;
+import java.util.Comparator;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
+import dev.frostguard.api.runtime.WorkspacePaths;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -422,6 +429,64 @@ public class EmuConfigLayoutController {
 			javafx.application.Platform.runLater(launcher::scheduleAutoStart);
 		}
 	}
+
+    /** User-initiated, local-only support bundle. Nothing is uploaded.
+     * Logs and screenshots may include visible player names; review ZIP before sharing.
+     */
+    @FXML
+    private void handleExportDiagnostics() {
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle("Export SurvivalOps diagnostics (review before sharing)");
+        chooser.setInitialFileName("survivalops-diagnostics.zip");
+        chooser.getExtensionFilters().add(
+                new FileChooser.ExtensionFilter("ZIP archive", "*.zip"));
+        File target = chooser.showSaveDialog(checkboxAnalyticsEnabled.getScene().getWindow());
+        if (target == null) return;
+        Path root = WorkspacePaths.current().logs();
+        try {
+            exportDiagnostics(root, target.toPath());
+            new Alert(Alert.AlertType.INFORMATION,
+                    "Diagnostics ZIP created locally. Review logs/screenshots for player names or other personal data before sharing.")
+                    .showAndWait();
+        } catch (IOException failure) {
+            logger.warn("Diagnostic export failed", failure);
+            new Alert(Alert.AlertType.ERROR, "Could not export diagnostics: "
+                    + failure.getClass().getSimpleName()).showAndWait();
+        }
+    }
+
+    static void exportDiagnostics(Path logs, Path destination) throws IOException {
+        if (!Files.isDirectory(logs)) throw new IOException("No diagnostics folder available");
+        Path normalized = logs.toRealPath();
+        Path output = destination.toAbsolutePath().normalize();
+        if (output.startsWith(normalized)) {
+            throw new IOException("Choose a destination outside the log directory");
+        }
+        try (var candidates = Files.walk(normalized, 5)) {
+            var files = candidates.filter(Files::isRegularFile)
+                    .filter(file -> !Files.isSymbolicLink(file))
+                    .filter(file -> {
+                        String name = file.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
+                        return name.endsWith(".log") || (name.endsWith(".png")
+                                && file.toString().contains("snapshot"));
+                    })
+                    .sorted(Comparator.comparingLong((Path file) -> file.toFile().lastModified()).reversed())
+                    .limit(80).toList();
+            if (files.isEmpty()) throw new IOException("No log or snapshot files available");
+            long included = 0;
+            try (var archive = new ZipOutputStream(Files.newOutputStream(output))) {
+                for (Path file : files) {
+                    long length = Files.size(file);
+                    if (length > 5_000_000 || included + length > 30_000_000) continue;
+                    included += length;
+                    ZipEntry entry = new ZipEntry(normalized.relativize(file).toString().replace('\\', '/'));
+                    archive.putNextEntry(entry);
+                    Files.copy(file, archive);
+                    archive.closeEntry();
+                }
+            }
+        }
+    }
 
 	/* ────────────────────────────────────────────────
 	 *  Analytics toggles
