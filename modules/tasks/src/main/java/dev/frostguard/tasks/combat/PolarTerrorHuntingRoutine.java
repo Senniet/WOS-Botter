@@ -176,7 +176,21 @@ private record RallyLaunchResult(RallyLaunchOutcome outcome, String detail) {
             if (!staminaCouldSupportRally())
                 return;
 
-            List<MarchSlotState> marchQueue = marchHelper.readMarchQueue();
+            List<MarchSlotState> marchQueue;
+            try {
+                marchQueue = readMarchQueueAfterWorldTransition();
+            } catch (IllegalStateException unavailable) {
+                if (!"Could not open the requested sidebar section".equals(unavailable.getMessage())) {
+                    throw unavailable;
+                }
+                LocalDateTime retryAt = LocalDateTime.now().plusMinutes(1);
+                logWarning(routineLogPolarTerrorHuntingLine(
+                        "March queue sidebar unavailable after world transition; "
+                        + "preserving " + deployedCount + " confirmed rally deployment(s) and retrying at "
+                        + GameTimeUtils.formatCountdown(retryAt)));
+                reschedule(retryAt);
+                return;
+            }
             if (marchQueue.stream().noneMatch(MarchSlotState::isIdle)) {
                 LocalDateTime retryAt = resolveNoSlotRetry(marchQueue);
                 logInfo(routineLogPolarTerrorHuntingLine(String.format(
@@ -580,6 +594,27 @@ private void leaveSameTargetDialog() {
             logWarning(routineLogPolarTerrorHuntingLine(
                     "World anchor not verified after cancelling; the next run re-navigates"));
         }
+    }
+
+/**
+ * After a successful rally the world transition may still animate, leaving
+ * the sidebar temporarily unavailable. Recheck once, never assume a slot is
+ * free and never undo a previously confirmed deployment on this failure.
+ */
+private List<MarchSlotState> readMarchQueueAfterWorldTransition() {
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            checkPreemption();
+            try {
+                return marchHelper.readMarchQueue();
+            } catch (IllegalStateException unavailable) {
+                if (!"Could not open the requested sidebar section".equals(unavailable.getMessage())
+                        || attempt == 2) throw unavailable;
+                logWarning(routineLogPolarTerrorHuntingLine(
+                        "Wilderness sidebar not ready after rally; allowing screen to settle before retry"));
+                sleepTask(1800);
+            }
+        }
+        throw new IllegalStateException("March queue retry exhausted");
     }
 
 // Picks the next useful wake-up when every march slot is busy. Rallies this routine launched itself
