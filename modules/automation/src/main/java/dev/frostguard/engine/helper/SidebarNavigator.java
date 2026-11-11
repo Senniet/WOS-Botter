@@ -1,6 +1,9 @@
 package dev.frostguard.engine.helper;
 
 import java.awt.image.BufferedImage;
+import java.time.Instant;
+import java.util.Locale;
+import dev.frostguard.engine.diagnostics.DiagnosticSnapshotStore;
 import java.util.Optional;
 import java.util.function.Predicate;
 
@@ -123,8 +126,35 @@ public final class SidebarNavigator {
         if (bottomScan.rowIcon().isFound()) {
             return SidebarRowLookup.fromRow(bottomScan.rowIcon());
         }
-        log.info("Sidebar destination unavailable after bounded icon scan: " + destination
-                + " bottomBoundary=" + bottomScan.boundaryReached());
+        // Sidebar retains its scroll position across tasks. A downward-only scan
+        // misses destinations above the current viewport, even after reaching
+        // the bottom. Reverse over the entire content range before declaring
+        // the destination absent.
+        ScrollScanResult topScan = scan(destination, ScrollDirection.TOWARD_TOP, bottomScan.frame());
+        if (!topScan.completed()) {
+            log.warn("Sidebar upward scan interrupted or section changed: " + destination);
+            return SidebarRowLookup.sidebarUnavailable();
+        }
+        if (topScan.rowIcon().isFound()) {
+            log.info("Sidebar destination recovered on upward scan: " + destination);
+            return SidebarRowLookup.fromRow(topScan.rowIcon());
+        }
+        String evidence = "snapshot=disabled";
+        DiagnosticSnapshotStore diagnostics = DiagnosticSnapshotStore.forCurrentWorkspace();
+        if (diagnostics.isEnabled()) {
+            try {
+                evidence = "snapshot=" + diagnostics.write(topScan.frame(), "sidebar",
+                        destination.name().toLowerCase(Locale.ROOT) + "-missing",
+                        Instant.now()).orElse("not-saved");
+            } catch (RuntimeException failure) {
+                if (failure instanceof java.util.concurrent.CancellationException
+                        || Thread.currentThread().isInterrupted()) throw failure;
+                evidence = "snapshot=unavailable(" + failure.getClass().getSimpleName() + ")";
+            }
+        }
+        log.warn("Sidebar destination unavailable after two-way bounded scan: " + destination
+                + " bottomBoundary=" + bottomScan.boundaryReached()
+                + " topBoundary=" + topScan.boundaryReached() + " " + evidence);
         return SidebarRowLookup.fromRow(ImageSearchResultData.miss());
     }
 
@@ -359,7 +389,9 @@ public final class SidebarNavigator {
 
     private enum ScrollDirection {
         TOWARD_BOTTOM(CommonGameAreas.SIDEBAR_SCROLL_TOWARD_BOTTOM_FROM,
-                CommonGameAreas.SIDEBAR_SCROLL_TOWARD_BOTTOM_TO);
+                CommonGameAreas.SIDEBAR_SCROLL_TOWARD_BOTTOM_TO),
+        TOWARD_TOP(CommonGameAreas.SIDEBAR_SCROLL_TOWARD_BOTTOM_TO,
+                CommonGameAreas.SIDEBAR_SCROLL_TOWARD_BOTTOM_FROM);
 
         private final PointData from;
         private final PointData to;
