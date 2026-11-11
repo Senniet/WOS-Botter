@@ -67,8 +67,8 @@ public final class AndroidTouchSession implements AutoCloseable {
             run("push", localBinary.toString(), remote + ".jar");
             run("push", localScript.toString(), remote + ".sh");
             String forwarded = run("forward", "tcp:0", remoteSocket).trim();
-            try { port = Integer.parseInt(forwarded); }
-            catch (NumberFormatException error) { throw new IOException("ADB returned an invalid control port", error); }
+            port = resolveOwnedForwardPort(forwarded, serial, remoteSocket,
+                    () -> run("forward", "--list"));
             if (port < 1 || port > 65535) throw new IOException("ADB control port out of range");
             checkCancellation();
             server = command("exec-out", "sh", remote + ".sh")
@@ -159,6 +159,31 @@ public final class AndroidTouchSession implements AutoCloseable {
         if (!remote.matches("/data/local/tmp/frostguard-touch-[0-9a-f-]{36}")) {
             throw new IllegalArgumentException("Unowned Android control path");
         }
+    }
+
+    @FunctionalInterface
+    interface ForwardListing {
+        String list() throws IOException, InterruptedException;
+    }
+
+    /**
+     * Some ADB builds return an empty / nonnumeric response for tcp:0 even
+     * though the forward was installed. Resolve only a unique exact owned
+     * socket and serial. Never select a random unrelated forward.
+     */
+    static int resolveOwnedForwardPort(String response, String serial, String remoteSocket,
+                                       ForwardListing listing) throws IOException, InterruptedException {
+        String trimmed = response == null ? "" : response.trim();
+        if (trimmed.matches("(?:tcp:)?[0-9]{1,5}")) {
+            int value = Integer.parseInt(trimmed.replace("tcp:", ""));
+            if (value > 0 && value <= 65535) return value;
+        }
+        List<Integer> matches = ownedForwardPorts(listing.list(), serial, remoteSocket);
+        if (matches.size() == 1) return matches.getFirst();
+        String clean = trimmed.replaceAll("[\r\n]+", " ").replaceAll("[^a-zA-Z0-9 :._-]", "");
+        throw new IOException("ADB did not provide a unique control port for owned socket; response="
+                + clean.substring(0, Math.min(100, clean.length()))
+                + " matchingOwnedForwards=" + matches.size());
     }
 
     static List<Integer> ownedForwardPorts(String listing, String serial, String remoteSocket) {
