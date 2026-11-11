@@ -278,7 +278,21 @@ public class InitializeRoutine extends DelayedTask {
 						EMULATOR_NUMBER, serial, inspection, lastVerifiedStartupState),
 				() -> emuManager.captureScreen(EMULATOR_NUMBER),
 				this::logWarning,
-				this::sleepTask);
+				this::sleepTask,
+				(attempt, failure) -> {
+					checkPreemption();
+					emuManager.invalidateAllCaches(EMULATOR_NUMBER);
+					if (emuManager.isRunning(EMULATOR_NUMBER)) {
+						logWarning("Emulator process exists but ADB is offline; restarting ADB bridge once.");
+						emuManager.restartAdbServer();
+					} else {
+						logWarning("Emulator no longer running after ADB failure; requesting one restart.");
+						isStarted = false;
+						emuManager.launchEmulator(EMULATOR_NUMBER);
+						isStarted = true;
+					}
+					checkPreemption();
+				});
 		lastStartupFrame = frame;
 		return frame;
 	}
