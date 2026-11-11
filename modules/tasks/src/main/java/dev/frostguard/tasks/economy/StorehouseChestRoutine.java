@@ -26,6 +26,7 @@ import dev.frostguard.engine.schedule.LaunchPoint;
 import dev.frostguard.tasks.diagnostics.TaskDiagnosticSnapshots;
 import dev.frostguard.engine.nav.SidebarDestination;
 import dev.frostguard.engine.nav.SearchConfigConstants;
+import dev.frostguard.engine.nav.CommonOCRSettings;
 import dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig;
 import dev.frostguard.tasks.diagnostics.TaskControlSignals;
 
@@ -157,21 +158,19 @@ public class StorehouseChestRoutine extends DelayedTask {
             return false;
         }
 
-        // The Research Center centers the city with a visible part of the Storehouse at the left.
-        // Selecting that stable visible area avoids a momentum-sensitive map pan.
-        tapInside(STOREHOUSE_VISIBLE_BUILDING_AREA.topLeft(), STOREHOUSE_VISIBLE_BUILDING_AREA.bottomRight());
-        sleepTask(STOREHOUSE_SELECTION_SETTLE_MILLIS);
+        // A previous selection can survive navigation. First inspect the
+        // current screen; never tap a different building when Storehouse is
+        // already visibly selected.
+        boolean alreadySelected = isStorehouseSelected();
+        if (!alreadySelected) {
+            // Legacy city coordinate is only a candidate: verify the exact
+            // selected building after tapping or decline all reward actions.
+            tapInside(STOREHOUSE_VISIBLE_BUILDING_AREA.topLeft(), STOREHOUSE_VISIBLE_BUILDING_AREA.bottomRight());
+            sleepTask(STOREHOUSE_SELECTION_SETTLE_MILLIS);
+        }
 
-        ImageSearchResultData selected = templateSearchHelper.locatePattern(
-                TemplatesEnum.STOREHOUSE_SELECTED_CURRENT,
-                SearchConfig.builder()
-                        .withArea(STOREHOUSE_TITLE_AREA)
-                        .withThreshold(85)
-                        .withMaxAttempts(3)
-                        .withDelay(300L)
-                        .build());
-        if (selected.isFound()) {
-            logInfo("Storehouse selected and verified by its title anchor.");
+        if (alreadySelected || isStorehouseSelected()) {
+            logInfo("Storehouse selected and verified by its title (template or confirmed OCR).");
             // The reward bubbles are only actionable after Android Back closes the
             // building's Details/Upgrade selection controls.
             pressBack();
@@ -182,6 +181,50 @@ public class StorehouseChestRoutine extends DelayedTask {
 
         logWarning("Storehouse title anchor was not detected after the direct selection.");
         return false;
+    }
+
+    /**
+     * Current account captures show a visible Storehouse title even when the
+     * older selectedCurrent template misses because of lighting/season.
+     * Require the full building name on two fresh frames; single OCR noise
+     * must never authorize reward collection or pressing Back.
+     */
+    private boolean isStorehouseSelected() {
+        ImageSearchResultData template = templateSearchHelper.locatePattern(
+                TemplatesEnum.STOREHOUSE_SELECTED_CURRENT,
+                SearchConfig.builder()
+                        .withArea(STOREHOUSE_TITLE_AREA)
+                        .withThreshold(85)
+                        .withMaxAttempts(2)
+                        .withDelay(250L)
+                        .build());
+        if (template.isFound()) return true;
+        try {
+            String first = emuManager.readText(EMULATOR_NUMBER,
+                    STOREHOUSE_TITLE_AREA.topLeft(), STOREHOUSE_TITLE_AREA.bottomRight(),
+                    CommonOCRSettings.SHOP_TAB_TEXT_SETTINGS, false);
+            if (!isStorehouseTitle(first)) return false;
+            sleepTask(200);
+            String second = emuManager.readText(EMULATOR_NUMBER,
+                    STOREHOUSE_TITLE_AREA.topLeft(), STOREHOUSE_TITLE_AREA.bottomRight(),
+                    CommonOCRSettings.SHOP_TAB_TEXT_SETTINGS, false);
+            if (isStorehouseTitle(second)) {
+                logInfo("Storehouse title confirmed via independent OCR frames.");
+                return true;
+            }
+        } catch (Exception error) {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new java.util.concurrent.CancellationException("Storehouse OCR interrupted");
+            }
+            logDebug("Storehouse title OCR unavailable: " + error.getClass().getSimpleName());
+        }
+        return false;
+    }
+
+    static boolean isStorehouseTitle(String text) {
+        if (text == null) return false;
+        String normalized = text.toLowerCase(Locale.ROOT).replaceAll("[^a-z]", "");
+        return normalized.contains("storehouse");
     }
 
     private final class StorehouseActions implements StorehouseVisitFlow.Actions<StorehouseBubbleDetector.Candidate> {
