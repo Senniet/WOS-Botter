@@ -2,6 +2,8 @@ package dev.frostguard.engine.emulator;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.net.InetAddress;
+import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -66,9 +68,7 @@ public final class AndroidTouchSession implements AutoCloseable {
             uploaded = true;
             run("push", localBinary.toString(), remote + ".jar");
             run("push", localScript.toString(), remote + ".sh");
-            String forwarded = run("forward", "tcp:0", remoteSocket).trim();
-            port = resolveOwnedForwardPort(forwarded, serial, remoteSocket,
-                    () -> run("forward", "--list"));
+            port = establishForward();
             if (port < 1 || port > 65535) throw new IOException("ADB control port out of range");
             checkCancellation();
             server = command("exec-out", "sh", remote + ".sh")
@@ -79,6 +79,50 @@ public final class AndroidTouchSession implements AutoCloseable {
             deleteLocal(localBinary);
             if (localScript != null) deleteLocal(localScript);
         }
+    }
+
+    /**
+     * Android's bundled ADB may accept tcp:0 without allocating a forward.
+     * An explicitly chosen local port is a bounded fallback. --no-rebind
+     * prevents hijacking another process's forwarding; verify ownership
+     * against the returned forward listing before opening the control socket.
+     */
+    private int establishForward() throws IOException, InterruptedException {
+        IOException autoFailure;
+        try {
+            String response = run("forward", "tcp:0", remoteSocket);
+            return resolveOwnedForwardPort(response, serial, remoteSocket,
+                    () -> run("forward", "--list"));
+        } catch (IOException failure) {
+            autoFailure = failure;
+        }
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            checkCancellation();
+            int candidate;
+            try (ServerSocket reservation = new ServerSocket(0, 1,
+                    InetAddress.getLoopbackAddress())) {
+                candidate = reservation.getLocalPort();
+            }
+            try {
+                run("forward", "--no-rebind", "tcp:" + candidate, remoteSocket);
+                List<Integer> verified = ownedForwardPorts(
+                        run("forward", "--list"), serial, remoteSocket);
+                if (verified.contains(candidate)) return candidate;
+                // A successful exit status with no listed port is not proof of
+                // forwarding. Don't interact with an unverified endpoint.
+            } catch (IOException error) {
+                autoFailure.addSuppressed(error);
+            }
+            // Remove only a port whose mapping is confirmed as ours.
+            try {
+                if (ownedForwardPorts(run("forward", "--list"), serial, remoteSocket)
+                        .contains(candidate)) {
+                    run("forward", "--remove", "tcp:" + candidate);
+                }
+            } catch (IOException ignored) { }
+        }
+        throw new IOException("ADB failed to establish a verified owned control forward "
+                + "(tcp:0 and 3 explicit ports)", autoFailure);
     }
 
     private void connect() throws IOException, InterruptedException {
@@ -237,8 +281,11 @@ public final class AndroidTouchSession implements AutoCloseable {
                 }
             } catch (IOException ignored) { }
             catch (InterruptedException error) { interrupted = true; Thread.interrupted(); }
-            if (port > 0 && port <= 65535) try { run("forward", "--remove", "tcp:" + port); }
-            catch (IOException ignored) { } catch (InterruptedException error) { interrupted = true; Thread.interrupted(); }
+            if (port > 0 && port <= 65535) try {
+                if (ownedForwardPorts(run("forward", "--list"), serial, remoteSocket).contains(port)) {
+                    run("forward", "--remove", "tcp:" + port);
+                }
+            } catch (IOException ignored) { } catch (InterruptedException error) { interrupted = true; Thread.interrupted(); }
         } finally {
             if (server != null && server.isAlive()) server.destroyForcibly();
             if (interrupted) Thread.currentThread().interrupt();
