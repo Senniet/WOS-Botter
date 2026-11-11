@@ -33,6 +33,34 @@ class BlueLabelActionDetectorTest {
         assertFalse(BlueLabelActionDetector.detect(panel(false), ENACT).isFound());
     }
 
+    @Test void recognisesExplorationAndFishingBlueLabelsInTheirOwnRegions() {
+        BlueLabelActionDetector.Region exploration =
+                new BlueLabelActionDetector.Region(214, 1139, 507, 1219, 292, 1156, 435, 1196);
+        BlueLabelActionDetector.Region fishing =
+                new BlueLabelActionDetector.Region(376, 1148, 659, 1233, 432, 1160, 597, 1205);
+        assertTrue(BlueLabelActionDetector.detect(actionFrame(exploration, true), exploration).isFound());
+        assertTrue(BlueLabelActionDetector.detect(actionFrame(fishing, true), fishing).isFound());
+        assertFalse(BlueLabelActionDetector.detect(actionFrame(fishing, false), fishing).isFound());
+    }
+
+    private static BufferedImage actionFrame(BlueLabelActionDetector.Region region, boolean label) {
+        var image = new BufferedImage(720, 1280, BufferedImage.TYPE_INT_RGB);
+        Graphics2D graphics = image.createGraphics();
+        graphics.setColor(new Color(5, 42, 70));
+        graphics.fillRect(0, 0, 720, 1280);
+        graphics.setColor(new Color(79, 165, 252));
+        graphics.fillRect(region.left(), region.top(),
+                region.right() - region.left(), region.bottom() - region.top());
+        if (label) {
+            graphics.setColor(Color.WHITE);
+            int width = region.labelRight() - region.labelLeft();
+            graphics.fillRect(region.labelLeft() + width / 4, region.labelTop() + 4,
+                    width / 2, Math.max(10, (region.labelBottom() - region.labelTop()) / 3));
+        }
+        graphics.dispose();
+        return image;
+    }
+
     @Test void refusesWrongScreenGeometry() {
         assertFalse(BlueLabelActionDetector.detect(
                 new BufferedImage(1080, 1920, BufferedImage.TYPE_INT_RGB), ENACT).isFound());

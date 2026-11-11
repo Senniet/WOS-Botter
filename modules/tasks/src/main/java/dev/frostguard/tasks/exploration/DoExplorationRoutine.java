@@ -8,6 +8,10 @@ import dev.frostguard.api.domain.ImageSearchResultData;
 import dev.frostguard.api.domain.PointData;
 import dev.frostguard.api.domain.SizeData;
 import dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig;
+import dev.frostguard.engine.helper.BlueLabelActionDetector;
+import dev.frostguard.engine.helper.RecognitionConsensus;
+import dev.frostguard.vision.convert.ImageConverter;
+import dev.frostguard.tasks.diagnostics.TaskDiagnosticSnapshots;
 import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.schedule.LaunchPoint;
 import dev.frostguard.engine.service.StatisticsService;
@@ -15,6 +19,9 @@ import dev.frostguard.engine.service.StatisticsService;
 import java.time.LocalDateTime;
 
 public class DoExplorationRoutine extends DelayedTask {
+
+    private static final BlueLabelActionDetector.Region EXPLORE_BLUE_BUTTON =
+            new BlueLabelActionDetector.Region(214, 1139, 507, 1219, 292, 1156, 435, 1196);
 
     private static final PointData EXPLORATION_ENTRY_TOP_LEFT = new PointData(40, 1190);
     private static final PointData EXPLORATION_ENTRY_BOTTOM_RIGHT = new PointData(100, 1250);
@@ -73,9 +80,30 @@ public class DoExplorationRoutine extends DelayedTask {
     }
 
     private ImageSearchResultData detectExploreButton() {
-        return templateSearchHelper.locatePattern(
+        ImageSearchResultData existing = templateSearchHelper.locatePattern(
                 TemplatesEnum.EXPLORATION_BUTTON,
                 SearchConfig.builder().withMaxAttempts(3).withDelay(1000L).build());
+        if (existing.isFound()) return existing;
+        // Current 2026 UI uses a different rendering from explore.png.
+        // The screenshot-grounded fallback requires the right blue button and
+        // its light label on two independent normalized frames.
+        var first = BlueLabelActionDetector.detect(
+                ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER)), EXPLORE_BLUE_BUTTON);
+        if (!first.isFound()) {
+            logWarning("Exploration button not matched; " + TaskDiagnosticSnapshots.capture(
+                    emuManager, EMULATOR_NUMBER, "exploration", "explore-button-missing"));
+            return ImageSearchResultData.miss();
+        }
+        sleepTask(250);
+        var second = BlueLabelActionDetector.detect(
+                ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER)), EXPLORE_BLUE_BUTTON);
+        if (RecognitionConsensus.agrees(first, second, 8)) {
+            logInfo("Explore action verified by two-frame blue-button geometry");
+            return second;
+        }
+        logWarning("Exploration blue action not confirmed in two frames; "
+                + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER, "exploration", "explore-unconfirmed"));
+        return ImageSearchResultData.miss();
     }
 
     private void tapExploreButton(ImageSearchResultData exploreButton) {

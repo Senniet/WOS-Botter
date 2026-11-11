@@ -6,6 +6,9 @@ import dev.frostguard.api.configs.*;
 import dev.frostguard.api.domain.*;
 import dev.frostguard.engine.emulator.AndroidFrameStream;
 import dev.frostguard.engine.emulator.AndroidTouchSession;
+import dev.frostguard.engine.helper.BlueLabelActionDetector;
+import dev.frostguard.engine.helper.RecognitionConsensus;
+import dev.frostguard.vision.convert.ImageConverter;
 import dev.frostguard.engine.schedule.LaunchPoint;
 import dev.frostguard.engine.nav.CommonGameAreas;
 import dev.frostguard.engine.nav.CommonOCRSettings;
@@ -19,6 +22,8 @@ import dev.frostguard.vision.ocr.OcrEngine;
 /** Free Winter casts only; unknown screens never authorize another cast or premium spending. */
 public class FishingMinigameRoutine extends DelayedTask {
     // Animated shortcut art is weaker evidence than the separately verified cast controls.
+    private static final BlueLabelActionDetector.Region ICE_FISHING_BLUE_BUTTON =
+            new BlueLabelActionDetector.Region(376, 1148, 659, 1233, 432, 1160, 597, 1205);
     static final int HOME_ENTRY_MATCH_THRESHOLD = 85;
     private static final long BAIT_CONFIRMATION_TIMEOUT_NANOS = 4_000_000_000L;
     private static final Pattern BAIT = Pattern.compile("(\\d+)\\s*/\\s*(\\d+)");
@@ -111,11 +116,11 @@ public class FishingMinigameRoutine extends DelayedTask {
                     }
                     if (!resumed) {
                         // The common event title also appears on the remembered Club/leaderboard tabs.
-                        if (!find(TemplatesEnum.FISHING_ICE_BUTTON, CommonGameAreas.FISHING_ICE_CAST_BUTTON).isFound()) {
+                        if (!findIceFishingAction().isFound()) {
                             checkPreemption();
                             requireRecentObservation();
                             tapInside(CommonGameAreas.FISHING_TOURNAMENT_TAB);
-                            if (!waitFor(TemplatesEnum.FISHING_ICE_BUTTON, CommonGameAreas.FISHING_ICE_CAST_BUTTON, 5000).isFound()) {
+                            if (!waitForIceFishingAction(5000).isFound()) {
                                 deferUnplayable("Fishing overview controls unverified; no bait selected"); return;
                             }
                         }
@@ -235,7 +240,7 @@ public class FishingMinigameRoutine extends DelayedTask {
             while (System.nanoTime() < deadline) {
                 freshFrame();
                 if (!find(TemplatesEnum.FISHING_TITLE, AreaData.of(85, 0, 500, 80)).isFound()
-                        || !find(TemplatesEnum.FISHING_ICE_BUTTON, CommonGameAreas.FISHING_ICE_CAST_BUTTON).isFound()) return -1;
+                        || !findIceFishingAction().isFound()) return -1;
                 String text;
                 try {
                     text = ocr.recognize(observation.image(), region);
@@ -264,7 +269,7 @@ public class FishingMinigameRoutine extends DelayedTask {
     }
 
     private boolean startFreeCast() {
-        var ice = waitFor(TemplatesEnum.FISHING_ICE_BUTTON, AreaData.of(370, 1140, 675, 1240), 5000);
+        var ice = waitForIceFishingAction(5000);
         if (!ice.isFound()) return false;
         safeTap(ice);
         long deadline = System.nanoTime() + 5_000_000_000L;
@@ -305,7 +310,7 @@ public class FishingMinigameRoutine extends DelayedTask {
             boolean missingRequired = false;
             for (var item : FishingLoadoutPolicy.Item.values()) {
                 freshFrame();
-                if (!find(TemplatesEnum.FISHING_ICE_BUTTON, AreaData.of(370, 1140, 675, 1240)).isFound()
+                if (!findIceFishingAction().isFound()
                         || !find(TemplatesEnum.FISHING_TITLE, AreaData.of(85, 0, 500, 80)).isFound()) return false;
                 boolean selected = FishingLoadoutPolicy.selected(observation.image(), item);
                 boolean wanted = FishingLoadoutPolicy.wants(item, useLantern, useStabilizer, specialCastsUsed, maxSpecialCasts);
@@ -590,6 +595,36 @@ public class FishingMinigameRoutine extends DelayedTask {
     private ImageSearchResultData find(TemplatesEnum template, AreaData area) {
         int threshold = template == TemplatesEnum.FISHING_HOME_ICON ? HOME_ENTRY_MATCH_THRESHOLD : 90;
         return OpenCvPatternLocator.locatePattern(observation.image(), template.getTemplate(), area.topLeft(), area.bottomRight(), threshold);
+    }
+
+    /** Only detect this button on the independently identified Fishing overview.
+     * Never accept a similarly coloured control from a different event tab.
+     */
+    private ImageSearchResultData findIceFishingAction() {
+        var template = find(TemplatesEnum.FISHING_ICE_BUTTON, CommonGameAreas.FISHING_ICE_CAST_BUTTON);
+        if (template.isFound()) return template;
+        if (!find(TemplatesEnum.FISHING_TITLE, AreaData.of(85, 0, 500, 80)).isFound()) {
+            return ImageSearchResultData.miss();
+        }
+        return BlueLabelActionDetector.detect(
+                ImageConverter.toBufferedImage(observation.image()), ICE_FISHING_BLUE_BUTTON);
+    }
+
+    private ImageSearchResultData waitForIceFishingAction(long timeoutMs) {
+        long deadline = System.nanoTime() + timeoutMs * 1_000_000L;
+        while (System.nanoTime() < deadline) {
+            freshFrame();
+            var first = findIceFishingAction();
+            if (!first.isFound()) continue;
+            // A fresh frame is required before using fallback evidence as an
+            // actionable control. Template matches are also confirmed here.
+            freshFrame();
+            var second = findIceFishingAction();
+            if (RecognitionConsensus.agrees(first, second, 18)) {
+                return second;
+            }
+        }
+        return ImageSearchResultData.miss();
     }
 
     private ImageSearchResultData waitFor(TemplatesEnum template, AreaData area, long timeoutMs) {
