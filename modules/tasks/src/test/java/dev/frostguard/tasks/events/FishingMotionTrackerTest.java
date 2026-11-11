@@ -43,6 +43,33 @@ class FishingMotionTrackerTest {
     }
 
     @Test
+    void overlappingDuplicateDetectionsDoNotExhaustTrackingSlots() {
+        var tracker = new FishingMotionTracker();
+        var duplicates = Collections.nCopies(200, AreaData.of(100, 300, 140, 320));
+        for (int i = 0; i < 10; i++) {
+            assertEquals(1, tracker.update(duplicates, 1000 + i * 50, 0).size());
+        }
+    }
+
+    @Test
+    void foregroundObservationsReplaceStalePredictionsWhenTrackerIsFull() {
+        var tracker = new FishingMotionTracker();
+        var initial = new java.util.ArrayList<AreaData>();
+        for (int i = 0; i < 256; i++) {
+            int x = 10 + (i % 16) * 42;
+            int y = 10 + (i / 16) * 48;
+            initial.add(AreaData.of(x, y, x + 12, y + 12));
+        }
+        assertEquals(256, tracker.update(initial, 1000, 0).size());
+        // All the prior objects are unmatched, but still within the prediction TTL.
+        // New current objects should never crash the game due to old predictions.
+        var newObservation = List.of(AreaData.of(700, 900, 715, 915));
+        var result = tracker.update(newObservation, 1050, 0);
+        assertEquals(256, result.size());
+        assertTrue(result.stream().anyMatch(f -> f.x() > 700 && f.y() >= 900));
+    }
+
+    @Test
     void expiresOldTracksAndKeepsFreshUnmatchedThreatsBriefly() {
         var tracker = new FishingMotionTracker();
         assertEquals(1, tracker.update(List.of(AreaData.of(100, 300, 140, 320)), 1000, 0).size());
