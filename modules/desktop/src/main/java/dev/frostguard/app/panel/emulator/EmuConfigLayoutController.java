@@ -460,7 +460,10 @@ public class EmuConfigLayoutController {
         if (!Files.isDirectory(logs)) throw new IOException("No diagnostics folder available");
         Path normalized = logs.toRealPath();
         Path output = destination.toAbsolutePath().normalize();
-        if (output.startsWith(normalized)) {
+        // Windows temporary paths and junctions may differ between absolute and
+        // real forms. Resolve the existing parent of the ZIP before comparing.
+        Path outputParent = output.getParent();
+        if (outputParent == null || outputParent.toRealPath().startsWith(normalized)) {
             throw new IOException("Choose a destination outside the log directory");
         }
         try (var candidates = Files.walk(normalized, 5)) {
