@@ -84,15 +84,22 @@ public class TemplateSearchHelper {
         Objects.requireNonNull(preferred, "preferred");
         Objects.requireNonNull(cfg, "cfg");
         ImageSearchResultData primary = locatePattern(preferred, cfg);
-        if (confirmedAction(preferred, cfg, primary)) return primary;
-        if (alternatives == null) return ImageSearchResultData.miss();
-        for (TemplatesEnum alternative : alternatives) {
-            if (alternative == null || alternative == preferred) continue;
-            preemptionHook.run();
-            ImageSearchResultData first = doSearch(alternative, cfg);
-            if (confirmedAction(alternative, cfg, first)) {
-                dbg("Action " + preferred.name() + " confirmed with " + alternative.name());
-                return first;
+        if (confirmedAction(preferred, cfg, primary, false)) return primary;
+        if (alternatives != null) {
+            for (TemplatesEnum alternative : alternatives) {
+                if (alternative == null || alternative == preferred || !alternative.existsAtPath()) continue;
+                preemptionHook.run();
+                ImageSearchResultData exact = doSearch(alternative, cfg);
+                if (confirmedAction(alternative, cfg, exact, false)) {
+                    dbg("Action " + preferred.name() + " confirmed via " + alternative.name() + " exact");
+                    return exact;
+                }
+                // The same button artwork often changes size under BlueStacks scaling.
+                ImageSearchResultData scaled = doSearchMultiScale(alternative, cfg);
+                if (confirmedAction(alternative, cfg, scaled, true)) {
+                    dbg("Action " + preferred.name() + " confirmed via " + alternative.name() + " multiscale");
+                    return scaled;
+                }
             }
         }
         recordMiss(preferred, cfg, primary);
@@ -100,11 +107,12 @@ public class TemplateSearchHelper {
     }
 
     private boolean confirmedAction(TemplatesEnum template, SearchConfig cfg,
-                                    ImageSearchResultData first) {
+                                    ImageSearchResultData first, boolean multiScale) {
         if (first == null || !first.isFound() || first.getPoint() == null) return false;
         sleepWithPreemption(180);
         preemptionHook.run();
-        ImageSearchResultData second = doSearch(template, cfg);
+        ImageSearchResultData second = multiScale
+                ? doSearchMultiScale(template, cfg) : doSearch(template, cfg);
         boolean agreed = RecognitionConsensus.agrees(first, second, FALLBACK_CONFIRMATION_DISTANCE);
         if (!agreed) dbg("Action " + template.name() + " failed two-frame confirmation");
         return agreed;

@@ -408,7 +408,8 @@ private RallyLaunchResult launchSingleRallyFlow(int polarLevel, boolean useFlag,
             String snapshot = TaskDiagnosticSnapshots.capture(
                     emuManager, EMULATOR_NUMBER, "polarterror", "deploy-not-found");
             String detail = "Deploy button not recognized after formation setup (Intel and shared rally templates checked); "
-                    + snapshot + ". Check troops, march slots, overlays, or an unexpected formation screen";
+                    + snapshot + ". Enable Diagnostic Screenshots in Emulator Settings if disabled;"
+                    + " check troops, march slots, overlays, or an unexpected formation screen";
             logWarning(routineLogPolarTerrorHuntingLine("Deployment decision: " + detail));
             return fail(RallyLaunchOutcome.DEPLOY_NOT_FOUND, detail);
         }
