@@ -390,7 +390,12 @@ private RallyLaunchResult launchSingleRallyFlow(int polarLevel, boolean useFlag,
             logInfo(routineLogPolarTerrorHuntingLine("Formation setup: flag #" + flagNumber + " confirmed"));
         } else {
             logInfo(routineLogPolarTerrorHuntingLine("Formation setup: no flag configured, using Equalize"));
-            deploymentHelper.tapEqualize();
+            if (!deploymentHelper.tapEqualize()) {
+                String snapshot = TaskDiagnosticSnapshots.capture(
+                        emuManager, EMULATOR_NUMBER, "polarterror", "equalize-not-found");
+                return fail(RallyLaunchOutcome.DEPLOY_NOT_FOUND,
+                        "Formation screen not confirmed: Equalize button missing; " + snapshot);
+            }
             sleepTask(500);
         }
 
@@ -405,9 +410,11 @@ private RallyLaunchResult launchSingleRallyFlow(int polarLevel, boolean useFlag,
 
         ImageSearchResultData deploy = findFormationDeployButton();
         if (!deploy.isFound()) {
+            String screenText = inspectFormationFooterText();
             String snapshot = TaskDiagnosticSnapshots.capture(
                     emuManager, EMULATOR_NUMBER, "polarterror", "deploy-not-found");
             String detail = "Deploy button not recognized after formation setup (Intel and shared rally templates checked); "
+                    + "footerText=" + screenText + "; "
                     + snapshot + ". Enable Diagnostic Screenshots in Emulator Settings if disabled;"
                     + " check troops, march slots, overlays, or an unexpected formation screen";
             logWarning(routineLogPolarTerrorHuntingLine("Deployment decision: " + detail));
@@ -496,6 +503,27 @@ private RallyLaunchResult launchSingleRallyFlow(int polarLevel, boolean useFlag,
         }
 
         return ok("Rally deployed and World anchor verified");
+    }
+
+/**
+ * Read-only diagnostic: OCR cannot establish a safe click coordinate. Keep
+ * the result bounded and never use its text to send a march automatically.
+ */
+private String inspectFormationFooterText() {
+        try {
+            String raw = emuManager.readText(EMULATOR_NUMBER,
+                    new PointData(60, 1160), new PointData(700, 1275),
+                    CommonOCRSettings.SHOP_TAB_TEXT_SETTINGS, false);
+            if (raw == null || raw.isBlank()) return "empty";
+            String clean = raw.replaceAll("[\r\n\t]+", " ")
+                    .replaceAll("[^a-zA-Z0-9 ?!.,:()/-]", "");
+            return "'" + clean.substring(0, Math.min(100, clean.length())) + "'";
+        } catch (Exception ex) {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new java.util.concurrent.CancellationException("Formation OCR interrupted");
+            }
+            return "unavailable(" + ex.getClass().getSimpleName() + ")";
+        }
     }
 
 /**
