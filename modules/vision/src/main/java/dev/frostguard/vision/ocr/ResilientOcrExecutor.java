@@ -109,6 +109,7 @@ public class ResilientOcrExecutor<R> {
         if (pauseMillis < 0) throw new IllegalArgumentException("pauseMillis must not be negative");
 
         String lastRaw = null;
+        String lastNonBlank = null;
         String lastFailure = null;
         boolean receivedText = false;
         for (int trial = 0; trial < maxAttempts; trial++) {
@@ -125,6 +126,7 @@ public class ResilientOcrExecutor<R> {
                 log.warn("OCR trial {} failed: {}", trial + 1, lastFailure);
             }
             if (lastRaw != null && !lastRaw.isBlank()) {
+                lastNonBlank = lastRaw;
                 receivedText = true;
                 if (acceptor.test(lastRaw)) {
                     R value = transformer.apply(lastRaw);
@@ -144,7 +146,10 @@ public class ResilientOcrExecutor<R> {
             }
         }
         Status status = receivedText ? Status.REJECTED : Status.FAILED;
-        return new RecognitionResult<>(status, null, lastRaw, maxAttempts, lastFailure);
+        log.warn("OCR not accepted: status={} attempts={} readableText={} transportFailure={}",
+                status, maxAttempts, receivedText,
+                lastFailure == null ? "none" : lastFailure);
+        return new RecognitionResult<>(status, null, lastNonBlank, maxAttempts, lastFailure);
     }
 
     private static void checkCancellation() {
