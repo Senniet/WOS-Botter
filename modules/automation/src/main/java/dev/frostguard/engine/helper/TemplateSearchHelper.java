@@ -73,6 +73,37 @@ public class TemplateSearchHelper {
         return retrySearch(tpl, cfg, false, true);
     }
 
+    /**
+     * Recognize a semantic action using several known visual variants. The
+     * preferred template uses the standard resilient matcher; alternatives
+     * need two independent agreeing frames before they may be tapped.
+     * Callers must choose variants for the SAME action and screen context.
+     */
+    public ImageSearchResultData locateAction(TemplatesEnum preferred, SearchConfig cfg,
+                                               TemplatesEnum... alternatives) {
+        ImageSearchResultData primary = locatePattern(preferred, cfg);
+        if (primary != null && primary.isFound()) return primary;
+        if (alternatives == null) return ImageSearchResultData.miss();
+        for (TemplatesEnum alternative : alternatives) {
+            if (alternative == null || alternative == preferred) continue;
+            preemptionHook.run();
+            ImageSearchResultData first = doSearch(alternative, cfg);
+            if (first == null || !first.isFound() || first.getPoint() == null) continue;
+            sleepWithPreemption(180);
+            preemptionHook.run();
+            ImageSearchResultData second = doSearch(alternative, cfg);
+            if (second != null && second.isFound() && second.getPoint() != null
+                    && first.getPoint().manhattanDistanceTo(second.getPoint()) <= FALLBACK_CONFIRMATION_DISTANCE) {
+                dbg("Action " + preferred.name() + " confirmed with alternate " + alternative.name()
+                        + " in two frames (" + score(first) + "/" + score(second) + ")");
+                return second;
+            }
+            dbg("Action " + preferred.name() + " alternate " + alternative.name()
+                    + " not confirmed in two frames");
+        }
+        return ImageSearchResultData.miss();
+    }
+
     // ── multi-match (colour) ─────────────────────────────────────────
 
     public List<ImageSearchResultData> locateAllPatterns(TemplatesEnum tpl, SearchConfig cfg) {

@@ -504,17 +504,10 @@ private RallyLaunchResult launchSingleRallyFlow(int polarLevel, boolean useFlag,
  * The post-tap flow independently verifies that the game returned to World.
  */
 private ImageSearchResultData findFormationDeployButton() {
-        ImageSearchResultData primary = templateSearchHelper.locatePattern(
-                TemplatesEnum.DEPLOY_BUTTON, SearchConfigConstants.SINGLE_WITH_RETRIES);
-        if (primary.isFound()) return primary;
-        ImageSearchResultData rally = templateSearchHelper.locatePattern(
-                TemplatesEnum.RALLY_DEPLOY_BUTTON, SearchConfigConstants.SINGLE_WITH_RETRIES);
-        if (rally.isFound()) {
-            logInfo(routineLogPolarTerrorHuntingLine(
-                    "Deploy recognized via shared rally template; score=" + rally.getMatchScore()));
-            return rally;
-        }
-        return primary;
+        return templateSearchHelper.locateAction(
+                TemplatesEnum.DEPLOY_BUTTON,
+                SearchConfigConstants.SINGLE_WITH_RETRIES,
+                TemplatesEnum.RALLY_DEPLOY_BUTTON);
     }
 
 // Backing out of the confirmation returns to the formation screen, from where one more back press
