@@ -193,7 +193,8 @@ public class FishingMinigameRoutine extends DelayedTask {
     static boolean isFishingStageUnverified(IllegalStateException error) {
         if (error == null || error.getMessage() == null) return false;
         String message = error.getMessage();
-        return message.startsWith("Go Fish resume action unverified")
+        return message.startsWith("Normal Cast transition unverified")
+                || message.startsWith("Go Fish resume action unverified")
                 || message.startsWith("Go Fish not stable across fresh frames")
                 || message.startsWith("Fishing title lost before resume tap")
                 || message.startsWith("Suspended Fishing title unverified")
@@ -294,32 +295,67 @@ public class FishingMinigameRoutine extends DelayedTask {
         var ice = waitForIceFishingAction(5000);
         if (!ice.isFound()) return false;
         safeTap(ice);
-        long deadline = System.nanoTime() + 5_000_000_000L;
+        long deadline = System.nanoTime() + 6_000_000_000L;
         while (System.nanoTime() < deadline) {
             freshFrame();
             var normal = normalCastControl(observation, loadoutHasItems, System::nanoTime);
             if (!normal.isFound()) continue;
-            safeTap(normal);
+            // Confirm the same cast control on a second *new* frame. Never substitute
+            // the orange 2x Power Cast button or retry after an uncertain tap.
+            freshFrame();
+            var confirmed = normalCastControl(observation, loadoutHasItems, System::nanoTime);
+            if (!RecognitionConsensus.agrees(normal, confirmed, 18)) continue;
+            safeTap(confirmed);
             if (loadoutHasItems) specialCastsUsed++;
-            logInfo("Started one verified Normal Cast; special items=" + loadoutHasItems + " boosted casts=" + specialCastsUsed + "/" + maxSpecialCasts);
-            return true;
+            logInfo("Selected verified Normal Cast; waiting for Fishing HUD, special items="
+                    + loadoutHasItems + " boosted casts=" + specialCastsUsed + "/" + maxSpecialCasts);
+            // Once the tap is issued, never send a second cast on an uncertain transition.
+            long hudDeadline = System.nanoTime() + 7_000_000_000L;
+            while (System.nanoTime() < hudDeadline) {
+                freshFrame();
+                if (find(TemplatesEnum.FISHING_PAUSE, AreaData.of(645, 0, 720, 85)).isFound()) {
+                    logInfo("Normal Cast confirmed: active Fishing HUD visible");
+                    return true;
+                }
+            }
+            logWarning("Normal Cast tap sent but Fishing HUD unverified; no second cast authorized; "
+                    + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+                            "fishing", "normal-cast-transition-unverified"));
+            throw new IllegalStateException("Normal Cast transition unverified; no additional bait authorized");
         }
+        logWarning("Normal Cast button unverified; "
+                + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+                        "fishing", "normal-cast-control-unverified"));
         return false;
     }
 
     static ImageSearchResultData normalCastControl(AndroidFrameStream.Frame frame, boolean hasItems,
             java.util.function.LongSupplier clock) {
         if (frame == null) return ImageSearchResultData.miss();
-        var normal = OpenCvPatternLocator.locatePattern(frame.image(), TemplatesEnum.FISHING_NORMAL_CAST.getTemplate(),
-                AreaData.of(50, 760, 360, 885).topLeft(), AreaData.of(50, 760, 360, 885).bottomRight(), 90);
+        if (clock.getAsLong() - frame.receivedNanos() > 250_000_000L) return ImageSearchResultData.miss();
+        return normalCastControl(frame.image(), hasItems);
+    }
+
+    static ImageSearchResultData normalCastControl(dev.frostguard.api.domain.RawImageData image, boolean hasItems) {
+        var area = AreaData.of(50, 760, 360, 885);
+        var normal = OpenCvPatternLocator.locatePattern(image,
+                TemplatesEnum.FISHING_NORMAL_CAST_CURRENT.getTemplate(),
+                area.topLeft(), area.bottomRight(), 90);
+        if (!normal.isFound()) normal = OpenCvPatternLocator.locatePattern(image,
+                TemplatesEnum.FISHING_NORMAL_CAST.getTemplate(),
+                area.topLeft(), area.bottomRight(), 90);
         if (!normal.isFound()) return normal;
-        // A selected loadout is independently verified on the overview before opening this dialog.
-        if (!hasItems && !OpenCvPatternLocator.locatePattern(frame.image(), TemplatesEnum.FISHING_NO_SPECIAL_ITEM.getTemplate(),
-                AreaData.of(100, 580, 650, 730).topLeft(), AreaData.of(100, 580, 650, 730).bottomRight(), 90).isFound()) {
-            return ImageSearchResultData.miss();
+        if (!hasItems) {
+            var items = AreaData.of(100, 580, 650, 730);
+            var absent = OpenCvPatternLocator.locatePattern(image,
+                    TemplatesEnum.FISHING_NO_SPECIAL_ITEM_CURRENT.getTemplate(),
+                    items.topLeft(), items.bottomRight(), 90);
+            if (!absent.isFound()) absent = OpenCvPatternLocator.locatePattern(image,
+                    TemplatesEnum.FISHING_NO_SPECIAL_ITEM.getTemplate(),
+                    items.topLeft(), items.bottomRight(), 90);
+            if (!absent.isFound()) return ImageSearchResultData.miss();
         }
-        // Both matches can outlive the input freshness budget. Poll another frame, never tap that old result.
-        return clock.getAsLong() - frame.receivedNanos() > 250_000_000L ? ImageSearchResultData.miss() : normal;
+        return normal;
     }
 
     private boolean loadoutHasItems;
@@ -406,6 +442,7 @@ public class FishingMinigameRoutine extends DelayedTask {
         int previousHookY = 0;
         double hookVy = 0, latency = 150;
         int responseFailures = 0;
+        int continuationFrames = 0, continuationTaps = 0;
         contactCalibrated = false;
         restartRequested = false;
         boolean returning = false;
@@ -419,6 +456,25 @@ public class FishingMinigameRoutine extends DelayedTask {
                 if (!find(TemplatesEnum.FISHING_PAUSE, AreaData.of(645, 0, 720, 85)).isFound()) {
                     realtimeInput.endSteering();
                     contactCalibrated = false;
+                    // The current Fishing event presents a character dialogue after a round,
+                    // with the explicit instruction "Tap anywhere to continue". This is not
+                    // a Haul button: a stale result detector will wait forever on that screen.
+                    // Require two fresh confirmations, then tap the inert lower centre once.
+                    if (fishingContinueOverlay(observation.image())) {
+                        continuationFrames++;
+                        if (continuationFrames >= 2 && continuationTaps < 4) {
+                            checkPreemption();
+                            requireRecentObservation();
+                            tapInside(AreaData.of(335, 970, 385, 1010));
+                            continuationTaps++;
+                            continuationFrames = 0;
+                            logInfo("Verified Fishing dialogue continuation " + continuationTaps + "/4; no bait selected");
+                            freshFrame();
+                            nextResultCheck = 0;
+                        }
+                        continue;
+                    }
+                    continuationFrames = 0;
                     if (System.nanoTime() >= nextResultCheck) {
                         nextResultCheck = System.nanoTime() + 500_000_000L;
                         if (exitVerifiedHaul()) return depth.sufficientDescent()
@@ -553,6 +609,13 @@ public class FishingMinigameRoutine extends DelayedTask {
             public void tap(AreaData area) { tapInside(area); }
             public void checkCancellation() { checkPreemption(); }
         };
+    }
+
+    static boolean fishingContinueOverlay(dev.frostguard.api.domain.RawImageData image) {
+        var area = AreaData.of(155, 895, 565, 985);
+        return OpenCvPatternLocator.locatePattern(image,
+                TemplatesEnum.FISHING_TAP_ANYWHERE_CONTINUE_CURRENT.getTemplate(),
+                area.topLeft(), area.bottomRight(), 90).isFound();
     }
 
     private boolean exitVerifiedHaul() {

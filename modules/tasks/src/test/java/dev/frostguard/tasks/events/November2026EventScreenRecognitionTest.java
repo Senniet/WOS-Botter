@@ -19,6 +19,24 @@ import static org.junit.jupiter.api.Assertions.*;
 class November2026EventScreenRecognitionTest {
     @BeforeAll static void loadCv() throws Exception { OpenCvPatternLocator.loadNativeLibrary(); }
 
+    @Test void currentPowerCastDialogLocatesNormalAndUnselectedItems() throws Exception {
+        var screen = raw(image("/fishing/power-cast-november.png"));
+        var normal = FishingMinigameRoutine.normalCastControl(screen, false);
+        assertTrue(normal.isFound(), "Current Normal Cast art and no-special-items text should be recognized");
+        assertTrue(normal.getHitX() < 350, "Must never target orange 2x Power Cast");
+        assertFalse(FishingMinigameRoutine.normalCastControl(
+                raw(image("/fishing/event-current.png")), false).isFound());
+    }
+
+    @Test void fishingDialogueRequiresTheVisibleContinueInstruction() throws Exception {
+        assertTrue(FishingMinigameRoutine.fishingContinueOverlay(
+                raw(image("/fishing/tap-anywhere-continue-november.png"))),
+                "The actual post-round Fishing dialogue should be actionable");
+        assertFalse(FishingMinigameRoutine.fishingContinueOverlay(
+                raw(image("/fishing/event-current.png"))),
+                "Ordinary Fishing overview must not be tapped blindly");
+    }
+
     @Test void currentlyVisibleFishingResumeIsOnlyAcceptedOnTheEventScreen() throws Exception {
         BufferedImage page = image("/fishing/go-fish-november-masked.png");
         var control = FishingRetryNavigator.goFishControl(raw(page));
