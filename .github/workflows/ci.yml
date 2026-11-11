@@ -30,6 +30,9 @@ jobs:
           # Binaries are ordinary blobs; do not fetch Git LFS.
           lfs: false
 
+      - name: Audit all recognition template resources
+        run: python3 tools/audit-template-assets.py --baseline tools/template-missing-baseline.json
+
       - name: Verify shipped binaries are real files
         run: build-support/verification/check_lfs_assets.sh
 
