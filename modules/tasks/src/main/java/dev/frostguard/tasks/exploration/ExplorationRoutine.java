@@ -10,6 +10,7 @@ import dev.frostguard.api.domain.PointData;
 import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.api.domain.SizeData;
 import dev.frostguard.engine.nav.SearchConfigConstants;
+import dev.frostguard.tasks.diagnostics.TaskDiagnosticSnapshots;
 import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.schedule.LaunchPoint;
 
@@ -20,7 +21,6 @@ public class ExplorationRoutine extends DelayedTask {
 	private static final PointData REWARD_POPUP_TOP_LEFT = new PointData(230, 890);
 	private static final PointData REWARD_POPUP_BOTTOM_RIGHT = new PointData(490, 960);
 	private static final int MAX_OPEN_ATTEMPTS = 2;
-	private static final int MAX_CLAIM_TAP_ATTEMPTS = 3;
 
 	public ExplorationRoutine(AccountDescriptor profile, TpDailyTaskEnum tpDailyTask) {
 		super(profile, tpDailyTask);
@@ -39,12 +39,19 @@ public class ExplorationRoutine extends DelayedTask {
 		if (claimedAnyReward) {
 			logInfo(routineLogExplorationLine("Exploration rewards claimed."));
 		} else if (!opened) {
-			logWarning(routineLogExplorationLine("Exploration screen could not be confirmed."));
+			logWarning(routineLogExplorationLine("Exploration screen could not be confirmed; " +
+					captureDiagnostic("screen-not-confirmed")));
 		} else {
-			logInfo(routineLogExplorationLine("No exploration rewards to claim."));
+			logInfo(routineLogExplorationLine("No confirmed exploration reward claim."));
 		}
 
-		rescheduleFromConfiguredOffset();
+		if (opened && (claimedAnyReward || locateDisabledClaimButton().isFound())) {
+			rescheduleFromConfiguredOffset();
+		} else {
+			// A missing button is not proof that a reward was collected or exhausted.
+			// Retry later instead of silently waiting for the normal reward interval.
+			reschedule(LocalDateTime.now().plusMinutes(10));
+		}
 		pressBack();
 		sleepTask(500);
 	}
@@ -73,7 +80,8 @@ public class ExplorationRoutine extends DelayedTask {
 			return true;
 		}
 
-		if (locateDisabledClaimButton().isFound()) {
+		if (locateDisabledClaimButton().isFound()
+				&& !locateEnabledClaimButton().isFound()) {
 			return true;
 		}
 
@@ -83,45 +91,46 @@ public class ExplorationRoutine extends DelayedTask {
 	}
 
 	private boolean claimAvailableRewards() {
-		for (int attempt = 1; attempt <= MAX_CLAIM_TAP_ATTEMPTS; attempt++) {
-			ImageSearchResultData claimResult = locateEnabledClaimButton();
-
-			if (!claimResult.isFound()) {
-				logDebug(routineLogExplorationLine("Enabled claim button not detected on attempt " + attempt + "."));
-				return attempt > 1;
+		ImageSearchResultData claim = locateEnabledClaimButton();
+		if (!claim.isFound()) {
+			if (!locateDisabledClaimButton().isFound()) {
+				logWarning(routineLogExplorationLine("Neither enabled nor disabled claim state found; "
+						+ captureDiagnostic("claim-state-unknown")));
 			}
-
-			logInfo(routineLogExplorationLine(String.format(
-					"Enabled claim button detected at %s with score %.2f. Pressing attempt %d/%d.",
-					claimResult.getPoint(), claimResult.getMatchPercentage(), attempt, MAX_CLAIM_TAP_ATTEMPTS)));
-			tapClaimButton(claimResult);
-			sleepTask(800);
-			dismissRewardPopup();
-
-			ImageSearchResultData disabledClaim = locateDisabledClaimButton();
-			if (disabledClaim.isFound()) {
-				logInfo(routineLogExplorationLine(String.format(
-						"Disabled claim button detected at %s with score %.2f; reward claim succeeded.",
-						disabledClaim.getPoint(), disabledClaim.getMatchPercentage())));
-				return true;
-			}
-
-			ImageSearchResultData remainingEnabledClaim = locateEnabledClaimButton();
-			if (!remainingEnabledClaim.isFound()) {
-				logInfo(routineLogExplorationLine(String.format(
-						"Claim button no longer visible after attempt %d; reward claim succeeded.",
-						attempt)));
-				return true;
-			}
-
-			logWarning(routineLogExplorationLine(String.format(
-					"Enabled claim button still detected after attempt %d; retrying claim tap.",
-					attempt)));
+			return false;
 		}
 
-		logWarning(routineLogExplorationLine(
-				"Enabled claim button remained after all claim attempts. Rescheduling normally."));
+		logInfo(routineLogExplorationLine(String.format(
+				"Enabled claim detected at %s (score %.2f). Tapping once and verifying state.",
+				claim.getPoint(), claim.getMatchPercentage())));
+		tapClaimButton(claim);
+		sleepTask(800);
+		if (locateDisabledClaimButton().isFound()
+				&& !locateEnabledClaimButton().isFound()) {
+			return true;
+		}
+
+		// The reward overlay often hides the claim controls. Preserve the existing
+		// dismissal step, but never infer success from a vanished button alone.
+		dismissRewardPopup();
+		boolean disabled = locateDisabledClaimButton().isFound();
+		boolean enabled = locateEnabledClaimButton().isFound();
+		if (claimConfirmed(disabled, enabled)) {
+			logInfo(routineLogExplorationLine("Claim verified by disabled claim control."));
+			return true;
+		}
+		logWarning(routineLogExplorationLine("Claim outcome unknown (disabled=" + disabled
+				+ ", enabled=" + enabled + "); no repeated tap; "
+				+ captureDiagnostic("claim-unverified")));
 		return false;
+	}
+
+	static boolean claimConfirmed(boolean disabledVisible, boolean enabledVisible) {
+		return disabledVisible && !enabledVisible;
+	}
+
+	private String captureDiagnostic(String kind) {
+		return TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER, "exploration-chest", kind);
 	}
 
 	private ImageSearchResultData locateEnabledClaimButton() {

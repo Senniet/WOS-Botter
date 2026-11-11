@@ -30,6 +30,7 @@ import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.schedule.LaunchPoint;
 import dev.frostguard.engine.nav.SidebarDestination;
 import dev.frostguard.engine.service.StatisticsService;
+import dev.frostguard.tasks.diagnostics.TaskDiagnosticSnapshots;
 import dev.frostguard.vision.color.GameColors;
 import dev.frostguard.vision.color.PixelStats;
 import dev.frostguard.vision.convert.GameTimeUtils;
@@ -255,22 +256,22 @@ public class ArenaRoutine extends DelayedTask {
         }
 
         if (!navigateToArena()) {
-            logWarning("Failed to navigate to arena.");
-            rescheduleWithActivationHour();
+            logWarning("Failed to navigate to arena; " + captureArenaDiagnostic("navigation-failed"));
+            reschedule(java.time.LocalDateTime.now().plusMinutes(10));
             return;
         }
 
         firstRun = detectFirstRun();
 
         if (!openChallengeList()) {
-            logWarning("Failed to open challenge list.");
-            rescheduleWithActivationHour();
+            logWarning("Failed to open challenge list; " + captureArenaDiagnostic("challenge-list-not-open"));
+            reschedule(java.time.LocalDateTime.now().plusMinutes(10));
             return;
         }
 
         if (!readInitialAttempts()) {
-            logWarning("Failed to read initial attempts.");
-            rescheduleWithActivationHour();
+            logWarning("Failed to read initial attempts; " + captureArenaDiagnostic("attempts-unreadable"));
+            reschedule(java.time.LocalDateTime.now().plusMinutes(10));
             return;
         }
 
@@ -313,6 +314,10 @@ public class ArenaRoutine extends DelayedTask {
         logDebug(String.format("Task running within window (current: %s UTC, window: %s - 23:55 UTC)",
                 nowUtc.format(DateTimeFormatter.ofPattern("HH:mm")), activationTime));
         return true;
+    }
+
+    private String captureArenaDiagnostic(String kind) {
+        return TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER, "arena", kind);
     }
 
     private boolean navigateToArena() {
@@ -361,7 +366,7 @@ public class ArenaRoutine extends DelayedTask {
         }
 
         if (!challengeResult.isFound()) {
-            logError("Challenge button not found.");
+            logError("Challenge button not found; " + captureArenaDiagnostic("challenge-button-missing"));
             return false;
         }
 
@@ -404,17 +409,15 @@ public class ArenaRoutine extends DelayedTask {
         }
 
         if (attemptsRead == null) {
-            logWarning("Attempt count OCR failed. Assuming 5 attempts and checking each challenge button before attacking.");
-            this.attempts = 5;
-            return true;
+            logWarning("Attempt count OCR failed. Remaining attempts are unknown; declining to attack.");
+            return false;
         }
 
         if (attemptsRead < 0 || attemptsRead > MAX_REASONABLE_CHALLENGE_ATTEMPTS) {
             logWarning(String.format(
-                    "Attempt count OCR produced implausible value %d. Assuming 5 attempts and checking each challenge button before attacking.",
+                    "Attempt count OCR produced implausible value %d. Declining to attack.",
                     attemptsRead));
-            this.attempts = 5;
-            return true;
+            return false;
         }
 
         this.attempts = attemptsRead;
@@ -461,7 +464,8 @@ public class ArenaRoutine extends DelayedTask {
                     continue;
                 }
 
-                logInfo(String.format("No eligible arena opponents after refresh checks. Stopping with %d attempts unused.", attempts));
+                logWarning(String.format("No eligible arena opponents after refresh checks. Stopping with %d attempts unused; %s",
+                        attempts, captureArenaDiagnostic("no-eligible-opponents")));
                 return;
             }
 

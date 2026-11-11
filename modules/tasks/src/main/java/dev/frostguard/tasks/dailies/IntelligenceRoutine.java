@@ -20,6 +20,7 @@ import dev.frostguard.engine.schedule.LaunchPoint;
 import dev.frostguard.engine.schedule.TaskQueue;
 import dev.frostguard.engine.service.StaminaService;
 import dev.frostguard.engine.service.StatisticsService;
+import dev.frostguard.tasks.diagnostics.TaskDiagnosticSnapshots;
 import dev.frostguard.engine.service.TaskManagementService;
 import dev.frostguard.vision.convert.GameTimeUtils;
 import dev.frostguard.vision.ocr.ResilientOcrExecutor;
@@ -171,6 +172,9 @@ public IntelligenceRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
 		IntelCyclePolicy.Decision entryDecision = intelCyclePolicy.evaluateDailyAvailability(
 				dailyIntelAvailable, LocalDateTime.now(), ZoneId.systemDefault());
 		if (entryDecision.action() == IntelCyclePolicy.Action.WAIT_FOR_NEXT_REFRESH) {
+			logInfo(routineLogIntelligenceLine("Daily unavailable evidence; "
+					+ TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+							"intel", "daily-not-available")));
 			logInfo(routineLogIntelligenceLine("Daily sidebar has no green Intel availability evidence and no "
 					+ "Intel cycle is active. Planning the next UTC Intel refresh at: "
 					+ entryDecision.nextRun().format(DATETIME_FORMATTER)));
@@ -185,7 +189,9 @@ public IntelligenceRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
 		}
 		boolean intelMissionsDetected = hasVisibleIntelMissionFlow();
 		if (!intelMissionsDetected) {
-			logInfo(routineLogIntelligenceLine("Daily reported Intel, but no enabled mission marker was detected."));
+			logWarning(routineLogIntelligenceLine("No enabled Intel mission marker detected; "
+					+ TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+							"intel", "mission-markers-missing")));
 			tryRescheduleFromCooldownFlow();
 			processingTask = false;
 			return;
@@ -388,7 +394,10 @@ private void tryRescheduleFromCooldownFlow() {
 		}
 
 		if (cooldown == null) {
-			logWarning(routineLogIntelligenceLine("Could not read cooldown timer via OCR. Planning next run in 10 minutes."));
+			logWarning(routineLogIntelligenceLine("Could not read cooldown timer via OCR; "
+					+ TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+							"intel", "cooldown-unreadable")
+					+ ". Planning next run in 10 minutes."));
 			reschedule(LocalDateTime.now().plusMinutes(10));
 			pressBack();
 			return;
