@@ -153,8 +153,15 @@ public final class LanDiagnosticReporter {
         return value.length() > 70 ? value.substring(0, 70) : value;
     }
 
+    static boolean workspaceReady(Path database) {
+        return database != null && Files.isRegularFile(database);
+    }
+
     private static boolean enabled() {
         try {
+            // Never bootstrap persistence merely to report a snapshot.
+            // On fresh installs and test runners the workspace DB may not exist.
+            if (!workspaceReady(WorkspacePaths.current().database())) return false;
             Map<String, String> cfg = ConfigService.obtain().loadGlobalSettings();
             return cfg != null && Boolean.parseBoolean(cfg.getOrDefault(
                     ConfigurationKeyEnum.LAN_DIAGNOSTICS_ENABLED_BOOL.name(), "false"));
@@ -163,6 +170,7 @@ public final class LanDiagnosticReporter {
 
     private static String secret() {
         try {
+            if (!workspaceReady(WorkspacePaths.current().database())) return "";
             Map<String, String> cfg = ConfigService.obtain().loadGlobalSettings();
             return cfg == null ? "" : cfg.getOrDefault(
                     ConfigurationKeyEnum.LAN_DIAGNOSTICS_TOKEN_STRING.name(), "");
