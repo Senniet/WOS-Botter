@@ -69,6 +69,25 @@ static final SearchConfig INTEL_VIEW_ACTION_SEARCH = SearchConfig.builder()
         .withArea(AreaData.of(205, 850, 535, 1015))
         .build();
 
+// Text label images are thin and sensitive to anti-aliasing. Require two
+// agreeing frames, retrying after the View -> wilderness transition settles.
+static final SearchConfig INTEL_SURVIVOR_ACTION_SEARCH = SearchConfig.builder()
+        .withMaxAttempts(3).withDelay(500L).withThreshold(86).build();
+static final SearchConfig INTEL_JOURNEY_ACTION_SEARCH = SearchConfig.builder()
+        .withMaxAttempts(3).withDelay(500L).withThreshold(86).build();
+
+private void deferIntelMissingAction(String mission, String action, String snapshotKind) {
+    String snapshot = TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+            "intel-actions", snapshotKind);
+    logWarning(routineLogIntelligenceLine(mission + " " + action
+            + " not verified on screen; " + snapshot
+            + ". No blind Back tap; retrying in five minutes."));
+    markWorkIncomplete("Intel " + mission + ": " + action + " unavailable");
+    reschedule(LocalDateTime.now().plusMinutes(5));
+    processingTask = false;
+}
+
+
 // Hero formation screens may use a different sized Deploy label.
 // Recognition requires the action to be confirmed in two successive frames.
 static final SearchConfig INTEL_DEPLOY_ACTION_SEARCH = SearchConfig.builder()
@@ -1203,27 +1222,30 @@ private void manageRescheduling(boolean anyIntelProcessed, boolean nonBeastIntel
 	}
 
 private void handleSurvivor(ImageSearchResultData result) {
+    runExclusiveUiTransaction(() -> handleSurvivorExclusive(result));
+}
+
+private void handleSurvivorExclusive(ImageSearchResultData result) {
 		tapInside(result);
 		sleepTask(2000);
 
 		ImageSearchResultData view = templateSearchHelper.locateAction(TemplatesEnum.INTEL_VIEW, INTEL_VIEW_ACTION_SEARCH);
 		if (!view.isFound()) {
-			logWarning(routineLogIntelligenceLine("Could not find the 'View' button for the survivor. Going back."));
-			pressBack();
-			return;
+            deferIntelMissingAction("Survivor", "View", "survivor-view-missing");
+            return;
 		}
 
-		tapInside(view);
-		sleepTask(500);
-
-		ImageSearchResultData rescue = templateSearchHelper.locatePattern(TemplatesEnum.INTEL_RESCUE, SearchConfigConstants.SINGLE_WITH_RETRIES);
-		if (!rescue.isFound()) {
-			logWarning(routineLogIntelligenceLine("Could not find the 'Rescue' button for the survivor. Going back."));
-			pressBack();
-			pressBack();
-
-			return;
-		}
+        tapInside(view);
+        sleepTask(1400);
+        logInfo(routineLogIntelligenceLine("Survivor after View: "
+                + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+                        "intel-actions", "survivor-after-view")));
+        ImageSearchResultData rescue = templateSearchHelper.locateAction(
+                TemplatesEnum.INTEL_RESCUE, INTEL_SURVIVOR_ACTION_SEARCH);
+        if (!rescue.isFound()) {
+            deferIntelMissingAction("Survivor", "Rescue", "survivor-rescue-missing");
+            return;
+        }
 
 		tapInside(rescue);
 		sleepTask(800);
@@ -1234,27 +1256,30 @@ private void handleSurvivor(ImageSearchResultData result) {
 	}
 
 private void handleJourney(ImageSearchResultData result) {
+    runExclusiveUiTransaction(() -> handleJourneyExclusive(result));
+}
+
+private void handleJourneyExclusive(ImageSearchResultData result) {
 		tapInside(result);
 		sleepTask(2000);
 
 		ImageSearchResultData view = templateSearchHelper.locateAction(TemplatesEnum.INTEL_VIEW, INTEL_VIEW_ACTION_SEARCH);
 		if (!view.isFound()) {
-			logWarning(routineLogIntelligenceLine("Could not find the 'View' button for the journey. Going back."));
-			pressBack();
-			return;
+            deferIntelMissingAction("Journey", "View", "journey-view-missing");
+            return;
 		}
 
-		tapInside(view);
-		sleepTask(500);
-
-		ImageSearchResultData explore = templateSearchHelper.locatePattern(TemplatesEnum.INTEL_EXPLORE, SearchConfigConstants.SINGLE_WITH_RETRIES);
-		if (!explore.isFound()) {
-			logWarning(routineLogIntelligenceLine("Could not find the 'Explore' button for the journey. Going back."));
-			pressBack();
-			pressBack();
-
-			return;
-		}
+        tapInside(view);
+        sleepTask(1400);
+        logInfo(routineLogIntelligenceLine("Journey after View: "
+                + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+                        "intel-actions", "journey-after-view")));
+        ImageSearchResultData explore = templateSearchHelper.locateAction(
+                TemplatesEnum.INTEL_EXPLORE, INTEL_JOURNEY_ACTION_SEARCH);
+        if (!explore.isFound()) {
+            deferIntelMissingAction("Journey", "Explore", "journey-explore-missing");
+            return;
+        }
 
 		tapInside(explore);
 		sleepTask(500);

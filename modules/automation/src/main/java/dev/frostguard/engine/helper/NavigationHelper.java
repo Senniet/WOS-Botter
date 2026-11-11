@@ -670,6 +670,23 @@ public class NavigationHelper {
                 pass++;
                 continue;
             }
+            // A blind Android Back on the wilderness map opens Quit game?.
+            // If it is already showing, cancel rather than sending another
+            // Back. Abort this recovery sequence to prevent a quit loop.
+            if (!atHome && !atWorld && searcher.locateAction(
+                    TemplatesEnum.GAME_QUIT_CONFIRMATION_PROMPT,
+                    TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
+                            .withThreshold(88).withArea(AreaData.of(250, 525, 470, 645))
+                            .build()).isFound()) {
+                broadcastWarn("Quit game? dialog detected, selecting Cancel; "
+                        + "no further blind Back attempts in this recovery");
+                checkpoint.run();
+                taps.tapInside(AreaData.of(110, 768, 298, 830));
+                interruptibleWait(550);
+                if (target == LaunchPoint.ANY) return LaunchPoint.ANY;
+                throw new HomeNotFoundException("Quit dialog cancelled; specific "
+                        + "home/world location not safely confirmed");
+            }
             // Unknown, not a known reward overlay: Android Back is an input
             // action, not a missing on-screen Back button.
             if (!atHome && !atWorld) {
