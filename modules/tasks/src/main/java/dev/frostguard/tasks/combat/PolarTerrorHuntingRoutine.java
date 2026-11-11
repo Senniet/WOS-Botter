@@ -10,6 +10,7 @@ import dev.frostguard.api.domain.MarchSlotState;
 import dev.frostguard.api.domain.PointData;
 import dev.frostguard.data.entity.DailyTask;
 import dev.frostguard.data.repository.DailyTaskRepository;
+import dev.frostguard.engine.helper.FormationDeployDetector;
 import dev.frostguard.engine.helper.MarchSlotAvailabilityEstimator;
 import dev.frostguard.engine.helper.StaminaTopUpResult;
 import dev.frostguard.engine.nav.CommonGameAreas;
@@ -533,10 +534,35 @@ private String inspectFormationFooterText() {
  * The post-tap flow independently verifies that the game returned to World.
  */
 private ImageSearchResultData findFormationDeployButton() {
-        return templateSearchHelper.locateAction(
+        ImageSearchResultData template = templateSearchHelper.locateAction(
                 TemplatesEnum.DEPLOY_BUTTON,
                 SearchConfigConstants.SINGLE_WITH_RETRIES,
                 TemplatesEnum.RALLY_DEPLOY_BUTTON);
+        if (template.isFound()) return template;
+
+        // A confirmed Equalize button plus two independent formation frames
+        // provides stronger evidence than guessing from the blue bar alone.
+        try {
+            var first = FormationDeployDetector.detect(
+                    dev.frostguard.vision.convert.ImageConverter.toBufferedImage(
+                            emuManager.captureScreen(EMULATOR_NUMBER)));
+            if (!first.isFound()) return ImageSearchResultData.miss();
+            sleepTask(220);
+            var second = FormationDeployDetector.detect(
+                    dev.frostguard.vision.convert.ImageConverter.toBufferedImage(
+                            emuManager.captureScreen(EMULATOR_NUMBER)));
+            if (dev.frostguard.engine.helper.RecognitionConsensus.agrees(first, second, 8)) {
+                logInfo(routineLogPolarTerrorHuntingLine(
+                        "Formation Deploy confirmed by two-frame blue-button/label geometry"));
+                return second;
+            }
+        } catch (RuntimeException exception) {
+            if (exception instanceof java.util.concurrent.CancellationException
+                    || Thread.currentThread().isInterrupted()) throw exception;
+            logWarning(routineLogPolarTerrorHuntingLine(
+                    "Formation Deploy pixel inspection unavailable: " + exception.getClass().getSimpleName()));
+        }
+        return ImageSearchResultData.miss();
     }
 
 // Backing out of the confirmation returns to the formation screen, from where one more back press
