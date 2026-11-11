@@ -58,23 +58,63 @@ private static final long JOURNEY_RESULT_TIMEOUT_MILLIS = 30_000L;
 
 private static final long JOURNEY_INITIAL_RESULT_WAIT_MILLIS = 4_000L;
 
-private static final long JOURNEY_RESULT_POLL_MILLIS = 1_000L;
+private static final long JOURNEY_RESULT_POLL_MILLIS = 500L;
 
 private static final AreaData JOURNEY_VICTORY_CONTINUE_AREA = AreaData.of(400, 990, 658, 1038);
 
 // View is confined to the Intel mission modal. A real saved frame from
 // 2026-11-11 scored 89.56%, below the old default of 90.
 static final SearchConfig INTEL_VIEW_ACTION_SEARCH = SearchConfig.builder()
-        .withMaxAttempts(3).withDelay(300L).withThreshold(88)
+        .withMaxAttempts(1).withDelay(0L).withThreshold(88)
         .withArea(AreaData.of(205, 850, 535, 1015))
         .build();
 
 // Text label images are thin and sensitive to anti-aliasing. Require two
 // agreeing frames, retrying after the View -> wilderness transition settles.
 static final SearchConfig INTEL_SURVIVOR_ACTION_SEARCH = SearchConfig.builder()
-        .withMaxAttempts(3).withDelay(500L).withThreshold(86).build();
+        .withMaxAttempts(1).withDelay(0L).withThreshold(89)
+        .withArea(AreaData.of(220, 565, 510, 690)).build();
 static final SearchConfig INTEL_JOURNEY_ACTION_SEARCH = SearchConfig.builder()
-        .withMaxAttempts(3).withDelay(500L).withThreshold(86).build();
+        .withMaxAttempts(1).withDelay(0L).withThreshold(89)
+        .withArea(AreaData.of(220, 565, 510, 690)).build();
+
+// Poll for readiness rather than sleeping 2 s for every modal. All matches
+// are still verified in two independently captured frames by locateAction.
+private ImageSearchResultData awaitIntelAction(TemplatesEnum primary, SearchConfig config,
+        long timeoutMillis, TemplatesEnum... legacyVariants) {
+    long started = System.nanoTime();
+    long deadline = started + timeoutMillis * 1_000_000L;
+    do {
+        ImageSearchResultData ready = templateSearchHelper.locateAction(primary, config);
+        if (ready.isFound()) {
+            logDebug(routineLogIntelligenceLine(primary + " ready after "
+                    + ((System.nanoTime() - started) / 1_000_000L) + " ms"));
+            return ready;
+        }
+        if (System.nanoTime() >= deadline) break;
+        sleepTask(140);
+    } while (true);
+    // One compatibility attempt for older artwork, with two-frame confirmation.
+    for (TemplatesEnum old : legacyVariants) {
+        ImageSearchResultData fallback = templateSearchHelper.locateAction(old,
+                SearchConfig.builder().withArea(config.getArea())
+                        .withMaxAttempts(1).withThreshold(86).build());
+        if (fallback.isFound()) return fallback;
+    }
+    return ImageSearchResultData.miss();
+}
+
+// After tapping a command, proceed as soon as its modal button disappears.
+// Wait at most briefly for the click animation; do not tap the button twice.
+private boolean awaitIntelActionAcknowledged(TemplatesEnum action, SearchConfig config,
+        long timeoutMillis) {
+    long deadline = System.nanoTime() + timeoutMillis * 1_000_000L;
+    do {
+        if (!templateSearchHelper.locatePattern(action, config).isFound()) return true;
+        if (System.nanoTime() >= deadline) return false;
+        sleepTask(160);
+    } while (true);
+}
 
 private void deferIntelMissingAction(String mission, String action, String snapshotKind) {
     String snapshot = TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
@@ -1227,29 +1267,34 @@ private void handleSurvivor(ImageSearchResultData result) {
 
 private void handleSurvivorExclusive(ImageSearchResultData result) {
 		tapInside(result);
-		sleepTask(2000);
 
-		ImageSearchResultData view = templateSearchHelper.locateAction(TemplatesEnum.INTEL_VIEW, INTEL_VIEW_ACTION_SEARCH);
+        ImageSearchResultData view = awaitIntelAction(TemplatesEnum.INTEL_VIEW,
+                INTEL_VIEW_ACTION_SEARCH, 2400);
 		if (!view.isFound()) {
             deferIntelMissingAction("Survivor", "View", "survivor-view-missing");
             return;
 		}
 
         tapInside(view);
-        sleepTask(1400);
         logInfo(routineLogIntelligenceLine("Survivor after View: "
                 + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
                         "intel-actions", "survivor-after-view")));
-        ImageSearchResultData rescue = templateSearchHelper.locateAction(
-                TemplatesEnum.INTEL_RESCUE, INTEL_SURVIVOR_ACTION_SEARCH);
+        ImageSearchResultData rescue = awaitIntelAction(
+                TemplatesEnum.INTEL_RESCUE_BUTTON_MODERN, INTEL_SURVIVOR_ACTION_SEARCH,
+                2900, TemplatesEnum.INTEL_RESCUE);
         if (!rescue.isFound()) {
             deferIntelMissingAction("Survivor", "Rescue", "survivor-rescue-missing");
             return;
         }
 
-		tapInside(rescue);
-		sleepTask(800);
-		intelScreenHelper.returnToIntelFromWilderness();
+        tapInside(rescue);
+        // Never count a Rescue unless the action has visibly left its modal.
+        if (!awaitIntelActionAcknowledged(TemplatesEnum.INTEL_RESCUE_BUTTON_MODERN,
+                INTEL_SURVIVOR_ACTION_SEARCH, 1500)) {
+            deferIntelMissingAction("Survivor", "Rescue tap not acknowledged", "survivor-rescue-still-visible");
+            return;
+        }
+        intelScreenHelper.returnToIntelFromWilderness();
 		survivorMissionsSincePause++;
 		StaminaService.getServices().subtractStamina(profile.getId(), SURVIVOR_STAMINA_COST_VALUE);
 		StatisticsService.obtain().addToCounter(profile, "Intel Survivor Camps", 1);
@@ -1261,31 +1306,34 @@ private void handleJourney(ImageSearchResultData result) {
 
 private void handleJourneyExclusive(ImageSearchResultData result) {
 		tapInside(result);
-		sleepTask(2000);
 
-		ImageSearchResultData view = templateSearchHelper.locateAction(TemplatesEnum.INTEL_VIEW, INTEL_VIEW_ACTION_SEARCH);
+        ImageSearchResultData view = awaitIntelAction(TemplatesEnum.INTEL_VIEW,
+                INTEL_VIEW_ACTION_SEARCH, 2400);
 		if (!view.isFound()) {
             deferIntelMissingAction("Journey", "View", "journey-view-missing");
             return;
 		}
 
         tapInside(view);
-        sleepTask(1400);
         logInfo(routineLogIntelligenceLine("Journey after View: "
                 + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
                         "intel-actions", "journey-after-view")));
-        ImageSearchResultData explore = templateSearchHelper.locateAction(
-                TemplatesEnum.INTEL_EXPLORE, INTEL_JOURNEY_ACTION_SEARCH);
+        ImageSearchResultData explore = awaitIntelAction(
+                TemplatesEnum.INTEL_EXPLORE_BUTTON_MODERN, INTEL_JOURNEY_ACTION_SEARCH,
+                2900, TemplatesEnum.INTEL_EXPLORE);
         if (!explore.isFound()) {
             deferIntelMissingAction("Journey", "Explore", "journey-explore-missing");
             return;
         }
 
-		tapInside(explore);
-		sleepTask(500);
-		tapNear(new PointData(520, 1200));
-		long deadline = System.nanoTime() + JOURNEY_RESULT_TIMEOUT_MILLIS * 1_000_000L;
-		sleepTask(JOURNEY_INITIAL_RESULT_WAIT_MILLIS);
+        tapInside(explore);
+        if (!awaitIntelActionAcknowledged(TemplatesEnum.INTEL_EXPLORE_BUTTON_MODERN,
+                INTEL_JOURNEY_ACTION_SEARCH, 1500)) {
+            deferIntelMissingAction("Journey", "Explore tap not acknowledged", "journey-explore-still-visible");
+            return;
+        }
+        // Avoid a blind tap at (520,1200). Poll the result as soon as it appears.
+        long deadline = System.nanoTime() + JOURNEY_RESULT_TIMEOUT_MILLIS * 1_000_000L;
 
 		ImageSearchResultData victory = ImageSearchResultData.miss();
 		while (System.nanoTime() < deadline) {

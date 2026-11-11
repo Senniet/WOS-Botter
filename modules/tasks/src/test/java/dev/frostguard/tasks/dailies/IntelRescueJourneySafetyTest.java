@@ -42,9 +42,9 @@ class IntelRescueJourneySafetyTest {
     void rescueAndJourneySearchesUseConservativeTwoFrameMatching() {
         var rescue = IntelligenceRoutine.INTEL_SURVIVOR_ACTION_SEARCH;
         var journey = IntelligenceRoutine.INTEL_JOURNEY_ACTION_SEARCH;
-        assertEquals(86, rescue.getThreshold());
-        assertEquals(86, journey.getThreshold());
-        assertEquals(3, rescue.getMaxAttempts());
-        assertEquals(3, journey.getMaxAttempts());
+        assertEquals(89, rescue.getThreshold());
+        assertEquals(89, journey.getThreshold());
+        assertEquals(1, rescue.getMaxAttempts());
+        assertEquals(1, journey.getMaxAttempts());
     }
 }

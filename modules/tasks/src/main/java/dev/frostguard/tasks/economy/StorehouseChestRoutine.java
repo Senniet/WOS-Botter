@@ -57,8 +57,11 @@ public class StorehouseChestRoutine extends DelayedTask {
     private static final AreaData STOREHOUSE_TITLE_AREA = new AreaData(
             new PointData(245, 515), new PointData(505, 575));
     static final AreaData CHEST_REWARD_OVERLAY_CLOSE_AREA = AreaData.of(565, 530, 715, 705);
-    private static final int STOREHOUSE_SELECTION_SETTLE_MILLIS = 2_200;
-    private static final int STOREHOUSE_DESELECTION_SETTLE_MILLIS = 800;
+    private static final int STOREHOUSE_SELECTION_TIMEOUT_MILLIS = 2_000;
+    private static final int STOREHOUSE_SELECTION_POLL_MILLIS = 140;
+    private static final int STOREHOUSE_DESELECTION_SETTLE_MILLIS = 350;
+    private static final AreaData MODERN_STOREHOUSE_NAME_AREA = AreaData.of(280, 510, 500, 580);
+    private static final AreaData MODERN_STOREHOUSE_DETAILS_AREA = AreaData.of(290, 835, 480, 965);
 
     // ========== Stamina Reward Coordinates ==========
     private static final PointData STAMINA_AMOUNT_TOP_LEFT = new PointData(436, 632);
@@ -161,15 +164,14 @@ public class StorehouseChestRoutine extends DelayedTask {
         // A previous selection can survive navigation. First inspect the
         // current screen; never tap a different building when Storehouse is
         // already visibly selected.
-        boolean alreadySelected = isStorehouseSelected();
+        boolean alreadySelected = isStorehouseSelectedModern();
         if (!alreadySelected) {
-            // Legacy city coordinate is only a candidate: verify the exact
-            // selected building after tapping or decline all reward actions.
+            // Legacy city coordinate is only a candidate: verify that this
+            // selected object is really Storehouse AND displays Details.
             tapInside(STOREHOUSE_VISIBLE_BUILDING_AREA.topLeft(), STOREHOUSE_VISIBLE_BUILDING_AREA.bottomRight());
-            sleepTask(STOREHOUSE_SELECTION_SETTLE_MILLIS);
         }
 
-        if (alreadySelected || isStorehouseSelected()) {
+        if (alreadySelected || waitUntilStorehouseSelected()) {
             logInfo("Storehouse selected and verified by its title (template or confirmed OCR).");
             // The reward bubbles are only actionable after Android Back closes the
             // building's Details/Upgrade selection controls.
@@ -189,6 +191,35 @@ public class StorehouseChestRoutine extends DelayedTask {
      * Require the full building name on two fresh frames; single OCR noise
      * must never authorize reward collection or pressing Back.
      */
+    private boolean isStorehouseSelectedModern() {
+        // Separate UI labels at separate locations reduce the likelihood of
+        // approving an unrelated selected building or a partial city overlay.
+        SearchConfig name = SearchConfig.builder().withMaxAttempts(1).withThreshold(90)
+                .withArea(MODERN_STOREHOUSE_NAME_AREA).build();
+        SearchConfig details = SearchConfig.builder().withMaxAttempts(1).withThreshold(90)
+                .withArea(MODERN_STOREHOUSE_DETAILS_AREA).build();
+        return templateSearchHelper.locateAction(
+                TemplatesEnum.STOREHOUSE_SELECTED_NAME_MODERN, name).isFound()
+            && templateSearchHelper.locateAction(
+                TemplatesEnum.STOREHOUSE_SELECTED_DETAILS_MODERN, details).isFound();
+    }
+
+    private boolean waitUntilStorehouseSelected() {
+        long started = System.nanoTime();
+        long deadline = started + STOREHOUSE_SELECTION_TIMEOUT_MILLIS * 1_000_000L;
+        do {
+            if (isStorehouseSelectedModern()) {
+                logInfo("Storehouse visual selection ready in "
+                        + ((System.nanoTime() - started) / 1_000_000L) + " ms");
+                return true;
+            }
+            if (System.nanoTime() >= deadline) break;
+            sleepTask(STOREHOUSE_SELECTION_POLL_MILLIS);
+        } while (true);
+        // Keep OCR support for a future Storehouse artwork revision.
+        return isStorehouseSelected();
+    }
+
     private boolean isStorehouseSelected() {
         ImageSearchResultData template = templateSearchHelper.locatePattern(
                 TemplatesEnum.STOREHOUSE_SELECTED_CURRENT,
@@ -265,7 +296,7 @@ public class StorehouseChestRoutine extends DelayedTask {
                     + (pendingAgnesStamina == null ? "unreadable" : pendingAgnesStamina));
             logInfo("Stamina Claim button confirmed. Claiming the reward.");
             tapInside(claimButton);
-            sleepTask(4_000);
+            sleepTask(450);
             StorehouseVisitFlow.CollectionState confirmation = confirmBubbleDisappeared(
                     candidate, StorehouseBubbleDetector.Kind.STAMINA);
             if (confirmation == StorehouseVisitFlow.CollectionState.CONFIRMED) {
