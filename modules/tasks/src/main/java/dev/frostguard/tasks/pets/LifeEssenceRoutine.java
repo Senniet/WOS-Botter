@@ -67,11 +67,16 @@ public class LifeEssenceRoutine extends DelayedTask {
 			return;
 		}
 
-		boolean weeklyScrollUnresolved = buyWeeklyScroll && shouldBuyWeeklyScroll() && !buyWeeklyFreeScroll();
-		if (!countsAsCompletedRun(weeklyScrollUnresolved)) {
-			scheduleRetry("Weekly scroll outcome is unknown");
-			return;
-		}
+        // Collecting island Life Essence and buying the OPTIONAL weekly scroll
+        // are separate outcomes. Missing shop stock must not defer the normal
+        // resource collection for six hours or block the usual schedule.
+        logInfo("Life Essence marker collection complete: " + claim.confirmedClaims()
+                + " confirmed; checking optional weekly scroll separately");
+        boolean weeklyScrollUnresolved = buyWeeklyScroll && shouldBuyWeeklyScroll() && !buyWeeklyFreeScroll();
+        if (weeklyScrollUnresolved) {
+            logWarning("Optional weekly free scroll unavailable or not verified. "
+                    + "Life Essence collection was successful; leaving normal scheduling intact.");
+        }
 
 		likeIsland();
 
@@ -160,10 +165,15 @@ public class LifeEssenceRoutine extends DelayedTask {
 					sleepTask(500);
 				}
 				case WAIT -> sleepTask(500);
-				case FINISH -> {
-					logInfo("Claimed " + step.confirmedClaims() + " Life Essence items");
-					return new ClaimRun(true, step.confirmedClaims());
-				}
+                case FINISH -> {
+                    logInfo("Claimed " + step.confirmedClaims() + " Life Essence items");
+                    if (step.confirmedClaims() == 0) {
+                        logInfo("No visible Life Essence markers; diagnostic for the next check: "
+                                + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+                                        "lifeessence", "no-claim-markers-visible"));
+                    }
+                    return new ClaimRun(true, step.confirmedClaims());
+                }
 				case RETRY -> {
 					logWarning("Life Essence claim stopped: " + step.reason()
 							+ ". Confirmed claims: " + step.confirmedClaims());
@@ -294,9 +304,11 @@ public class LifeEssenceRoutine extends DelayedTask {
 		return false;
 	}
 
-	static boolean countsAsCompletedRun(boolean weeklyScrollUnresolved) {
-		return !weeklyScrollUnresolved;
-	}
+    static boolean countsAsCompletedRun(boolean coreCollectionFinished, boolean weeklyScrollUnresolved) {
+        // Optional purchases have independent outcomes and cannot cancel a
+        // successful main Life Essence collection.
+        return coreCollectionFinished;
+    }
 
 	static LocalDateTime nextMondayReset(ZonedDateTime nowUtc) {
 		ZonedDateTime nextMonday = nowUtc

@@ -22,12 +22,19 @@ class FishingRetryNavigatorTest {
         assertEquals(2, port.taps.size());
         assertEquals(1, port.releases);
         port.frames.add(fixture("suspended"));
+        port.frames.add(fixture("suspended"));
         port.frames.add(fixture("active"));
         FishingRetryNavigator.resume(port);
         assertEquals(3, port.taps.size());
         assertTrue(port.taps.get(0).topLeft().getY() < 85);
         assertTrue(port.taps.get(1).topLeft().getY() >= 570);
         assertTrue(port.taps.get(2).topLeft().getY() >= 1040);
+    }
+
+    @Test void goFishThresholdIsRestrictedToTheResumptionButton() {
+        assertEquals(85, FishingRetryNavigator.thresholdFor(dev.frostguard.api.configs.TemplatesEnum.FISHING_GO_FISH));
+        assertEquals(90, FishingRetryNavigator.thresholdFor(dev.frostguard.api.configs.TemplatesEnum.FISHING_NORMAL_CAST));
+        assertEquals(90, FishingRetryNavigator.thresholdFor(dev.frostguard.api.configs.TemplatesEnum.FISHING_PAUSE));
     }
 
     @Test void interruptionBeforeSuspensionSendsNoTap() throws Exception {
@@ -38,10 +45,10 @@ class FishingRetryNavigatorTest {
     }
 
     @Test void stageLoadingAfterGoFishWaitsWithoutAnotherTriggerTap() throws Exception {
-        var port = new FakePort("suspended-after-reload", "event", "event", "active");
+        var port = new FakePort("suspended-after-reload", "suspended-after-reload", "event", "event", "active");
         FishingRetryNavigator.resume(port);
         assertEquals(1, port.taps.size());
-        assertEquals(4, port.sequence);
+        assertEquals(5, port.sequence);
         assertTrue(port.taps.getFirst().topLeft().getY() >= 1040);
     }
 

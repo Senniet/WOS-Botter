@@ -155,6 +155,13 @@ public class FishingMinigameRoutine extends DelayedTask {
         } catch (java.io.IOException error) {
             deferTransportFailure(error);
         } catch (IllegalStateException error) {
+            if (isFishingStageUnverified(error)) {
+                logWarning("Fishing stage transition not verified: " + error.getMessage()
+                        + "; " + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+                                "fishing", "stage-resume-unconfirmed"));
+                defer(5, "Existing Fishing stage unverified; no new bait authorized");
+                return;
+            }
             if (!isTransportFailure(error)) throw error;
             deferTransportFailure(error);
         } finally {
@@ -183,6 +190,17 @@ public class FishingMinigameRoutine extends DelayedTask {
         defer(5, "Video/input channel not verified; no additional cast authorized");
     }
 
+    static boolean isFishingStageUnverified(IllegalStateException error) {
+        if (error == null || error.getMessage() == null) return false;
+        String message = error.getMessage();
+        return message.startsWith("Go Fish resume action unverified")
+                || message.startsWith("Go Fish not stable across fresh frames")
+                || message.startsWith("Fishing title lost before resume tap")
+                || message.startsWith("Suspended Fishing title unverified")
+                || message.startsWith("Fishing retry control unverified: FISHING_GO_FISH")
+                || message.startsWith("Fishing retry control timed out: FISHING_PAUSE");
+    }
+
     static boolean isTransportFailure(IllegalStateException error) {
         if (error == null || error.getMessage() == null) return false;
         String message = error.getMessage();
@@ -203,6 +221,9 @@ public class FishingMinigameRoutine extends DelayedTask {
 
     private void deferUnplayable(String reason) {
         consecutiveUnplayableMisses++;
+        String firstFailureEvidence = consecutiveUnplayableMisses == 1
+                ? TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+                        "fishing", "stage-entry-unverified") : null;
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime retryAt = FishingPlayabilityRetryPolicy.retryAt(
                 now, GameTimeUtils.dailyResetTime(), consecutiveUnplayableMisses);
@@ -218,6 +239,7 @@ public class FishingMinigameRoutine extends DelayedTask {
                     + "/" + FishingPlayabilityRetryPolicy.SHORT_RETRY_LIMIT
                     + "; next check in " + FishingPlayabilityRetryPolicy.RETRY_MINUTES
                     + " minutes at " + retryAt.format(DATETIME_FORMATTER)
+                    + "; " + (firstFailureEvidence == null ? "no additional snapshot" : firstFailureEvidence)
                     + ". No premium spending authorized.");
         }
         reschedule(retryAt);
@@ -359,6 +381,8 @@ public class FishingMinigameRoutine extends DelayedTask {
         if (!find(TemplatesEnum.FISHING_TITLE, AreaData.of(85, 0, 500, 80)).isFound()) return false;
         var goFish = find(TemplatesEnum.FISHING_GO_FISH, AreaData.of(270, 1040, 465, 1130));
         if (!goFish.isFound()) return false;
+        logInfo("Go Fish button detected on Fishing Tournament screen; "
+                + "verifying two fresh frames before resuming previous stage");
         FishingRetryNavigator.resume(retryPort());
         logInfo("Verified Go Fish recovered the already-paid stage; no fresh Normal Cast selected.");
         return true;
@@ -593,7 +617,8 @@ public class FishingMinigameRoutine extends DelayedTask {
     }
 
     private ImageSearchResultData find(TemplatesEnum template, AreaData area) {
-        int threshold = template == TemplatesEnum.FISHING_HOME_ICON ? HOME_ENTRY_MATCH_THRESHOLD : 90;
+        int threshold = template == TemplatesEnum.FISHING_HOME_ICON ? HOME_ENTRY_MATCH_THRESHOLD
+                : FishingRetryNavigator.thresholdFor(template);
         return OpenCvPatternLocator.locatePattern(observation.image(), template.getTemplate(), area.topLeft(), area.bottomRight(), threshold);
     }
 

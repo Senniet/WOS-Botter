@@ -14,6 +14,18 @@ class FishingTransportRecoveryTest {
                     new IllegalStateException(message)), message);
         }
     }
+    @Test void uncertainGoFishResumptionIsDeferredWithoutNewBait() {
+        for (String reason : new String[]{
+                "Go Fish resume action unverified; no bait selected",
+                "Go Fish not stable across fresh frames; no bait selected",
+                "Fishing retry control timed out: FISHING_PAUSE"}) {
+            assertTrue(FishingMinigameRoutine.isFishingStageUnverified(
+                    new IllegalStateException(reason)));
+        }
+        assertFalse(FishingMinigameRoutine.isFishingStageUnverified(
+                new IllegalStateException("Normal Cast failed")));
+    }
+
     @Test void gameStateAndProgrammingFailuresAreNotMisclassified() {
         assertFalse(FishingMinigameRoutine.isTransportFailure(
                 new IllegalStateException("Suspended retry stage unverified; no replacement bait authorized")));
