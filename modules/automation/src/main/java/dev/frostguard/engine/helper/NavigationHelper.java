@@ -612,7 +612,7 @@ public class NavigationHelper {
     /** Allows task-owned recovery to yield before every navigation action. */
     public LaunchPoint ensureCorrectScreenLocation(LaunchPoint target, Runnable checkpoint) {
         broadcastDebug("Locating screen - need " + target);
-        int budget = 10;
+        int budget = 4;
         int pass = 1;
         while (pass <= budget) {
             checkpoint.run();
@@ -659,10 +659,14 @@ public class NavigationHelper {
             // A recognised Rewards overlay says "Tap anywhere to exit". Do
             // not use ten blind Android Back events for this known screen.
             if (!atHome && !atWorld && pass <= 2
-                    && searcher.locateAction(TemplatesEnum.SHARED_REWARDS_BANNER,
+                    && (searcher.locateAction(TemplatesEnum.SHARED_REWARDS_BANNER_CURRENT,
+                            TemplateSearchHelper.SearchConfig.builder()
+                                    .withMaxAttempts(1).withThreshold(92)
+                                    .withArea(AreaData.of(50, 245, 670, 400)).build()).isFound()
+                        || searcher.locateAction(TemplatesEnum.SHARED_REWARDS_BANNER,
                             TemplateSearchHelper.SearchConfig.builder()
                                     .withMaxAttempts(1).withThreshold(85)
-                                    .withArea(AreaData.of(30, 245, 690, 400)).build()).isFound()) {
+                                    .withArea(AreaData.of(30, 245, 690, 400)).build()).isFound())) {
                 broadcastDebug("Recognised Rewards overlay; dismissing with one verified tap");
                 checkpoint.run();
                 taps.tapInside(AreaData.of(340, 1125, 385, 1185));
@@ -687,17 +691,29 @@ public class NavigationHelper {
                 throw new HomeNotFoundException("Quit dialog cancelled; specific "
                         + "home/world location not safely confirmed");
             }
-            // Unknown, not a known reward overlay: Android Back is an input
-            // action, not a missing on-screen Back button.
-            if (!atHome && !atWorld) {
-                broadcastDebug("Unknown screen - back (" + pass + "/" + budget + ")");
-                checkpoint.run();
-                emu.pressBack(device);
-                interruptibleWait(300);
+            // ANY tasks, including an already-paid Fishing cast, own their entry
+            // screen. The scheduler must not close it before the routine inspects it.
+            if (target == LaunchPoint.ANY) {
+                broadcastDebug("Unrecognised location, but task accepts ANY; no navigation input sent");
+                return LaunchPoint.ANY;
             }
+            // Never send a blind Android Back: it brings up Quit game? when
+            // world detection is briefly unavailable. Use the verified visible
+            // header arrow instead, and check location again after it closes a page.
+            var back = searcher.locatePattern(TemplatesEnum.GAME_HEADER_BACK_ARROW_CURRENT,
+                    TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
+                            .withThreshold(91).withArea(AreaData.of(0, 0, 110, 105)).build());
+            if (!back.isFound() || !isStableScreenAnchorFlow(TemplatesEnum.GAME_HEADER_BACK_ARROW_CURRENT)) {
+                throw new HomeNotFoundException("Unknown location; no verified screen back arrow; "
+                        + "refusing blind Android Back to protect against Quit game dialog");
+            }
+            checkpoint.run();
+            taps.tapInside(back);
+            broadcastDebug("Used verified on-screen back arrow; checking location");
+            interruptibleWait(650);
             pass++;
         }
-        throw new HomeNotFoundException("Home not found after " + budget + " attempts");
+        throw new HomeNotFoundException("Home not found after " + budget + " verified recovery attempts");
     }
 
     // Require one immediate re-check before tapping a home/world anchor to reduce transient mis-taps.

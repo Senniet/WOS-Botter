@@ -6,6 +6,7 @@ import dev.frostguard.api.configs.TpDailyTaskEnum;
 import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.api.domain.ImageSearchResultData;
 import dev.frostguard.api.domain.PointData;
+import dev.frostguard.api.domain.AreaData;
 import dev.frostguard.api.domain.SizeData;
 import dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig;
 import dev.frostguard.engine.helper.BlueLabelActionDetector;
@@ -52,7 +53,12 @@ public class DoExplorationRoutine extends DelayedTask {
 
     protected void execute() {
         logInfo("Opening exploration screen...");
-        openExplorationScreen();
+        if (!openExplorationScreen()) {
+            logWarning("Exploration page could not be verified; " + TaskDiagnosticSnapshots.capture(
+                    emuManager, EMULATOR_NUMBER, "exploration", "entry-unverified"));
+            reschedule(LocalDateTime.now().plusMinutes(5));
+            return;
+        }
 
         logInfo("Searching exploration button...");
         ImageSearchResultData exploreButton = detectExploreButton();
@@ -73,17 +79,32 @@ public class DoExplorationRoutine extends DelayedTask {
         rescheduleInOneHour();
     }
 
-    private void openExplorationScreen() {
+    private boolean openExplorationScreen() {
+        if (explorationTitleVisible()) return true;
         logInfo("Tapping exploration entry area...");
         tapInside(EXPLORATION_ENTRY_TOP_LEFT, EXPLORATION_ENTRY_BOTTOM_RIGHT);
         sleepTask(EXPLORATION_SCREEN_LOAD_DELAY_MS);
+        return explorationTitleVisible();
+    }
+
+    private boolean explorationTitleVisible() {
+        return templateSearchHelper.locatePattern(TemplatesEnum.EXPLORATION_SCREEN_TITLE,
+                SearchConfig.builder().withMaxAttempts(2).withDelay(150).withThreshold(90)
+                        .withArea(AreaData.of(70, 5, 365, 90)).build()).isFound();
     }
 
     private ImageSearchResultData detectExploreButton() {
         ImageSearchResultData existing = templateSearchHelper.locatePattern(
                 TemplatesEnum.EXPLORATION_BUTTON,
-                SearchConfig.builder().withMaxAttempts(3).withDelay(1000L).build());
-        if (existing.isFound()) return existing;
+                SearchConfig.builder().withMaxAttempts(1).withThreshold(86)
+                        .withArea(AreaData.of(160, 1100, 540, 1230)).build());
+        if (existing.isFound()) {
+            sleepTask(150);
+            var second = templateSearchHelper.locatePattern(TemplatesEnum.EXPLORATION_BUTTON,
+                    SearchConfig.builder().withMaxAttempts(1).withThreshold(86)
+                            .withArea(AreaData.of(160, 1100, 540, 1230)).build());
+            if (RecognitionConsensus.agrees(existing, second, 10)) return second;
+        }
         // Current 2026 UI uses a different rendering from explore.png.
         // The screenshot-grounded fallback requires the right blue button and
         // its light label on two independent normalized frames.

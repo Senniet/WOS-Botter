@@ -45,12 +45,16 @@ public class ExplorationRoutine extends DelayedTask {
 
 	@Override
 	protected LaunchPoint getRequiredStartLocation() {
-		return LaunchPoint.WORLD;
+		// An interrupted claim may have left the Idle Income window open.
+		return LaunchPoint.ANY;
 	}
 
 	@Override
 	protected void execute() {
-		logInfo(routineLogExplorationLine("Opening Exploration screen from world view."));
+        if (!isExplorationScreenVisible()) {
+            navigationHelper.ensureCorrectScreenLocation(LaunchPoint.WORLD);
+        }
+		logInfo(routineLogExplorationLine("Opening or resuming Exploration rewards."));
 		boolean opened = openExplorationScreen();
 		boolean claimedAnyReward = opened && claimAvailableRewards();
 		if (claimedAnyReward) {
@@ -107,6 +111,13 @@ public class ExplorationRoutine extends DelayedTask {
 				TemplatesEnum.EXPLORATION_BUTTON, SearchConfigConstants.SINGLE_WITH_2_RETRIES);
 		return explorationButton.isFound();
 	}
+
+    private boolean isExplorationMainScreenVisible() {
+        return templateSearchHelper.locatePattern(TemplatesEnum.EXPLORATION_SCREEN_TITLE,
+                dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig.builder()
+                    .withMaxAttempts(1).withThreshold(90)
+                    .withArea(AreaData.of(70, 5, 365, 90)).build()).isFound();
+    }
 
     private boolean claimAvailableRewards() {
         // A previously-open Idle Income panel can survive a failed run.
@@ -247,6 +258,10 @@ public class ExplorationRoutine extends DelayedTask {
 	}
 
     private boolean rewardsOverlayVisible() {
+        if (templateSearchHelper.locatePattern(TemplatesEnum.SHARED_REWARDS_BANNER_CURRENT,
+                dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig.builder()
+                        .withMaxAttempts(1).withThreshold(92)
+                        .withArea(AreaData.of(50, 245, 670, 400)).build()).isFound()) return true;
         return templateSearchHelper.locatePattern(TemplatesEnum.SHARED_REWARDS_BANNER,
                 dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig.builder()
                         .withMaxAttempts(1).withThreshold(85)

@@ -5,6 +5,9 @@ import dev.frostguard.api.domain.AreaData;
 import dev.frostguard.engine.emulator.AndroidFrameStream;
 import dev.frostguard.vision.match.OpenCvPatternLocator;
 import dev.frostguard.engine.helper.RecognitionConsensus;
+import dev.frostguard.engine.helper.BlueLabelActionDetector;
+import dev.frostguard.vision.convert.ImageConverter;
+import dev.frostguard.api.domain.RawImageData;
 import dev.frostguard.api.domain.ImageSearchResultData;
 import java.io.IOException;
 
@@ -22,6 +25,11 @@ final class FishingRetryNavigator {
     private static final AreaData EXIT = AreaData.of(185, 570, 330, 710);
     private static final AreaData GO_FISH = AreaData.of(270, 1040, 465, 1130);
     private static final AreaData TITLE = AreaData.of(85, 0, 500, 80);
+    // The 2026 stage-resume overlay has a bright, centred Go Fish button.
+    // Its artwork is animated; require a title anchor and the white-labelled
+    // blue button before accepting the fallback on two different frames.
+    private static final BlueLabelActionDetector.Region GO_FISH_BLUE =
+            new BlueLabelActionDetector.Region(225, 1042, 495, 1135, 299, 1065, 425, 1110);
 
     private FishingRetryNavigator() { }
 
@@ -62,7 +70,17 @@ final class FishingRetryNavigator {
         return template == TemplatesEnum.FISHING_GO_FISH ? 85 : 90;
     }
 
+    static ImageSearchResultData goFishControl(RawImageData frame) {
+        var template = OpenCvPatternLocator.locatePattern(frame, TemplatesEnum.FISHING_GO_FISH.getTemplate(),
+                GO_FISH.topLeft(), GO_FISH.bottomRight(), thresholdFor(TemplatesEnum.FISHING_GO_FISH));
+        if (template.isFound()) return template;
+        if (!OpenCvPatternLocator.locatePattern(frame, TemplatesEnum.FISHING_TITLE.getTemplate(),
+                TITLE.topLeft(), TITLE.bottomRight(), 90).isFound()) return ImageSearchResultData.miss();
+        return BlueLabelActionDetector.detect(ImageConverter.toBufferedImage(frame), GO_FISH_BLUE);
+    }
+
     private static ImageSearchResultData scan(Port port, TemplatesEnum template, AreaData area) {
+        if (template == TemplatesEnum.FISHING_GO_FISH) return goFishControl(port.frame().image());
         return OpenCvPatternLocator.locatePattern(port.frame().image(), template.getTemplate(),
                 area.topLeft(), area.bottomRight(), thresholdFor(template));
     }

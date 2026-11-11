@@ -379,7 +379,7 @@ public class FishingMinigameRoutine extends DelayedTask {
             return true;
         }
         if (!find(TemplatesEnum.FISHING_TITLE, AreaData.of(85, 0, 500, 80)).isFound()) return false;
-        var goFish = find(TemplatesEnum.FISHING_GO_FISH, AreaData.of(270, 1040, 465, 1130));
+        var goFish = FishingRetryNavigator.goFishControl(observation.image());
         if (!goFish.isFound()) return false;
         logInfo("Go Fish button detected on Fishing Tournament screen; "
                 + "verifying two fresh frames before resuming previous stage");
