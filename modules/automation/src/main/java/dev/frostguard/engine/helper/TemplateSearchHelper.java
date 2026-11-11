@@ -113,9 +113,26 @@ public class TemplateSearchHelper {
         preemptionHook.run();
         ImageSearchResultData second = multiScale
                 ? doSearchMultiScale(template, cfg) : doSearch(template, cfg);
-        boolean agreed = RecognitionConsensus.agrees(first, second, FALLBACK_CONFIRMATION_DISTANCE);
-        if (!agreed) dbg("Action " + template.name() + " failed two-frame confirmation");
-        return agreed;
+        if (RecognitionConsensus.agrees(first, second, FALLBACK_CONFIRMATION_DISTANCE)) return true;
+        // locatePattern may have found the first frame via its verified
+        // multiscale/greyscale fallback. Confirm against a fresh frame using
+        // those same methods rather than rejecting it with exact-only search.
+        if (!multiScale) {
+            preemptionHook.run();
+            second = doSearchMultiScale(template, cfg);
+            if (RecognitionConsensus.agrees(first, second, FALLBACK_CONFIRMATION_DISTANCE)) {
+                dbg("Action " + template.name() + " confirmed via multiscale second frame");
+                return true;
+            }
+            preemptionHook.run();
+            second = doSearchGrey(template, cfg);
+            if (RecognitionConsensus.agrees(first, second, FALLBACK_CONFIRMATION_DISTANCE)) {
+                dbg("Action " + template.name() + " confirmed via greyscale second frame");
+                return true;
+            }
+        }
+        dbg("Action " + template.name() + " failed two-frame confirmation");
+        return false;
     }
 
     // ── multi-match (colour) ─────────────────────────────────────────
