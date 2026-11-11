@@ -13,14 +13,8 @@ import org.junit.jupiter.api.Test;
 class AnalyticsServiceTest {
 
     @Test
-    void externalTelemetryRequiresExplicitTrue() {
-        assertFalse(AnalyticsService.externalAnalyticsOptIn(null));
-        assertFalse(AnalyticsService.externalAnalyticsOptIn(new HashMap<>()));
-        HashMap<String, String> config = new HashMap<>();
-        config.put("ANALYTICS_ENABLED_BOOL", "false");
-        assertFalse(AnalyticsService.externalAnalyticsOptIn(config));
-        config.put("ANALYTICS_ENABLED_BOOL", "true");
-        assertTrue(AnalyticsService.externalAnalyticsOptIn(config));
+    void externalMixpanelIsAlwaysDisabled() {
+        assertFalse(AnalyticsService.getInstance().isEnabled());
     }
 
     @Test

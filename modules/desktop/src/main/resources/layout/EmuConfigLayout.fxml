@@ -132,13 +132,16 @@
           <children>
               <VBox styleClass="content-card" HBox.hgrow="ALWAYS">
                   <HBox alignment="CENTER_LEFT" maxWidth="Infinity" styleClass="header-teal">
-                       <children><Label text="Analytics" /></children>
+                       <children><Label text="SurvivalOps LAN Diagnostics" /></children>
                    </HBox>
                   <VBox spacing="10" styleClass="content-card-inner">
-                      <CheckBox fx:id="checkboxAnalyticsEnabled" text="Send anonymous usage statistics to external Mixpanel (optional)" />
-                      <CheckBox fx:id="checkboxHideAnalyticsLogs" text="Hide analytics and statistics logs from console output" />
-                      <Label text="External analytics do not include recognition screenshots. Diagnostic export stays on this PC until you choose to share it." styleClass="description-label" style="-fx-text-fill: #8b949e; -fx-font-size: 11;" />
-                      <Button fx:id="buttonExportDiagnostics" text="Export diagnostics ZIP (logs + error screenshots)" onAction="#handleExportDiagnostics" />
+                      <CheckBox fx:id="checkboxLanDiagnosticsEnabled" text="Automatisch technische foutmeldingen delen via LAN" />
+                      <CheckBox fx:id="checkboxLanDiagnosticsImages" text="Ook game-screenshots bij fouten meesturen (kunnen spelersnamen tonen)" />
+                      <Label text="Ontvanger: https://10.0.0.100:18761 - alleen jouw webserver, geen Mixpanel of openbare GitHub." styleClass="description-label" />
+                      <javafx.scene.control.PasswordField fx:id="passwordLanDiagnosticsToken" promptText="Toegangssleutel voor webserver (eenmalig invoeren)" />
+                      <Button text="LAN-verbinding testen" onAction="#handleTestLanDiagnostics" />
+                      <Label fx:id="labelLanDiagnosticsStatus" text="Deel alleen gegevens als de opties ingeschakeld zijn." styleClass="description-label" />
+                      <Button fx:id="buttonExportDiagnostics" text="Exporteer diagnostiek als lokale ZIP" onAction="#handleExportDiagnostics" />
                   </VBox>
               </VBox>
           </children>

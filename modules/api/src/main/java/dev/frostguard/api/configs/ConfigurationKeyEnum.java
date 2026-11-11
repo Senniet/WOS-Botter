@@ -27,6 +27,9 @@ public enum ConfigurationKeyEnum {
     /* ─────────── analytics ─────────── */
 
     ANALYTICS_ENABLED_BOOL              ("false",             Boolean.class,       ConfigCategory.ANALYTICS),
+    LAN_DIAGNOSTICS_ENABLED_BOOL         ("false", Boolean.class, ConfigCategory.ANALYTICS),
+    LAN_DIAGNOSTICS_SCREENSHOTS_BOOL     ("false", Boolean.class, ConfigCategory.ANALYTICS),
+    LAN_DIAGNOSTICS_TOKEN_STRING         ("", String.class, ConfigCategory.ANALYTICS),
     ANALYTICS_ID_STRING                 ("",                 String.class,        ConfigCategory.ANALYTICS),
     HIDE_ANALYTICS_LOGS_BOOL            ("true",             Boolean.class,       ConfigCategory.ANALYTICS),
     STATISTICS_JSON_STRING              ("{}",               String.class,        ConfigCategory.ANALYTICS),

@@ -326,16 +326,8 @@ public class AnalyticsService {
 	 * @return true if analytics is enabled
 	 */
 	public boolean isEnabled() {
-		try {
-			return externalAnalyticsOptIn(ConfigService.obtain().loadGlobalSettings());
-		} catch (Exception e) {
-			return false; // Fail closed if settings cannot be read
-		}
-	}
-
-	static boolean externalAnalyticsOptIn(HashMap<String, String> settings) {
-		return settings != null && Boolean.parseBoolean(settings.getOrDefault(
-				ConfigurationKeyEnum.ANALYTICS_ENABLED_BOOL.name(), "false"));
+		// Legacy external Mixpanel pipeline is retired; no transmission.
+		return false;
 	}
 
 	/**

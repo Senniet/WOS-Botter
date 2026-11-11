@@ -721,6 +721,8 @@ public class TaskQueue {
                 ok = false;
             } else {
                 routeError(task, ex);
+                dev.frostguard.engine.diagnostics.LanDiagnosticReporter.failure(
+                        task.getTaskName(), ex.getClass().getSimpleName());
                 AnalyticsService.getInstance().trackTaskCompleted(task.getTaskName(), "failed", (System.currentTimeMillis()-t0)/1000);
                 ok = false;
             }

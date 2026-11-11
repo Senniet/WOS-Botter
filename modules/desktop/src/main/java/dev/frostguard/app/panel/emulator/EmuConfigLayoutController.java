@@ -34,6 +34,8 @@ import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.RadioButton;
+import javafx.scene.control.PasswordField;
+import dev.frostguard.engine.diagnostics.LanDiagnosticReporter;
 import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
@@ -117,11 +119,10 @@ public class EmuConfigLayoutController {
 	@FXML
 	private Label labelProfileMaxActiveTimeError;
 
-	@FXML
-	private CheckBox checkboxAnalyticsEnabled;
-
-	@FXML
-	private CheckBox checkboxHideAnalyticsLogs;
+	@FXML private CheckBox checkboxLanDiagnosticsEnabled;
+	@FXML private CheckBox checkboxLanDiagnosticsImages;
+	@FXML private PasswordField passwordLanDiagnosticsToken;
+	@FXML private Label labelLanDiagnosticsStatus;
 
 	@FXML
 	private CheckBox checkboxDesktopSnapshots;
@@ -148,8 +149,8 @@ public class EmuConfigLayoutController {
 		configureGameAndIdleDropdowns(globalConfig);
 		configureStopBehaviorDropdowns(globalConfig);
 		configureAutoStartSection(globalConfig);
-		configureAnalyticsToggles(globalConfig);
 		configureDiagnosticSnapshots(globalConfig);
+		configureAnalyticsToggles(globalConfig);
 	}
 
 	/* ────────────────────────────────────────────────
@@ -440,7 +441,7 @@ public class EmuConfigLayoutController {
         chooser.setInitialFileName("survivalops-diagnostics.zip");
         chooser.getExtensionFilters().add(
                 new FileChooser.ExtensionFilter("ZIP archive", "*.zip"));
-        File target = chooser.showSaveDialog(checkboxAnalyticsEnabled.getScene().getWindow());
+        File target = chooser.showSaveDialog(checkboxLanDiagnosticsEnabled.getScene().getWindow());
         if (target == null) return;
         Path root = WorkspacePaths.current().logs();
         try {
@@ -493,23 +494,37 @@ public class EmuConfigLayoutController {
 	 * ──────────────────────────────────────────────── */
 
 	private void configureAnalyticsToggles(Map<String, String> cfg) {
-		boolean analyticsOn = Boolean.parseBoolean(
-				cfg.getOrDefault(ConfigurationKeyEnum.ANALYTICS_ENABLED_BOOL.name(),
-						ConfigurationKeyEnum.ANALYTICS_ENABLED_BOOL.getDefaultValue()));
-		checkboxAnalyticsEnabled.setSelected(analyticsOn);
-
-		checkboxAnalyticsEnabled.selectedProperty().addListener((obs, prev, now) ->
+		boolean sharing = Boolean.parseBoolean(cfg.getOrDefault(
+				ConfigurationKeyEnum.LAN_DIAGNOSTICS_ENABLED_BOOL.name(), "false"));
+		boolean images = Boolean.parseBoolean(cfg.getOrDefault(
+				ConfigurationKeyEnum.LAN_DIAGNOSTICS_SCREENSHOTS_BOOL.name(), "false"));
+		checkboxLanDiagnosticsEnabled.setSelected(sharing);
+		checkboxLanDiagnosticsImages.setSelected(images);
+		checkboxLanDiagnosticsImages.setDisable(!sharing);
+		passwordLanDiagnosticsToken.setText(cfg.getOrDefault(
+				ConfigurationKeyEnum.LAN_DIAGNOSTICS_TOKEN_STRING.name(), ""));
+		passwordLanDiagnosticsToken.textProperty().addListener((obs, prev, value) ->
 			ConfigService.obtain().writeGlobalSetting(
-					ConfigurationKeyEnum.ANALYTICS_ENABLED_BOOL, String.valueOf(now)));
-
-		boolean hideLogs = Boolean.parseBoolean(
-				cfg.getOrDefault(ConfigurationKeyEnum.HIDE_ANALYTICS_LOGS_BOOL.name(),
-						ConfigurationKeyEnum.HIDE_ANALYTICS_LOGS_BOOL.getDefaultValue()));
-		checkboxHideAnalyticsLogs.setSelected(hideLogs);
-
-		checkboxHideAnalyticsLogs.selectedProperty().addListener((obs, prev, now) ->
+					ConfigurationKeyEnum.LAN_DIAGNOSTICS_TOKEN_STRING, value.trim()));
+		checkboxLanDiagnosticsEnabled.selectedProperty().addListener((obs, prev, value) -> {
 			ConfigService.obtain().writeGlobalSetting(
-					ConfigurationKeyEnum.HIDE_ANALYTICS_LOGS_BOOL, String.valueOf(now)));
+					ConfigurationKeyEnum.LAN_DIAGNOSTICS_ENABLED_BOOL, String.valueOf(value));
+			checkboxLanDiagnosticsImages.setDisable(!value);
+			if (value) {
+				// Captures must be enabled locally before the reporter can send them.
+				checkboxDiagnosticSnapshots.setSelected(true);
+			}
+		});
+		checkboxLanDiagnosticsImages.selectedProperty().addListener((obs, prev, value) ->
+			ConfigService.obtain().writeGlobalSetting(
+					ConfigurationKeyEnum.LAN_DIAGNOSTICS_SCREENSHOTS_BOOL, String.valueOf(value)));
+	}
+
+	@FXML
+	private void handleTestLanDiagnostics() {
+		labelLanDiagnosticsStatus.setText("LAN-verbinding controleren...");
+		LanDiagnosticReporter.testConnection(result ->
+			javafx.application.Platform.runLater(() -> labelLanDiagnosticsStatus.setText(result)));
 	}
 
 	private void configureDiagnosticSnapshots(Map<String, String> cfg) {
