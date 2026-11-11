@@ -403,11 +403,12 @@ private RallyLaunchResult launchSingleRallyFlow(int polarLevel, boolean useFlag,
         long travelTimeSeconds = deployment.travelTimeSeconds();
         int rallyStaminaCost = deployment.staminaCost();
 
-        ImageSearchResultData deploy = templateSearchHelper.locatePattern(
-                TemplatesEnum.DEPLOY_BUTTON,
-                SearchConfigConstants.SINGLE_WITH_RETRIES);
+        ImageSearchResultData deploy = findFormationDeployButton();
         if (!deploy.isFound()) {
-            String detail = "Deploy button not found after formation setup; known causes: no troops, flag locked, autojoin consumed the march slot, or unexpected formation screen";
+            String snapshot = TaskDiagnosticSnapshots.capture(
+                    emuManager, EMULATOR_NUMBER, "polarterror", "deploy-not-found");
+            String detail = "Deploy button not recognized after formation setup (Intel and shared rally templates checked); "
+                    + snapshot + ". Check troops, march slots, overlays, or an unexpected formation screen";
             logWarning(routineLogPolarTerrorHuntingLine("Deployment decision: " + detail));
             return fail(RallyLaunchOutcome.DEPLOY_NOT_FOUND, detail);
         }
@@ -432,9 +433,7 @@ private RallyLaunchResult launchSingleRallyFlow(int polarLevel, boolean useFlag,
                 return fail(outcome, "Stamina refill ended with " + refill.status());
             }
 
-            deploy = templateSearchHelper.locatePattern(
-                    TemplatesEnum.DEPLOY_BUTTON,
-                    SearchConfigConstants.SINGLE_WITH_RETRIES);
+            deploy = findFormationDeployButton();
             if (!deploy.isFound()) {
                 return fail(RallyLaunchOutcome.STAMINA_REFILL_FAILED, "Deploy button not restored after stamina refill");
             }
@@ -456,9 +455,7 @@ private RallyLaunchResult launchSingleRallyFlow(int polarLevel, boolean useFlag,
                     "Another player's troops are already marching toward this target; the rally was cancelled");
         }
 
-        deploy = templateSearchHelper.locatePattern(
-                TemplatesEnum.DEPLOY_BUTTON,
-                SearchConfigConstants.SINGLE_WITH_RETRIES);
+        deploy = findFormationDeployButton();
         if (deploy.isFound()) {
             logWarning(routineLogPolarTerrorHuntingLine(String.format(
                     "Deployment result: Deploy still visible at %s score=%.2f; rally not confirmed",
@@ -498,6 +495,26 @@ private RallyLaunchResult launchSingleRallyFlow(int polarLevel, boolean useFlag,
         }
 
         return ok("Rally deployed and World anchor verified");
+    }
+
+/**
+ * The generic deploy template originates from Intel and does not always match
+ * the rally formation button. Try the shared rally button as an alternative,
+ * but never tap at a guessed coordinate: both paths require an actual match.
+ * The post-tap flow independently verifies that the game returned to World.
+ */
+private ImageSearchResultData findFormationDeployButton() {
+        ImageSearchResultData primary = templateSearchHelper.locatePattern(
+                TemplatesEnum.DEPLOY_BUTTON, SearchConfigConstants.SINGLE_WITH_RETRIES);
+        if (primary.isFound()) return primary;
+        ImageSearchResultData rally = templateSearchHelper.locatePattern(
+                TemplatesEnum.RALLY_DEPLOY_BUTTON, SearchConfigConstants.SINGLE_WITH_RETRIES);
+        if (rally.isFound()) {
+            logInfo(routineLogPolarTerrorHuntingLine(
+                    "Deploy recognized via shared rally template; score=" + rally.getMatchScore()));
+            return rally;
+        }
+        return primary;
     }
 
 // Backing out of the confirmation returns to the formation screen, from where one more back press
