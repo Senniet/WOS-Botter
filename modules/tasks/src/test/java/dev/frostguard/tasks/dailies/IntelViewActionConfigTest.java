@@ -4,6 +4,14 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class IntelViewActionConfigTest {
+    @Test void deploySearchIsConfinedToFormationBottomBar() {
+        var c = IntelligenceRoutine.INTEL_DEPLOY_ACTION_SEARCH;
+        assertEquals(88, c.getThreshold());
+        assertTrue(c.hasArea());
+        assertEquals(1050, c.getArea().topLeft().getY());
+        assertEquals(1279, c.getArea().bottomRight().getY());
+    }
+
     @Test void viewRequiresPopupRegionAndTwoFrameActionVerification() {
         var c = IntelligenceRoutine.INTEL_VIEW_ACTION_SEARCH;
         assertEquals(88, c.getThreshold());

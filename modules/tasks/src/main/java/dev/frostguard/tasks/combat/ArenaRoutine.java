@@ -297,6 +297,10 @@ public class ArenaRoutine extends DelayedTask {
 
         if (!readInitialAttempts()) {
             logWarning("Failed to read initial attempts; " + captureArenaDiagnostic("attempts-unreadable"));
+            // A broken attempt-counter OCR must not block a chest that is
+            // already available after the five free challenges. The chest
+            // checker itself requires two 5/5 green-count observations.
+            claimDailyChallengesChest();
             reschedule(java.time.LocalDateTime.now().plusMinutes(10));
             return;
         }

@@ -66,6 +66,21 @@ static final SearchConfig INTEL_VIEW_ACTION_SEARCH = SearchConfig.builder()
         .withArea(AreaData.of(205, 850, 535, 1015))
         .build();
 
+// Hero formation screens may use a different sized Deploy label.
+// Recognition requires the action to be confirmed in two successive frames.
+static final SearchConfig INTEL_DEPLOY_ACTION_SEARCH = SearchConfig.builder()
+        .withMaxAttempts(2).withDelay(250).withThreshold(88)
+        .withArea(AreaData.of(0, 1050, 719, 1279)).build();
+
+private ImageSearchResultData findIntelDeploy() {
+    return templateSearchHelper.locateAction(TemplatesEnum.DEPLOY_BUTTON,
+            INTEL_DEPLOY_ACTION_SEARCH, TemplatesEnum.GATHER_DEPLOY_BUTTON);
+}
+
+private String intelDiagnostic(String kind) {
+    return TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER, "intel-deploy", kind);
+}
+
 private static final SearchConfig INTEL_CLAIM_ALL_SEARCH = SearchConfig.builder()
 		.withMaxAttempts(2)
 		.withDelay(500L)
@@ -1312,11 +1327,13 @@ private void handleBeast(ImageSearchResultData beast) {
 		}
 
 
-		ImageSearchResultData deployButton = templateSearchHelper.locatePattern(TemplatesEnum.DEPLOY_BUTTON,
-				SearchConfigConstants.SINGLE_WITH_RETRIES);
+        logInfo(routineLogIntelligenceLine("Formation screen reached after Attack; "
+                + intelDiagnostic("formation-after-attack")));
+        ImageSearchResultData deployButton = findIntelDeploy();
 		if (!deployButton.isFound()) {
 			logWarning(routineLogIntelligenceLine(
-					"Deploy screen was not confirmed after Attack. No march was sent; retrying in 5 minutes."));
+					"Deploy screen was not confirmed after Attack; " + intelDiagnostic("deploy-button-missing-after-attack")
+                            + ". No march was sent; retrying in 5 minutes."));
 			reschedule(LocalDateTime.now().plusMinutes(5));
 			processingTask = false;
 			return;
@@ -1344,7 +1361,8 @@ private void handleBeast(ImageSearchResultData beast) {
 		int spentStamina = deployment.staminaCost();
 		if (deploymentHelper.hasNoDeployableTroops()) {
 			logWarning(routineLogIntelligenceLine(
-					"Deployment has no available troops. No march was sent; retrying in 5 minutes."));
+					"Deployment has no available troops; " + intelDiagnostic("formation-troops-empty")
+                            + ". No march was sent; retrying in 5 minutes."));
 			pressBack();
 			reschedule(LocalDateTime.now().plusMinutes(5));
 			processingTask = false;
@@ -1352,7 +1370,8 @@ private void handleBeast(ImageSearchResultData beast) {
 		}
 		if (deploymentHelper.isDeployCostRed()) {
 			logWarning(routineLogIntelligenceLine(
-					"Deployment stamina cost is red. No march was sent or deducted; retrying in 5 minutes."));
+					"Deployment stamina cost is red; " + intelDiagnostic("formation-stamina-red")
+                            + ". No march was sent or deducted; retrying in 5 minutes."));
 			pressBack();
 			reschedule(LocalDateTime.now().plusMinutes(5));
 			processingTask = false;
@@ -1362,7 +1381,8 @@ private void handleBeast(ImageSearchResultData beast) {
 		IntelDeploymentPreflight.Decision preflight = IntelDeploymentPreflight.assess(travelTimeSeconds);
 		if (!preflight.allowed()) {
 			logWarning(routineLogIntelligenceLine("Deployment refused before tapping Deploy: "
-					+ preflight.evidence() + ". Retrying in 5 minutes."));
+					+ preflight.evidence() + "; " + intelDiagnostic("preflight-rejected")
+                        + ". Retrying in 5 minutes."));
 			pressBack();
 			reschedule(LocalDateTime.now().plusMinutes(5));
 			processingTask = false;
@@ -1370,9 +1390,10 @@ private void handleBeast(ImageSearchResultData beast) {
 		}
 
 
-		ImageSearchResultData deploy = templateSearchHelper.locatePattern(TemplatesEnum.DEPLOY_BUTTON, SearchConfigConstants.SINGLE_WITH_RETRIES);
+		ImageSearchResultData deploy = findIntelDeploy();
 		if (!deploy.isFound()) {
-			logError(routineLogIntelligenceLine("Deploy button not detected. Planning next run to try again in 5 minutes."));
+			logError(routineLogIntelligenceLine("Deploy button not detected after formation setup; " + intelDiagnostic("deploy-button-missing-before-click")
+                    + ". Planning next run to try again in 5 minutes."));
 			reschedule(LocalDateTime.now().plusMinutes(5));
 			processingTask = false;
 
@@ -1412,7 +1433,7 @@ private void handleBeast(ImageSearchResultData beast) {
 			return;
 		}
 
-		deploy = templateSearchHelper.locatePattern(TemplatesEnum.DEPLOY_BUTTON, SearchConfigConstants.SINGLE_WITH_RETRIES);
+		deploy = templateSearchHelper.locatePattern(TemplatesEnum.DEPLOY_BUTTON, INTEL_DEPLOY_ACTION_SEARCH);
 		if (deploy.isFound()) {
 			logWarning(routineLogIntelligenceLine("Deploy button still present after deployment attempt. March may not have completed. Planning next run in 5 minutes."));
 			reschedule(LocalDateTime.now().plusMinutes(5));

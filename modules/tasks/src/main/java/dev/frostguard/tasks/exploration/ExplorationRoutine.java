@@ -24,6 +24,17 @@ public class ExplorationRoutine extends DelayedTask {
 	private static final PointData EXPLORATION_ENTRY_BOTTOM_RIGHT = new PointData(100, 1250);
     private static final PointData REWARD_POPUP_TOP_LEFT = new PointData(340, 1125);
     private static final PointData REWARD_POPUP_BOTTOM_RIGHT = new PointData(385, 1185);
+    // 2026-11-11: the outer Claim opens a second "Idle Income" window.
+    // Its inner, centered Claim must be recognised and pressed before Rewards appears.
+    private static final GreenLabelActionDetector.Region IDLE_INCOME_CLAIM_REGION =
+            new GreenLabelActionDetector.Region(213, 875, 507, 972);
+    private static final PointData IDLE_INCOME_CLOSE_TOP_LEFT = new PointData(613, 275);
+    private static final PointData IDLE_INCOME_CLOSE_BOTTOM_RIGHT = new PointData(643, 316);
+    private static final dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig IDLE_INCOME_TITLE_SEARCH =
+            dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig.builder()
+                    .withMaxAttempts(1).withThreshold(88)
+                    .withArea(AreaData.of(140, 220, 550, 370)).build();
+
 	private static final int MAX_OPEN_ATTEMPTS = 2;
 
 	public ExplorationRoutine(AccountDescriptor profile, TpDailyTaskEnum tpDailyTask) {
@@ -80,6 +91,7 @@ public class ExplorationRoutine extends DelayedTask {
 	}
 
 	private boolean isExplorationScreenVisible() {
+        if (idleIncomeVisible()) return true;
 		if (locateEnabledClaimButton().isFound()) {
 			return true;
 		}
@@ -94,47 +106,90 @@ public class ExplorationRoutine extends DelayedTask {
 		return explorationButton.isFound();
 	}
 
-	private boolean claimAvailableRewards() {
-		ImageSearchResultData claim = locateEnabledClaimButton();
-		if (!claim.isFound()) {
-			if (!locateDisabledClaimButton().isFound()) {
-				logWarning(routineLogExplorationLine("Neither enabled nor disabled claim state found; "
-						+ captureDiagnostic("claim-state-unknown")));
-			}
-			return false;
-		}
+    private boolean claimAvailableRewards() {
+        // A previously-open Idle Income panel can survive a failed run.
+        if (idleIncomeVisible()) return claimIdleIncome();
 
-		logInfo(routineLogExplorationLine(String.format(
-				"Enabled claim detected at %s (score %.2f). Tapping once and verifying state.",
-				claim.getPoint(), claim.getMatchPercentage())));
-        tapClaimButton(claim);
-        sleepTask(800);
-        // A successful claim opens a Rewards overlay. Detect that before trying
-        // to inspect the controls hidden behind it (the previous false failure).
-        if (rewardOverlayAppeared()) {
-            logInfo(routineLogExplorationLine("Rewards overlay confirmed; chest claim succeeded."));
-            dismissRewardPopup();
-            if (rewardsOverlayVisible()) {
-                logWarning(routineLogExplorationLine("Rewards claimed but overlay is still visible; "
-                        + captureDiagnostic("reward-overlay-still-open")));
+        ImageSearchResultData outer = locateEnabledClaimButton();
+        if (!outer.isFound()) {
+            if (!locateDisabledClaimButton().isFound()) {
+                logWarning(routineLogExplorationLine("No outer Claim or Idle Income found; "
+                        + captureDiagnostic("claim-state-unknown")));
             }
-            return true;
+            return false;
         }
-        if (locateDisabledClaimButton().isFound()
-                && !locateEnabledClaimButton().isFound()) return true;
+        logInfo(routineLogExplorationLine(String.format(
+                "Outer Claim found at %s (score %.2f). Opening Idle Income.",
+                outer.getPoint(), outer.getMatchPercentage())));
+        tapClaimButton(outer);
+        sleepTask(700);
 
-        // Neither claim state nor reward overlay is confirmed; do not tap again.
-        boolean disabled = locateDisabledClaimButton().isFound();
-		boolean enabled = locateEnabledClaimButton().isFound();
-		if (claimConfirmed(disabled, enabled)) {
-			logInfo(routineLogExplorationLine("Claim verified by disabled claim control."));
-			return true;
-		}
-		logWarning(routineLogExplorationLine("Claim outcome unknown (disabled=" + disabled
-				+ ", enabled=" + enabled + "); no repeated tap; "
-				+ captureDiagnostic("claim-unverified")));
-		return false;
-	}
+        // The outer button does not claim the loot: it opens a second Claim.
+        if (idleIncomeVisible()) return claimIdleIncome();
+        // Some UI versions may go straight to Rewards; still require evidence.
+        if (rewardOverlayAppeared()) return finishConfirmedRewards();
+        logWarning(routineLogExplorationLine("Outer Claim did not lead to Idle Income or Rewards; "
+                + captureDiagnostic("outer-claim-unconfirmed")));
+        return false;
+    }
+
+    private boolean claimIdleIncome() {
+        if (!idleIncomeVisible()) return false;
+        ImageSearchResultData first = detectIdleIncomeClaim();
+        if (!first.isFound()) {
+            logWarning(routineLogExplorationLine("Idle Income opened but inner green Claim absent; "
+                    + captureDiagnostic("inner-claim-missing")));
+            closeIdleIncomeIfVisible();
+            return false;
+        }
+        sleepTask(250);
+        ImageSearchResultData second = detectIdleIncomeClaim();
+        if (!RecognitionConsensus.agrees(first, second, 8) || !idleIncomeVisible()) {
+            logWarning(routineLogExplorationLine("Inner Claim could not be verified in two frames; "
+                    + captureDiagnostic("inner-claim-unstable")));
+            closeIdleIncomeIfVisible();
+            return false;
+        }
+        logInfo(routineLogExplorationLine("Idle Income Claim verified; tapping once at " + second.getPoint()));
+        tapInside(second);
+        sleepTask(650);
+        if (rewardOverlayAppeared()) return finishConfirmedRewards();
+        logWarning(routineLogExplorationLine("Inner Claim tapped but Rewards screen not confirmed; "
+                + captureDiagnostic("inner-claim-unconfirmed")));
+        closeIdleIncomeIfVisible();
+        return false;
+    }
+
+    private ImageSearchResultData detectIdleIncomeClaim() {
+        return GreenLabelActionDetector.detect(
+                ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER)),
+                IDLE_INCOME_CLAIM_REGION);
+    }
+
+    private boolean idleIncomeVisible() {
+        return templateSearchHelper.locatePattern(TemplatesEnum.EXPLORATION_IDLE_INCOME_TITLE,
+                IDLE_INCOME_TITLE_SEARCH).isFound();
+    }
+
+    private boolean finishConfirmedRewards() {
+        logInfo(routineLogExplorationLine("Rewards banner confirmed: claim succeeded."));
+        dismissRewardPopup();
+        if (rewardsOverlayVisible()) {
+            logWarning(routineLogExplorationLine("Rewards confirmed, but overlay did not close; "
+                    + captureDiagnostic("reward-overlay-still-open")));
+            return true; // Rewards received, do not falsely schedule another immediate claim.
+        }
+        closeIdleIncomeIfVisible();
+        return true;
+    }
+
+    private void closeIdleIncomeIfVisible() {
+        if (!idleIncomeVisible()) return;
+        tapInside(IDLE_INCOME_CLOSE_TOP_LEFT, IDLE_INCOME_CLOSE_BOTTOM_RIGHT);
+        sleepTask(450);
+        if (idleIncomeVisible()) logWarning(routineLogExplorationLine(
+                "Idle Income remained open after close; " + captureDiagnostic("idle-income-still-open")));
+    }
 
 	static boolean claimConfirmed(boolean disabledVisible, boolean enabledVisible) {
 		return disabledVisible && !enabledVisible;
