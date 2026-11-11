@@ -1,12 +1,32 @@
 package dev.frostguard.engine.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import java.util.HashMap;
+import dev.frostguard.api.configs.ConfigurationKeyEnum;
 
 import java.net.SocketTimeoutException;
 
 import org.junit.jupiter.api.Test;
 
 class AnalyticsServiceTest {
+
+    @Test
+    void externalTelemetryRequiresExplicitTrue() {
+        assertFalse(AnalyticsService.externalAnalyticsOptIn(null));
+        assertFalse(AnalyticsService.externalAnalyticsOptIn(new HashMap<>()));
+        HashMap<String, String> config = new HashMap<>();
+        config.put("ANALYTICS_ENABLED_BOOL", "false");
+        assertFalse(AnalyticsService.externalAnalyticsOptIn(config));
+        config.put("ANALYTICS_ENABLED_BOOL", "true");
+        assertTrue(AnalyticsService.externalAnalyticsOptIn(config));
+    }
+
+    @Test
+    void defaultsToDisabled() {
+        assertEquals("false", ConfigurationKeyEnum.ANALYTICS_ENABLED_BOOL.getDefaultValue());
+    }
 
     @Test
     void describesDeliveryFailureWithoutStackTrace() {
