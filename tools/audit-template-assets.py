@@ -2,6 +2,7 @@
 """Report UI templates whose image files are absent. Exit nonzero in strict mode."""
 import argparse
 import json
+import struct
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -10,6 +11,7 @@ ASSETS = ROOT / "modules/vision/src/main/resources"
 
 def audit():
     missing = []
+    invalid = []
     total = 0
     for raw in MANIFEST.read_text(encoding="utf-8").splitlines():
         line = raw.strip()
@@ -19,9 +21,17 @@ def audit():
         if not resource.startswith("/templates/"):
             continue
         total += 1
-        if not (ASSETS / resource.lstrip("/")).is_file():
+        asset = ASSETS / resource.lstrip("/")
+        if not asset.is_file():
             missing.append((name, resource))
-    return total, missing
+            continue
+        with asset.open("rb") as stream:
+            header = stream.read(24)
+        if (len(header) < 24 or header[:8] != b"\x89PNG\r\n\x1a\n"
+                or header[12:16] != b"IHDR"
+                or min(struct.unpack(">II", header[16:24])) == 0):
+            invalid.append((name, resource))
+    return total, missing, invalid
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -29,8 +39,12 @@ if __name__ == "__main__":
     parser.add_argument("--baseline", type=Path,
                         help="fail if any new missing asset appears beyond an existing baseline")
     args = parser.parse_args()
-    total, missing = audit()
-    print(f"Template audit: {total} references, {len(missing)} missing assets")
+    total, missing, invalid = audit()
+    print(f"Template audit: {total} references, {len(missing)} missing assets, {len(invalid)} invalid PNG headers")
+    for name, resource in invalid:
+        print(f"INVALID {name}: {resource}")
+    if invalid:
+        raise SystemExit(1)
     for name, resource in missing:
         print(f"MISSING {name}: {resource}")
     if args.baseline:

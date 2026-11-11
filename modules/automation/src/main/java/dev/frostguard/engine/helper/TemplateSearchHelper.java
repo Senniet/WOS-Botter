@@ -81,27 +81,33 @@ public class TemplateSearchHelper {
      */
     public ImageSearchResultData locateAction(TemplatesEnum preferred, SearchConfig cfg,
                                                TemplatesEnum... alternatives) {
+        Objects.requireNonNull(preferred, "preferred");
+        Objects.requireNonNull(cfg, "cfg");
         ImageSearchResultData primary = locatePattern(preferred, cfg);
-        if (primary != null && primary.isFound()) return primary;
+        if (confirmedAction(preferred, cfg, primary)) return primary;
         if (alternatives == null) return ImageSearchResultData.miss();
         for (TemplatesEnum alternative : alternatives) {
             if (alternative == null || alternative == preferred) continue;
             preemptionHook.run();
             ImageSearchResultData first = doSearch(alternative, cfg);
-            if (first == null || !first.isFound() || first.getPoint() == null) continue;
-            sleepWithPreemption(180);
-            preemptionHook.run();
-            ImageSearchResultData second = doSearch(alternative, cfg);
-            if (second != null && second.isFound() && second.getPoint() != null
-                    && first.getPoint().manhattanDistanceTo(second.getPoint()) <= FALLBACK_CONFIRMATION_DISTANCE) {
-                dbg("Action " + preferred.name() + " confirmed with alternate " + alternative.name()
-                        + " in two frames (" + score(first) + "/" + score(second) + ")");
-                return second;
+            if (confirmedAction(alternative, cfg, first)) {
+                dbg("Action " + preferred.name() + " confirmed with " + alternative.name());
+                return first;
             }
-            dbg("Action " + preferred.name() + " alternate " + alternative.name()
-                    + " not confirmed in two frames");
         }
+        recordMiss(preferred, cfg, primary);
         return ImageSearchResultData.miss();
+    }
+
+    private boolean confirmedAction(TemplatesEnum template, SearchConfig cfg,
+                                    ImageSearchResultData first) {
+        if (first == null || !first.isFound() || first.getPoint() == null) return false;
+        sleepWithPreemption(180);
+        preemptionHook.run();
+        ImageSearchResultData second = doSearch(template, cfg);
+        boolean agreed = RecognitionConsensus.agrees(first, second, FALLBACK_CONFIRMATION_DISTANCE);
+        if (!agreed) dbg("Action " + template.name() + " failed two-frame confirmation");
+        return agreed;
     }
 
     // ── multi-match (colour) ─────────────────────────────────────────
@@ -154,8 +160,7 @@ public class TemplateSearchHelper {
             sleepWithPreemption(160);
             preemptionHook.run();
             ImageSearchResultData second = greyscale ? doSearchGrey(tpl, cfg) : doSearchMultiScale(tpl, cfg);
-            if (second != null && second.isFound() && second.getPoint() != null
-                    && first.getPoint().manhattanDistanceTo(second.getPoint()) <= FALLBACK_CONFIRMATION_DISTANCE) {
+            if (RecognitionConsensus.agrees(first, second, FALLBACK_CONFIRMATION_DISTANCE)) {
                 dbg(tpl.name() + " verified via " + (greyscale ? "greyscale" : "multiscale")
                         + " scores=" + score(first) + "/" + score(second));
                 return second;
