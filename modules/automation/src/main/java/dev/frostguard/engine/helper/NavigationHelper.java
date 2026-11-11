@@ -659,7 +659,7 @@ public class NavigationHelper {
             // A recognised Rewards overlay says "Tap anywhere to exit". Do
             // not use ten blind Android Back events for this known screen.
             if (!atHome && !atWorld && pass <= 2
-                    && searcher.locateAction(TemplatesEnum.ARENA_REWARDS_BANNER,
+                    && searcher.locateAction(TemplatesEnum.SHARED_REWARDS_BANNER,
                             TemplateSearchHelper.SearchConfig.builder()
                                     .withMaxAttempts(1).withThreshold(85)
                                     .withArea(AreaData.of(30, 245, 690, 400)).build()).isFound()) {

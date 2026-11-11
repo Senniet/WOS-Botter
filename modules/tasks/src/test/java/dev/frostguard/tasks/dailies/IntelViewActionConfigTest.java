@@ -8,7 +8,9 @@ class IntelViewActionConfigTest {
         var c = IntelligenceRoutine.INTEL_DEPLOY_ACTION_SEARCH;
         assertEquals(88, c.getThreshold());
         assertTrue(c.hasArea());
-        assertEquals(1050, c.getArea().topLeft().getY());
+        assertEquals(425, c.getArea().topLeft().getX());
+        assertEquals(1135, c.getArea().topLeft().getY());
+        assertEquals(710, c.getArea().bottomRight().getX());
         assertEquals(1279, c.getArea().bottomRight().getY());
     }
 

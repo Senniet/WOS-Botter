@@ -93,6 +93,8 @@ public abstract class DelayedTask implements Runnable, Delayed, StaminaWaitSched
 
     // ── preemption ──────────────────────────────────────────────────
     private PreemptionToken preemptionToken;
+    private volatile boolean exclusiveUiTransaction;
+    private volatile String incompleteWorkReason;
 
     // ── construction ────────────────────────────────────────────────
 
@@ -138,7 +140,24 @@ public abstract class DelayedTask implements Runnable, Delayed, StaminaWaitSched
 
     protected boolean consumesStamina() { return false; }
 
-    protected boolean acceptsInjections() { return true; }
+    protected boolean acceptsInjections() { return !exclusiveUiTransaction; }
+
+    /** Keep global task preemption away from multi-step game UI transactions. */
+    public final boolean isExclusiveUiTransaction() { return exclusiveUiTransaction; }
+
+    protected final void runExclusiveUiTransaction(Runnable operation) {
+        boolean previous = exclusiveUiTransaction;
+        exclusiveUiTransaction = true;
+        try { operation.run(); }
+        finally { exclusiveUiTransaction = previous; }
+    }
+
+    /** A task can defer unfinished work without reporting overall success. */
+    protected final void markWorkIncomplete(String reason) {
+        incompleteWorkReason = java.util.Objects.requireNonNull(reason);
+    }
+
+    public final String getIncompleteWorkReason() { return incompleteWorkReason; }
 
     protected Object getDistinctKey() {
         return customTaskIdentifier;
@@ -150,6 +169,7 @@ public abstract class DelayedTask implements Runnable, Delayed, StaminaWaitSched
     public void run() {
         checkPreemption();
         staminaDeferral = null;
+        incompleteWorkReason = null;
         refreshProfileFromDb();
         checkPreemption();
         Map<String, String> configBeforeExecution = snapshotProfileConfig();

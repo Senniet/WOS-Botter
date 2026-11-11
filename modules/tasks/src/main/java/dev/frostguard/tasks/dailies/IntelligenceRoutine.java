@@ -35,6 +35,9 @@ import java.util.List;
 
 public class IntelligenceRoutine extends DelayedTask {
 
+    @Override
+    protected boolean acceptsInjections() { return false; }
+
 private static final int MIN_STAMINA_REQUIRED_FLOOR = 30;
 
 private static final int SURVIVOR_STAMINA_COST_VALUE = 12;
@@ -70,11 +73,11 @@ static final SearchConfig INTEL_VIEW_ACTION_SEARCH = SearchConfig.builder()
 // Recognition requires the action to be confirmed in two successive frames.
 static final SearchConfig INTEL_DEPLOY_ACTION_SEARCH = SearchConfig.builder()
         .withMaxAttempts(2).withDelay(250).withThreshold(88)
-        .withArea(AreaData.of(0, 1050, 719, 1279)).build();
+        .withArea(AreaData.of(425, 1135, 710, 1279)).build();
 
 private ImageSearchResultData findIntelDeploy() {
-    return templateSearchHelper.locateAction(TemplatesEnum.DEPLOY_BUTTON,
-            INTEL_DEPLOY_ACTION_SEARCH, TemplatesEnum.GATHER_DEPLOY_BUTTON);
+    return templateSearchHelper.locateAction(TemplatesEnum.INTEL_DEPLOY_BUTTON_MODERN,
+            INTEL_DEPLOY_ACTION_SEARCH, TemplatesEnum.DEPLOY_BUTTON);
 }
 
 private String intelDiagnostic(String kind) {
@@ -1285,6 +1288,10 @@ private void handleJourney(ImageSearchResultData result) {
 	}
 
 private void handleBeast(ImageSearchResultData beast) {
+    runExclusiveUiTransaction(() -> handleBeastExclusive(beast));
+}
+
+private void handleBeastExclusive(ImageSearchResultData beast) {
 		if (marchQueueLimitReached) {
 			logInfo(routineLogIntelligenceLine("Beast detected but march queue is full. Skipping deployment but marking as detected."));
 			return;
@@ -1334,7 +1341,8 @@ private void handleBeast(ImageSearchResultData beast) {
 			logWarning(routineLogIntelligenceLine(
 					"Deploy screen was not confirmed after Attack; " + intelDiagnostic("deploy-button-missing-after-attack")
                             + ". No march was sent; retrying in 5 minutes."));
-			reschedule(LocalDateTime.now().plusMinutes(5));
+			markWorkIncomplete("Intel Beast: Deploy button not confirmed after Attack");
+            reschedule(LocalDateTime.now().plusMinutes(5));
 			processingTask = false;
 			return;
 		}
@@ -1394,7 +1402,8 @@ private void handleBeast(ImageSearchResultData beast) {
 		if (!deploy.isFound()) {
 			logError(routineLogIntelligenceLine("Deploy button not detected after formation setup; " + intelDiagnostic("deploy-button-missing-before-click")
                     + ". Planning next run to try again in 5 minutes."));
-			reschedule(LocalDateTime.now().plusMinutes(5));
+			markWorkIncomplete("Intel Beast: Deploy button missing before click");
+            reschedule(LocalDateTime.now().plusMinutes(5));
 			processingTask = false;
 
 			return;
@@ -1433,16 +1442,33 @@ private void handleBeast(ImageSearchResultData beast) {
 			return;
 		}
 
-		deploy = templateSearchHelper.locatePattern(TemplatesEnum.DEPLOY_BUTTON, INTEL_DEPLOY_ACTION_SEARCH);
-		if (deploy.isFound()) {
-			logWarning(routineLogIntelligenceLine("Deploy button still present after deployment attempt. March may not have completed. Planning next run in 5 minutes."));
-			reschedule(LocalDateTime.now().plusMinutes(5));
-			processingTask = false;
+		deploy = templateSearchHelper.locatePattern(TemplatesEnum.INTEL_DEPLOY_BUTTON_MODERN,
+                INTEL_DEPLOY_ACTION_SEARCH);
+        if (deploy.isFound()) {
+            logWarning(routineLogIntelligenceLine("Deploy button still visible after tap; "
+                    + intelDiagnostic("deploy-still-visible") + ". No verified march; retrying later."));
+            markWorkIncomplete("Intel Beast: Deploy still visible after tap");
+            reschedule(LocalDateTime.now().plusMinutes(5));
+            processingTask = false;
+            return;
+        }
 
-			return;
-		}
+        // Disappearance alone does not prove that the march started. Confirm
+        // the world HUD before updating stamina, statistics, or mission progress.
+        ImageSearchResultData verifiedWorld = templateSearchHelper.locatePattern(
+                TemplatesEnum.GAME_HOME_WORLD,
+                SearchConfig.builder().withMaxAttempts(3).withDelay(400)
+                        .withThreshold(85).build());
+        if (!verifiedWorld.isFound()) {
+            logWarning(routineLogIntelligenceLine("Deploy disappeared, but no World screen was confirmed; "
+                    + intelDiagnostic("deploy-transition-unknown") + ". No progress deducted."));
+            markWorkIncomplete("Intel Beast: launch transition not confirmed");
+            reschedule(LocalDateTime.now().plusMinutes(5));
+            processingTask = false;
+            return;
+        }
 
-		logInfo(routineLogIntelligenceLine("Beast march deployed finished cleanly."));
+        logInfo(routineLogIntelligenceLine("Beast march deployment verified on World screen."));
 		beastMarchSent = true;
 		intelMarchesRemaining = Math.max(0, intelMarchesRemaining - 1);
 		if (intelMarchesRemaining <= 0) {

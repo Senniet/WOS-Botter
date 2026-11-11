@@ -19,6 +19,8 @@ import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.schedule.LaunchPoint;
 
 public class ExplorationRoutine extends DelayedTask {
+    @Override
+    protected boolean acceptsInjections() { return false; }
 
 	private static final PointData EXPLORATION_ENTRY_TOP_LEFT = new PointData(40, 1190);
 	private static final PointData EXPLORATION_ENTRY_BOTTOM_RIGHT = new PointData(100, 1250);
@@ -245,7 +247,7 @@ public class ExplorationRoutine extends DelayedTask {
 	}
 
     private boolean rewardsOverlayVisible() {
-        return templateSearchHelper.locatePattern(TemplatesEnum.ARENA_REWARDS_BANNER,
+        return templateSearchHelper.locatePattern(TemplatesEnum.SHARED_REWARDS_BANNER,
                 dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig.builder()
                         .withMaxAttempts(1).withThreshold(85)
                         .withArea(AreaData.of(30, 245, 690, 400)).build()).isFound();
