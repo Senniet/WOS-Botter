@@ -74,17 +74,16 @@ public abstract class EmulatorInstance {
     }
 
     private String adbPath() {
-        // BlueStacks 5 ships HD-Adb.exe, not adb.exe. Prefer its own ADB binary
-        // so the ddmlib bridge and instance discovery use the same ADB server.
+        // BlueStacks includes its own ADB client; keep using that for BlueStacks.
         File blueStacksAdb = new File(consolePath, "HD-Adb.exe");
         if (blueStacksAdb.isFile()) return blueStacksAdb.getAbsolutePath();
 
-        String wd = System.getProperty("user.dir");
-        for (String sub : new String[]{"tools", "packaging/desktop/target/input/lib"}) {
-            File f = new File(wd, sub + File.separator + "adb" + File.separator + "adb.exe");
-            if (f.exists()) return f.getAbsolutePath();
-        }
-        return consolePath + File.separator + "adb.exe";
+        // jpackage ships the bundled Android platform tools inside app/lib/adb,
+        // irrespective of the Windows working directory. Locate them relative
+        // to the launcher/runtime, not by relying only on user.dir.
+        return BundledAdbLocator.find(System.getProperty("user.dir"),
+                System.getProperty("java.home"),
+                System.getProperty("jpackage.app-path"), consolePath);
     }
 
     private void killAdb() {
