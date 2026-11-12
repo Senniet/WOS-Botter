@@ -217,7 +217,27 @@ public class EmuConfigLayoutController {
 			{
 				browseBtn.setOnAction(evt -> {
 					EmulatorAux target = getTableView().getItems().get(getIndex());
-					File picked = promptForExecutable("Select" + target.getEmulatorType().getExecutableName());
+					if (target.getEmulatorType() == EmulatorType.SERVE_EMU) {
+                        TextInputDialog dialog = new TextInputDialog(target.getPath());
+                        dialog.setTitle("serve-emu ADB instellen");
+                        dialog.setHeaderText("ADB-adres van de TrueNAS-emulator");
+                        dialog.setContentText("host:poort (meerdere adressen gescheiden door komma's)");
+                        dialog.showAndWait().ifPresent(value -> {
+                            try {
+                                String cleaned = String.join(",",
+                                        dev.frostguard.engine.emulator.instance.ServeEmuEmulatorInstance
+                                                .validateEndpoints(value));
+                                target.setPath(cleaned);
+                                tableviewEmulators.refresh();
+                                ScheduleService.obtain().persistEmulatorPath(
+                                        target.getEmulatorType().getConfigKey(), cleaned);
+                            } catch (IllegalArgumentException invalid) {
+                                displayError(invalid.getMessage());
+                            }
+                        });
+                        return;
+                    }
+                    File picked = promptForExecutable("Select" + target.getEmulatorType().getExecutableName());
 
 					if (picked == null) {
 						return;
