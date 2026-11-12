@@ -455,7 +455,8 @@ public class LauncherLayoutController implements IProfileLoadListener, StaminaCh
 
         if (null != activeEmulator) {
             String activePath = globalConfig.get(activeEmulator.getConfigKey());
-            if (activePath != null && new File(activePath).exists()) {
+            if (activePath != null && (activeEmulator == EmulatorType.SERVE_EMU
+                    ? !activePath.isBlank() : new File(activePath).exists())) {
                 activeEmulatorValid = true;
             } else {
                 ScheduleService.obtain().persistEmulatorPath(activeEmulator.getConfigKey(), null);
@@ -468,9 +469,11 @@ public class LauncherLayoutController implements IProfileLoadListener, StaminaCh
                 continue;
 
             String emulatorPath = globalConfig.get(emulator.getConfigKey());
-            if (emulatorPath != null && new File(emulatorPath).exists()) {
+            if (emulatorPath != null && (emulator == EmulatorType.SERVE_EMU
+                    ? !emulatorPath.isBlank() : new File(emulatorPath).exists())) {
                 foundEmulators.add(emulator);
             } else {
+                if (emulator == EmulatorType.SERVE_EMU) continue;
                 File emulatorFile = new File(emulator.getDefaultPath());
                 if (emulatorFile.exists()) {
                     ScheduleService.obtain().persistEmulatorPath(emulator.getConfigKey(), emulatorFile.getParent());
@@ -555,6 +558,23 @@ public class LauncherLayoutController implements IProfileLoadListener, StaminaCh
     }
 
     private void selectEmulatorManually(EmulatorType selectedEmulator) { /* internal */
+        if (selectedEmulator == EmulatorType.SERVE_EMU) {
+            javafx.scene.control.TextInputDialog dialog = new javafx.scene.control.TextInputDialog();
+            dialog.setTitle("Connect serve-emu on TrueNAS");
+            dialog.setHeaderText("Enter remote ADB host:port; comma-separated for multiple devices");
+            dialog.setContentText("ADB endpoint(s):");
+            var result = dialog.showAndWait();
+            if (result.isPresent()) {
+                try {
+                    dev.frostguard.engine.emulator.instance.ServeEmuEmulatorInstance.validateEndpoints(result.get());
+                    ScheduleService.obtain().persistEmulatorPath(selectedEmulator.getConfigKey(), result.get());
+                    ScheduleService.obtain().persistEmulatorPath(ConfigurationKeyEnum.CURRENT_EMULATOR_STRING.name(), selectedEmulator.name());
+                    return;
+                } catch (IllegalArgumentException ex) { showErrorAndExit(ex.getMessage()); return; }
+            }
+            showErrorAndExit("No serve-emu ADB endpoint supplied");
+            return;
+        }
         FileChooser fileChooser = new FileChooser();
         fileChooser.setTitle("Select Emulator Executable for " + selectedEmulator.getDisplayName());
 
