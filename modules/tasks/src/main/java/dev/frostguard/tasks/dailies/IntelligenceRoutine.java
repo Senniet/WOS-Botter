@@ -619,26 +619,42 @@ private int redeemCompletedMissions() {
 	}
 
 private int redeemAllCompletedMissions(ImageSearchResultData claimAll) {
-		List<ImageSearchResultData> completed = templateSearchHelper.locateAllPatterns(
-				TemplatesEnum.INTEL_COMPLETED, searchConfigMultiple);
-		logInfo(routineLogIntelligenceLine("Intel Claim All detected. Collecting "
-				+ Math.max(1, completed.size()) + " completed mission(s) with one action."));
-		tapInside(claimAll);
-		sleepTask(1_500);
-		tapInside(new PointData(700, 1270), new PointData(710, 1280), 6, 250);
-		sleepTask(1_000);
+        List<ImageSearchResultData> completed = templateSearchHelper.locateAllPatterns(
+                TemplatesEnum.INTEL_COMPLETED, searchConfigMultiple);
+        logInfo(routineLogIntelligenceLine("Intel Claim All detected. Attempting one verified claim action."));
+        tapInside(claimAll);
+        sleepTask(700);
 
-		ImageSearchResultData remaining = templateSearchHelper.locatePattern(
-				TemplatesEnum.INTEL_CLAIM_ALL, INTEL_CLAIM_ALL_SEARCH);
-		if (!remaining.isFound()) {
-			logInfo(routineLogIntelligenceLine("Intel Claim All completed and the button disappeared."));
-			return Math.max(1, completed.size());
-		}
+        // Real Intel Claim All opens the Rewards overlay. The previous six
+        // blind taps at (705,1275) could navigate away after dismissing it.
+        ImageSearchResultData rewards = templateSearchHelper.locateAction(
+                TemplatesEnum.SERVE_EMU_REWARDS_BANNER,
+                SearchConfig.builder().withMaxAttempts(2).withDelay(180)
+                        .withThreshold(90).withArea(AreaData.of(40,245,680,425)).build());
+        if (rewards.isFound()) {
+            tapInside(AreaData.of(290, 1140, 430, 1205));
+            sleepTask(500);
+        }
 
-		logWarning(routineLogIntelligenceLine(
-				"Intel Claim All remained visible after the tap. Falling back to individual completed markers."));
-		return redeemCompletedMissionsIndividually();
-	}
+        boolean intelVisible = intelScreenHelper.isIntelScreenActive();
+        if (!intelVisible) {
+            logWarning(routineLogIntelligenceLine("Claim All did not return to verified Intel map; "
+                    + intelDiagnostic("claim-all-map-unverified") + ". Stopping instead of blind recovery."));
+            markWorkIncomplete("Intel Claim All: map not confirmed after claim");
+            reschedule(LocalDateTime.now().plusMinutes(5));
+            processingTask = false;
+            return 0;
+        }
+        ImageSearchResultData remaining = templateSearchHelper.locatePattern(
+                TemplatesEnum.INTEL_CLAIM_ALL, INTEL_CLAIM_ALL_SEARCH);
+        if (IntelClaimRewardConfirmation.isConfirmed(intelVisible, remaining.isFound())) {
+            logInfo(routineLogIntelligenceLine("Intel Claim All confirmed: map visible and active button absent."));
+            return Math.max(1, completed.size());
+        }
+        logWarning(routineLogIntelligenceLine("Intel Claim All still active on verified map; "
+                + "trying individually only from the known Intel screen."));
+        return redeemCompletedMissionsIndividually();
+    }
 
 private int redeemCompletedMissionsIndividually() {
 		int claimedRewards = 0;
