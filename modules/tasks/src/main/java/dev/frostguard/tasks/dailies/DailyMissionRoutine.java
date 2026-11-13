@@ -25,7 +25,10 @@ private static final int FINAL_CHECK_BEFORE_RESET_MINUTES_VALUE = 2;
 
 private static final int SAFETY_RESCHEDULE_MINUTES_VALUE = 30;
 
-private static final int POPUP_DISMISS_TAP_COUNT_VALUE = 3;
+private static final int UNVERIFIED_RETRY_MINUTES = 5;
+
+// One tap closes the reward overlay; extra taps also close the underlying Daily screen.
+private static final int POPUP_DISMISS_TAP_COUNT_VALUE = 1;
 
 private static final int MAX_INDIVIDUAL_CLAIMS = 20;
 
@@ -41,7 +44,7 @@ private static final SearchConfig DAILY_SCREEN_TITLE_SEARCH = SearchConfig.build
 		.withMaxAttempts(3)
 		.withDelay(300)
 		.withThreshold(87)
-		.withArea(new AreaData(new PointData(180, 70), new PointData(540, 170)))
+		.withArea(new AreaData(new PointData(120, 80), new PointData(600, 225)))
 		.build();
 
 private static final SearchConfig DAILY_TAB_BUTTON_SEARCH = SearchConfig.builder()
@@ -56,6 +59,8 @@ private static final GreenLabelActionDetector.Region DAILY_CLAIM_ALL_REGION =
 private static final GreenLabelActionDetector.Region DAILY_CLAIM_REGION =
         new GreenLabelActionDetector.Region(515, 528, 692, 634);
 
+private boolean claimActionObserved;
+
 private boolean autoScheduleEnabled;
 
 private int checkOffsetMinutes;
@@ -67,13 +72,14 @@ public DailyMissionRoutine(AccountDescriptor profile, TpDailyTaskEnum dailyMissi
 @Override
 	protected void execute() {
 
+        claimActionObserved = false;
 		hydrateTaskConfiguration();
 		reachDailyMissions();
 		boolean dailyScreenReached = switchToDailyMissionsTabFlow();
 		boolean claimFlowCompleted = dailyScreenReached && redeemAllRewards();
-		if (claimFlowCompleted) {
-			StatisticsService.obtain().addToCounter(profile, "Daily Missions Claimed", 1);
-		}
+        if (shouldCountClaim(claimFlowCompleted, claimActionObserved)) {
+            StatisticsService.obtain().addToCounter(profile, "Daily Missions Claimed", 1);
+        }
         // Never press Android Back when the Daily Missions screen was never
         // confirmed. On a City/World HUD that can open the game's Quit prompt.
         if (dailyScreenReached) {
@@ -84,6 +90,14 @@ public DailyMissionRoutine(AccountDescriptor profile, TpDailyTaskEnum dailyMissi
         }
 
 		configureRecurringBehaviorFlow();
+        if (!dailyScreenReached || !claimFlowCompleted) {
+            LocalDateTime retryAt = nextUnverifiedRetry(LocalDateTime.now());
+            reschedule(retryAt);
+            logWarning(routineLogDailyMissionLine("Daily mission result unverified; "
+                    + "no completion recorded. Retrying at "
+                    + retryAt.format(DATETIME_FORMATTER)));
+            return;
+        }
 		queueNextExecution();
 	}
 
@@ -140,7 +154,7 @@ private ImageSearchResultData currentDailyTitle() {
         if (original.isFound()) return original;
         return templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_DAILY_TITLE,
                 SearchConfig.builder().withMaxAttempts(2).withDelay(150)
-                        .withThreshold(90).withArea(AreaData.of(170, 105, 545, 210)).build());
+                        .withThreshold(90).withArea(AreaData.of(120, 80, 600, 225)).build());
     }
 
 private ImageSearchResultData seekForIndividualClaimButton() {
@@ -188,8 +202,9 @@ private boolean redeemRewardsIndividually() {
 		while (claimedCount < MAX_INDIVIDUAL_CLAIMS) {
 			ImageSearchResultData claimResult = seekForIndividualClaimButton();
 			if (!claimResult.isFound()) {
-				logInfo(routineLogDailyMissionLine("Individual collecting complete. Claimed " + claimedCount + " rewards"));
-				return true;
+                logInfo(routineLogDailyMissionLine("Individual collecting complete. Claimed " + claimedCount + " rewards"));
+                claimActionObserved = claimedCount > 0;
+                return true;
 			}
 
 			claimedCount++;
@@ -286,6 +301,10 @@ private void reachDailyMissions() {
 
 	}
 
+static LocalDateTime nextUnverifiedRetry(LocalDateTime now) {
+        return now.plusMinutes(UNVERIFIED_RETRY_MINUTES);
+    }
+
 private void queueNextExecution() {
 		if (isRecurring()) {
 			queueManualMode();
@@ -308,16 +327,25 @@ private LocalDateTime queueAtOffsetTime(LocalDateTime proposedTime, LocalDateTim
 	}
 
 private boolean redeemAllRewards() {
-		logInfo(routineLogDailyMissionLine("Scanning for claim buttons"));
+        logInfo(routineLogDailyMissionLine("Scanning for claim buttons"));
+        ImageSearchResultData claimAllResult = seekForClaimAllButton();
+        boolean claimed = claimAllResult.isFound()
+                ? redeemAllRewardsAtOnce(claimAllResult)
+                : redeemRewardsIndividually();
+        if (claimed && !currentDailyTitle().isFound()) {
+            logWarning(routineLogDailyMissionLine("Claim flow ended outside verified Daily Missions screen; "
+                    + captureDailyDiagnostic("daily-postclaim-screen-unverified")));
+            return false;
+        }
+        if (claimed && claimAllResult.isFound()) {
+            claimActionObserved = true;
+        }
+        return claimed;
+    }
 
-		ImageSearchResultData claimAllResult = seekForClaimAllButton();
-
-		if (claimAllResult.isFound()) {
-			return redeemAllRewardsAtOnce(claimAllResult);
-		} else {
-			return redeemRewardsIndividually();
-		}
-	}
+    static boolean shouldCountClaim(boolean completed, boolean actionObserved) {
+        return completed && actionObserved;
+    }
 
 private void dismissInterface() {
 		pressBack();
