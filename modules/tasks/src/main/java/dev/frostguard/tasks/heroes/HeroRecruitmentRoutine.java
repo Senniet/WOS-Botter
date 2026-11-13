@@ -177,6 +177,12 @@ public class HeroRecruitmentRoutine extends DelayedTask {
     }
 
     private boolean currentHeroRecruitmentVisible() {
+        // The 2026 Hero page moved the heading higher. The old title template
+        // fails on the 23:58 frame, so confirm either known title in its own
+        // header ROI before deciding whether to navigate or click.
+        if (templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_HERO_MODERN_RECRUIT_TITLE,
+                TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1).withThreshold(90)
+                        .withArea(AreaData.of(390, 70, 715, 330)).build()).isFound()) return true;
         return templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_HERO_RECRUIT_TITLE,
                 TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1).withThreshold(90)
                         .withArea(AreaData.of(390, 130, 710, 315)).build()).isFound();

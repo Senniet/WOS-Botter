@@ -732,9 +732,18 @@ private void finalizePostIntelTaskFlow() {
 			requeueAutoJoinTaskFlow();
 		}
 
-		autoJoinDisabledForIntel = false;
-		shouldRequeueGatherAfterIntel = false;
-		shouldRequeueAutoJoinAfterIntel = false;
+        autoJoinDisabledForIntel = false;
+        shouldRequeueGatherAfterIntel = false;
+        shouldRequeueAutoJoinAfterIntel = false;
+        if (!Thread.currentThread().isInterrupted()) {
+            try {
+                navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME, this::checkPreemption);
+                logInfo(routineLogIntelligenceLine("Intel flow returned to verified Home"));
+            } catch (dev.frostguard.engine.error.HomeNotFoundException missing) {
+                logWarning(routineLogIntelligenceLine("Intel finished but could not verify Home: "
+                        + missing.getMessage()));
+            }
+        }
 	}
 
 private void recallGatherTroopsFlow() {

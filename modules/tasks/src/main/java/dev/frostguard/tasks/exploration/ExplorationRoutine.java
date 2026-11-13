@@ -198,6 +198,12 @@ public class ExplorationRoutine extends DelayedTask {
     }
 
     private boolean idleIncomeVisible() {
+        // Captured at 23:55:19: the current game clearly shows Idle Income,
+        // but the older title templates scored only ~21% and blocked Claim.
+        if (templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_IDLE_INCOME_TITLE_NOV_2026,
+                dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig.builder()
+                        .withMaxAttempts(1).withThreshold(90)
+                        .withArea(AreaData.of(210, 233, 520, 330)).build()).isFound()) return true;
         if (templateSearchHelper.locatePattern(TemplatesEnum.EXPLORATION_IDLE_INCOME_TITLE,
                 IDLE_INCOME_TITLE_SEARCH).isFound()) return true;
         if (templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_IDLE_INCOME_TITLE,
@@ -209,7 +215,7 @@ public class ExplorationRoutine extends DelayedTask {
         // in the narrow title strip; never treat a generic green button as proof.
         try {
             String title = emuManager.readText(EMULATOR_NUMBER,
-                    new PointData(192, 301), new PointData(522, 366),
+                    new PointData(235, 250), new PointData(495, 311),
                     OcrSettingsData.builder()
                             .textLayout(OcrSettingsData.TextLayout.SINGLE_LINE).build());
             return isIdleIncomeTitle(title);

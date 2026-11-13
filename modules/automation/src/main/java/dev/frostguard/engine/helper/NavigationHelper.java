@@ -697,35 +697,37 @@ public class NavigationHelper {
                 broadcastDebug("Unrecognised location, but task accepts ANY; no navigation input sent");
                 return LaunchPoint.ANY;
             }
-            // Resource searches can hide the home/world anchor without offering
-            // a header back arrow. This is the only confirmed overlay for which
-            // Android Back is safe: first dismiss a verified resource modal,
-            // then close the still-visible search pane, at most once.
+            // The blue on-screen Back arrow is a stronger signal than the
+            // generic "Wood/Meat" search templates. Check it FIRST so Intel,
+            // Arena, Research and Events exit promptly instead of wasting
+            // several seconds searching for a gathering panel on the wrong page.
+            var back = findVerifiedBackArrow();
+            if (back.isFound()) {
+                checkpoint.run();
+                taps.tapInside(back);
+                broadcastDebug("Used verified on-screen Back arrow; checking Home/World");
+                interruptibleWait(650);
+                pass++;
+                continue;
+            }
+            // Resource search recovery remains available only when no
+            // verified page header is present.
             if (pass <= 2 && recoverVerifiedResourceSearch(checkpoint)) {
                 pass++;
                 continue;
             }
-            // Never send a blind Android Back: it brings up Quit game? when
-            // world detection is briefly unavailable. Use the verified visible
-            // header arrow instead, and check location again after it closes a page.
-            var back = findVerifiedBackArrow();
-            if (!back.isFound()) {
-                if (shouldRecheckUnknownScreen(pass)) {
-                    broadcastDebug("No home/world anchor or verified back arrow on pass " + pass
-                            + "; passively rechecking after screen settle, without tapping");
-                    interruptibleWait(UNKNOWN_SCREEN_PASSIVE_SETTLE_MS);
-                    pass++;
-                    continue;
-                }
-                throw new HomeNotFoundException("Unknown location after passive checks; "
-                        + "no verified screen back arrow; refusing blind Android Back "
-                        + "to protect against Quit game dialog");
+            // Neither a verified page arrow nor a resource-search recovery is
+            // present. Do not send an Android Back on the wilderness map.
+            if (shouldRecheckUnknownScreen(pass)) {
+                broadcastDebug("No Home/World anchor or verified Back arrow on pass " + pass
+                        + "; passively rechecking without tapping");
+                interruptibleWait(UNKNOWN_SCREEN_PASSIVE_SETTLE_MS);
+                pass++;
+                continue;
             }
-            checkpoint.run();
-            taps.tapInside(back);
-            broadcastDebug("Used verified on-screen back arrow; checking location");
-            interruptibleWait(650);
-            pass++;
+            throw new HomeNotFoundException("Unknown location after passive checks; "
+                    + "no verified screen back arrow; refusing blind Android Back "
+                    + "to protect against Quit game dialog");
         }
         throw new HomeNotFoundException("Home not found after " + budget + " verified recovery attempts");
     }
@@ -788,6 +790,30 @@ public class NavigationHelper {
             var next = searcher.locatePattern(TemplatesEnum.GAME_HEADER_BACK_ARROW_CURRENT, oldConfig);
             if (RecognitionConsensus.agrees(first, next, 12)) return next;
         }
+        // Live Intel and Event pages place their blue Back arrow at y=5..70,
+        // not y=65..155. The old ROI could never match that arrow, causing
+        // HomeNotFoundException despite a visible safe exit control.
+        var intelConfig = TemplateSearchHelper.SearchConfig.builder()
+                .withMaxAttempts(1).withThreshold(90)
+                .withArea(AreaData.of(0, 0, 110, 105)).build();
+        first = searcher.locatePattern(TemplatesEnum.SERVE_EMU_HEADER_BACK_INTEL_2026, intelConfig);
+        if (first.isFound()) {
+            interruptibleWait(130);
+            var next = searcher.locatePattern(TemplatesEnum.SERVE_EMU_HEADER_BACK_INTEL_2026, intelConfig);
+            if (RecognitionConsensus.agrees(first, next, 12)) return next;
+        }
+        first = searcher.locatePattern(TemplatesEnum.SERVE_EMU_HEADER_BACK_EVENTS_2026, intelConfig);
+        if (first.isFound()) {
+            interruptibleWait(130);
+            var next = searcher.locatePattern(TemplatesEnum.SERVE_EMU_HEADER_BACK_EVENTS_2026, intelConfig);
+            if (RecognitionConsensus.agrees(first, next, 12)) return next;
+        }
+        first = searcher.locatePattern(TemplatesEnum.SERVE_EMU_HEADER_BACK_HERO_2026, intelConfig);
+        if (first.isFound()) {
+            interruptibleWait(130);
+            var next = searcher.locatePattern(TemplatesEnum.SERVE_EMU_HEADER_BACK_HERO_2026, intelConfig);
+            if (RecognitionConsensus.agrees(first, next, 12)) return next;
+        }
         first = searcher.locatePattern(TemplatesEnum.SERVE_EMU_HEADER_BACK, currentConfig);
         if (first.isFound()) {
             interruptibleWait(120);
@@ -808,7 +834,9 @@ public class NavigationHelper {
     private ImageSearchResultData findWorldAnchor() {
         var config = TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
                 .withThreshold(90).withArea(AreaData.of(590, 1145, 715, 1275)).build();
-        var current = searcher.locatePattern(TemplatesEnum.SERVE_EMU_WORLD_ANCHOR, config);
+        var current = searcher.locatePattern(TemplatesEnum.SERVE_EMU_WORLD_ANCHOR_CURRENT, config);
+        if (current.isFound()) return current;
+        current = searcher.locatePattern(TemplatesEnum.SERVE_EMU_WORLD_ANCHOR, config);
         if (current.isFound()) return current;
         return searcher.locatePattern(TemplatesEnum.GAME_HOME_WORLD, config);
     }

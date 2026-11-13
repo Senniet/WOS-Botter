@@ -7,6 +7,7 @@ import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.api.domain.AreaData;
 import dev.frostguard.api.domain.ImageSearchResultData;
 import dev.frostguard.api.domain.PointData;
+import dev.frostguard.api.domain.OcrSettingsData;
 import dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig;
 import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.schedule.LaunchPoint;
@@ -95,6 +96,14 @@ public MailRewardsRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
 
         boolean allTabsVerified = handleAllMailTabs();
         dismissMailMenu();
+        if (!isCurrentMailMenuVisible()) {
+            try {
+                navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME, this::checkPreemption);
+            } catch (dev.frostguard.engine.error.HomeNotFoundException missing) {
+                logWarning(routineLogMailRewardsLine("Mail closed, Home not yet verified: "
+                        + missing.getMessage()));
+            }
+        }
         if (!allTabsVerified) {
             LocalDateTime retryAt = LocalDateTime.now().plusMinutes(ERROR_RETRY_MINUTES_VALUE);
             logWarning(routineLogMailRewardsLine("One or more mail tabs remained unverified; "
@@ -419,10 +428,38 @@ private boolean handleMailTab(PointData tabButton, String tabName, boolean openU
         if (openUnreadReports
                 && result.decision() == Decision.STOP_NO_PROGRESS
                 && !result.remainingEvidence().isEmpty()) {
+            // A single, non-reward [Survey] invitation can leave a red
+            // System unread badge indefinitely. Do not repeatedly open it
+            // or schedule ten-minute reward retries after Read & Claim All.
+            if (singleSurveyNonRewardMail(result.remainingEvidence())) {
+                logInfo(routineLogMailRewardsLine("One [Survey] System invitation has no "
+                        + "claimable reward; leaving it unread and continuing the normal cycle"));
+                return true;
+            }
             openUnreadSystemReports(result.remainingEvidence());
             return confirmMailMenuOpened() && findUnreadMailEvidence().isEmpty();
         }
         return result.decision() == Decision.COMPLETE;
+    }
+
+private boolean singleSurveyNonRewardMail(Evidence evidence) {
+        if (!isCurrentMailMenuVisible() || evidence.count() != 1) return false;
+        try {
+            OcrSettingsData settings = OcrSettingsData.configurator()
+                    .textLayout(OcrSettingsData.TextLayout.SPARSE).build();
+            PointData topLeft = new PointData(125, 155);
+            PointData bottomRight = new PointData(675, 285);
+            String first = emuManager.readText(EMULATOR_NUMBER, topLeft, bottomRight, settings, false);
+            sleepTask(180);
+            String second = emuManager.readText(EMULATOR_NUMBER, topLeft, bottomRight, settings, false);
+            return MailNonRewardSurveyPolicy.canLeaveSurveyUnread(evidence.count(), first, second);
+        } catch (RuntimeException | java.io.IOException | dev.frostguard.vision.ocr.OcrException error) {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new java.util.concurrent.CancellationException("Survey mail OCR interrupted");
+            }
+            logDebug("Mail survey text cannot be verified; retaining normal mail checks");
+            return false;
+        }
     }
 
 private void queueNextRun() {

@@ -292,6 +292,7 @@ public class ArenaRoutine extends DelayedTask {
         if (!openChallengeList()) {
             logWarning("Failed to open challenge list; " + captureArenaDiagnostic("challenge-list-not-open"));
             reschedule(java.time.LocalDateTime.now().plusMinutes(10));
+            returnHomeAfterArena();
             return;
         }
 
@@ -302,6 +303,7 @@ public class ArenaRoutine extends DelayedTask {
             // checker itself requires two 5/5 green-count observations.
             claimDailyChallengesChest();
             reschedule(java.time.LocalDateTime.now().plusMinutes(10));
+            returnHomeAfterArena();
             return;
         }
 
@@ -313,6 +315,40 @@ public class ArenaRoutine extends DelayedTask {
         claimDailyChallengesChest();
 
         rescheduleWithActivationHour();
+        returnHomeAfterArena();
+    }
+
+    /** Leave Arena cleanly, including its separate floating Challenge List. */
+    private void returnHomeAfterArena() {
+        try {
+            if (challengeListVisible()) {
+                var config = SearchConfig.builder().withMaxAttempts(1).withThreshold(90)
+                        .withArea(AreaData.of(625, 145, 712, 235)).build();
+                var first = templateSearchHelper.locatePattern(
+                        TemplatesEnum.SERVE_EMU_ARENA_LIST_CLOSE_2026, config);
+                if (!first.isFound()) {
+                    logWarning("Arena Challenge List close X missing; refusing blind tap");
+                    return;
+                }
+                sleepTask(170);
+                var confirmed = templateSearchHelper.locatePattern(
+                        TemplatesEnum.SERVE_EMU_ARENA_LIST_CLOSE_2026, config);
+                if (!dev.frostguard.engine.helper.RecognitionConsensus.agrees(first, confirmed, 12)) {
+                    logWarning("Arena Challenge List close X moved; leaving page unchanged");
+                    return;
+                }
+                tapInside(confirmed);
+                sleepTask(450);
+                if (challengeListVisible()) {
+                    logWarning("Arena Challenge List remained open after verified close; no repeat");
+                    return;
+                }
+            }
+            navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME, this::checkPreemption);
+            logInfo("Arena closed and Home verified after Daily Challenges pass");
+        } catch (dev.frostguard.engine.error.HomeNotFoundException missing) {
+            logWarning("Arena finished but Home recovery is not yet verified: " + missing.getMessage());
+        }
     }
 
     private boolean isWithinExecutionWindow() {
@@ -574,8 +610,8 @@ public class ArenaRoutine extends DelayedTask {
         tapNear(DAILY_CHEST_POINT);
 
         if (!waitForRewardsPanel()) {
-            logWarning("Daily Challenges chest tapped but no Rewards panel appeared. Leaving it for the next run.");
-            pressBack();
+            logWarning("Daily Challenges chest tapped but no Rewards panel appeared. "
+                    + "No blind Android Back: recovery will inspect the known Arena page.");
             return;
         }
 

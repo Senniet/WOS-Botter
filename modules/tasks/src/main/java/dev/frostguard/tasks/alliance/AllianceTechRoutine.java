@@ -81,23 +81,59 @@ public AllianceTechRoutine(AccountDescriptor profile, TpDailyTaskEnum tpDailyTas
 			return;
 		}
 
-		if (!locateDonationButton()) {
-			manageTaskFailure("Thumbs-up donation button not found");
-			return;
-		}
+        try {
+            if (!locateDonationButton()) {
+                manageTaskFailure("Thumbs-up donation button not found");
+                return;
+            }
 
-		performDonationsFlow();
-		donationsSuccessful = true;
+            performDonationsFlow();
+            donationsSuccessful = true;
 
-		inspectAndTriggerAllianceShop();
+            inspectAndTriggerAllianceShop();
 
-		queueNextRun();
+            queueNextRun();
+        } finally {
+            if (!Thread.currentThread().isInterrupted()) {
+                returnToHomeAfterAllianceContributions();
+            }
+        }
 	}
 
 @Override
 	public boolean provideDailyMissionProgress() {
 		return donationsSuccessful;
 	}
+
+private void returnToHomeAfterAllianceContributions() {
+        // Current alliance donation UI is a "Long Live Our Alliance" pop-up
+        // with a close X in the top-right, not an Android Back page.
+        try {
+            OcrSettingsData titleOcr = OcrSettingsData.configurator()
+                    .textLayout(OcrSettingsData.TextLayout.SINGLE_LINE).build();
+            PointData topLeft = new PointData(145, 20);
+            PointData bottomRight = new PointData(600, 105);
+            String first = emuManager.readText(EMULATOR_NUMBER, topLeft, bottomRight, titleOcr, false);
+            sleepTask(160);
+            String second = emuManager.readText(EMULATOR_NUMBER, topLeft, bottomRight, titleOcr, false);
+            if (AllianceContributionExitPolicy.isVerifiedContributionTitle(first, second)) {
+                logInfo("Alliance donation pop-up title verified; closing it once");
+                tapInside(AreaData.of(640, 15, 705, 90));
+                sleepTask(550);
+                String after = emuManager.readText(EMULATOR_NUMBER, topLeft, bottomRight, titleOcr, false);
+                if (AllianceContributionExitPolicy.isVerifiedContributionTitle(after, after)) {
+                    logWarning("Alliance contribution pop-up stayed open; no repeat or blind Back");
+                    return;
+                }
+            }
+            navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME, this::checkPreemption);
+            logInfo("Alliance donation flow returned to verified Home");
+        } catch (dev.frostguard.engine.error.HomeNotFoundException missing) {
+            logWarning("Alliance contributions finished; Home was not verified: " + missing.getMessage());
+        } catch (java.io.IOException | dev.frostguard.vision.ocr.OcrException failure) {
+            logWarning("Alliance contribution screen OCR unavailable; refusing unknown close tap");
+        }
+    }
 
 private void inspectAndTriggerAllianceShop() {
 		boolean shopEnabled = profile.getConfig(

@@ -220,6 +220,18 @@ public ResearchRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
         if (researchTextResult == null) {
             logWarning(routineLogResearchLine("No enabled category had an available research. Planning next run in 1 hour."));
             this.reschedule(LocalDateTime.now().plusHours(1));
+            // A maxed/locked research tree must not strand the next task on
+            // Tech Research. Only the central verified-arrow navigation may
+            // leave it; never use a blind Android Back or tap a locked item.
+            if (isResearchTreeVisible()) {
+                try {
+                    navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME, this::checkPreemption);
+                    logInfo(routineLogResearchLine("No research available; returned to verified Home"));
+                } catch (dev.frostguard.engine.error.HomeNotFoundException missing) {
+                    logWarning(routineLogResearchLine("Research unavailable, Home not yet confirmed: "
+                            + missing.getMessage()));
+                }
+            }
             return;
         }
 

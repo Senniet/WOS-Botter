@@ -31,7 +31,7 @@ import dev.frostguard.tasks.events.EventPeriodVisit;
 
 public class TundraTruckEventRoutine extends DelayedTask {
 
-	private static final Pattern TRUCK_COUNT_PATTERN = Pattern.compile("^(\\d+)\\s*/\\s*(\\d+)$");
+	private static final Pattern TRUCK_COUNT_PATTERN = Pattern.compile("(?<!\\d)(\\d{1,2})\\s*/\\s*(\\d{1,2})(?!\\d)");
 
 	// ===================== CONSTANTS =====================
 	// UI Areas
@@ -39,8 +39,8 @@ public class TundraTruckEventRoutine extends DelayedTask {
 			new PointData(120, 250),
 			new PointData(280, 270));
 	private static final AreaData REMAINING_TRUCKS_OCR = new AreaData(
-			new PointData(477, 1151),
-			new PointData(527, 1179));
+			new PointData(483, 1142),
+			new PointData(578, 1182));
 	private static final AreaData COUNTDOWN_OCR = new AreaData(
 			new PointData(194, 943),
 			new PointData(345, 976));
@@ -344,14 +344,26 @@ public class TundraTruckEventRoutine extends DelayedTask {
 	 * Main event handling logic
 	 */
 	private void handleTundraEvent() {
-		clickMyTrucksTab();
-		collectArrivedTrucks();
+        try {
+            clickMyTrucksTab();
+            collectArrivedTrucks();
 
-		if (!checkAvailableTrucks()) {
-			return; // No trucks remaining, already rescheduled
-		}
-
-		attemptSendTrucks();
+            if (!checkAvailableTrucks()) {
+                return; // No trucks remaining, already rescheduled
+            }
+            attemptSendTrucks();
+        } finally {
+            if (!Thread.currentThread().isInterrupted()) {
+                // Both the no-trucks path (0/4) and a completed dispatch must
+                // leave Events instead of stranding the next task in My Truck.
+                try {
+                    navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME, this::checkPreemption);
+                    logInfo("Tundra Truck exited Events and returned to verified Home");
+                } catch (dev.frostguard.engine.error.HomeNotFoundException missing) {
+                    logWarning("Tundra Truck finished, but Home remains unverified: " + missing.getMessage());
+                }
+            }
+        }
 	}
 
 	/**
@@ -401,10 +413,10 @@ public class TundraTruckEventRoutine extends DelayedTask {
 			String text = stringHelper.attemptRecognition(
 					REMAINING_TRUCKS_OCR.topLeft(),
 					REMAINING_TRUCKS_OCR.bottomRight(),
-					1,
-					300L,
+					2,
+					200L,
 					null,
-					s -> !s.isEmpty(),
+					s -> parseTruckCount(s) != null,
 					s -> s);
 			TruckCount truckCount = parseTruckCount(text);
 			if (truckCount == null) {
@@ -462,7 +474,7 @@ public class TundraTruckEventRoutine extends DelayedTask {
 			return null;
 		}
 		Matcher matcher = TRUCK_COUNT_PATTERN.matcher(text.trim());
-		if (!matcher.matches()) {
+		if (!matcher.find()) {
 			return null;
 		}
 		try {
