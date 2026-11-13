@@ -238,23 +238,26 @@ public class DoExplorationRoutine extends DelayedTask {
                 ConfigurationKeyEnum.DO_EXPLORATION_QUICK_DEPLOY_BOOL, Boolean.class));
         // Both actions must belong to Squad Settings. The earlier fixed taps
         // could hit World, Victory, or a loading frame instead of starting combat.
-        if (!verifiedSquadAction(TemplatesEnum.INTEL_JOURNEY_FIGHT_LIVE)) {
+        ImageSearchResultData fight = findVerifiedSquadAction(TemplatesEnum.INTEL_JOURNEY_FIGHT_LIVE);
+        if (!fight.isFound()) {
             logWarning("Exploration Fight not confirmed on Squad Settings; "
                     + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
                             "exploration", "squad-fight-missing"));
             return false;
         }
         if (useQuickDeploy) {
-            if (!verifiedSquadAction(TemplatesEnum.EXPLORATION_QUICK_DEPLOY_LIVE)) {
+            ImageSearchResultData quick = findVerifiedSquadAction(TemplatesEnum.EXPLORATION_QUICK_DEPLOY_LIVE);
+            if (!quick.isFound()) {
                 logWarning("Quick Deploy is enabled but no matching button was confirmed; "
                         + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
                                 "exploration", "quick-deploy-missing"));
                 return false;
             }
             logInfo("Verified Quick Deploy; selecting a fresh formation");
-            tapInside(QUICK_DEPLOY_TOP_LEFT, QUICK_DEPLOY_BOTTOM_RIGHT);
+            tapVerifiedSquadAction(quick);
             sleepTask(QUICK_DEPLOY_DELAY_MS);
-            if (!verifiedSquadAction(TemplatesEnum.INTEL_JOURNEY_FIGHT_LIVE)) {
+            fight = findVerifiedSquadAction(TemplatesEnum.INTEL_JOURNEY_FIGHT_LIVE);
+            if (!fight.isFound()) {
                 logWarning("Fight button no longer visible after Quick Deploy; refusing blind fight tap");
                 return false;
             }
@@ -262,16 +265,23 @@ public class DoExplorationRoutine extends DelayedTask {
             logInfo("Quick Deploy disabled; retaining saved formation");
         }
         logInfo("Verified Fight on Squad Settings; tapping once");
-        tapInside(FIGHT_BUTTON_TOP_LEFT, FIGHT_BUTTON_BOTTOM_RIGHT);
+        tapVerifiedSquadAction(fight);
         return true;
     }
 
-    boolean verifiedSquadAction(TemplatesEnum action) {
+    /** Tap the center of the positively located button, not a hardcoded screen box. */
+    private void tapVerifiedSquadAction(ImageSearchResultData match) {
+        PointData center = match.getPoint();
+        tapInside(new PointData(center.getX() - 26, center.getY() - 18),
+                new PointData(center.getX() + 26, center.getY() + 18));
+    }
+
+    ImageSearchResultData findVerifiedSquadAction(TemplatesEnum action) {
         AreaData searchArea = action == TemplatesEnum.EXPLORATION_QUICK_DEPLOY_LIVE
                 ? AreaData.of(30, 1145, 360, 1275) : AreaData.of(365, 1145, 710, 1275);
         return templateSearchHelper.locateAction(action,
                 SearchConfig.builder().withMaxAttempts(1).withThreshold(90)
-                        .withArea(searchArea).build()).isFound();
+                        .withArea(searchArea).build());
     }
 
     /** A short bounded scan handles a modal that animates in after the Explore tap. */

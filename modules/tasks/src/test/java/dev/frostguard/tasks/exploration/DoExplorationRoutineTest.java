@@ -37,8 +37,8 @@ class DoExplorationRoutineTest {
         routine.startBattle();
 
         assertEquals(List.of(
-                new PointData(55, 1170),
-                new PointData(390, 1170)), routine.tapTopLefts);
+                new PointData(179, 1178),
+                new PointData(502, 1178)), routine.tapTopLefts);
         assertEquals(List.of(300L), routine.sleepDurations);
     }
 
@@ -48,7 +48,7 @@ class DoExplorationRoutineTest {
 
         routine.startBattle();
 
-        assertEquals(List.of(new PointData(390, 1170)), routine.tapTopLefts);
+        assertEquals(List.of(new PointData(502, 1178)), routine.tapTopLefts);
         assertEquals(List.of(), routine.sleepDurations);
     }
 
@@ -177,8 +177,12 @@ class DoExplorationRoutineTest {
         }
 
         @Override
-        boolean verifiedSquadAction(dev.frostguard.api.configs.TemplatesEnum action) {
-            return !blockSquadActions;
+        dev.frostguard.api.domain.ImageSearchResultData findVerifiedSquadAction(
+                dev.frostguard.api.configs.TemplatesEnum action) {
+            if (blockSquadActions) return dev.frostguard.api.domain.ImageSearchResultData.miss();
+            int x = action == dev.frostguard.api.configs.TemplatesEnum.EXPLORATION_QUICK_DEPLOY_LIVE
+                    ? 205 : 528;
+            return dev.frostguard.api.domain.ImageSearchResultData.hit(x, 1196, 99);
         }
 
         @Override
