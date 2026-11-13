@@ -5,6 +5,8 @@ import dev.frostguard.api.configs.TpDailyTaskEnum;
 import dev.frostguard.api.domain.*;
 import dev.frostguard.engine.nav.SearchConfigConstants;
 import dev.frostguard.engine.nav.SidebarFrameClassifier;
+import dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig;
+import dev.frostguard.tasks.diagnostics.TaskDiagnosticSnapshots;
 import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.schedule.LaunchPoint;
 import dev.frostguard.engine.service.ConfigService;
@@ -106,6 +108,9 @@ private static final int UPGRADING_RESCHEDULE_MINUTES_VALUE = 10;
 
 private static final int TRAINING_BUTTON_RETRY_MINUTES_VALUE = 5;
 
+private static final int TRAINING_CLAIM_HAND_X_OFFSET = -73;
+private static final int TRAINING_CLAIM_HAND_Y_OFFSET = 88;
+
 private static final int MINISTRY_PROTECTION_WINDOW_MINUTES_VALUE = 30;
 
 private static final int MAX_SUNFIRE_TAB_SWIPES_LIMIT = 3;
@@ -177,6 +182,18 @@ protected void loadConfiguration() {
         }
 
         List<QueueSlot> analyzedQueues = inspectAllQueues();
+        if (analyzedQueues.stream().anyMatch(slot -> slot.status() == QueueMood.COMPLETE)) {
+            if (!collectCompletedTraining(analyzedQueues)) {
+                LocalDateTime retryAt = LocalDateTime.now().plusMinutes(TRAINING_BUTTON_RETRY_MINUTES_VALUE);
+                logWarning(routineLogTrainingLine("Completed troops could not be confirmed collected; "
+                        + "not starting another training. Retry at " + retryAt + "; "
+                        + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+                                "training", "completed-troops-unverified")));
+                reschedule(retryAt);
+                return;
+            }
+            analyzedQueues = inspectAllQueues();
+        }
 
         enabledTroopTypes.stream()
                 .map(type -> Map.entry(type, reservationUntil(type)))
@@ -784,6 +801,71 @@ private Integer extractMaxTroopCountFlow() {
                         .build(),
                 text -> RegexNumberParser.conformsTo(text, Pattern.compile(".*?(\\d+).*")),
                 text -> RegexNumberParser.extractByPattern(text, Pattern.compile(".*?(\\d+).*")));
+    }
+
+    private boolean collectCompletedTraining(List<QueueSlot> initialQueues) {
+        for (QueueSlot slot : initialQueues) {
+            if (slot.status() != QueueMood.COMPLETE) continue;
+            navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME);
+            marchHelper.openLeftMenuCitySection(true);
+            boolean currentLayout = SidebarFrameClassifier.isCurrentLayout(
+                    ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER)));
+            AreaData queueArea = currentLayout
+                    ? currentSidebarQueueArea(slot.type()) : resolvePipelineArea(slot.type());
+            ImageSearchResultData collect = templateSearchHelper.locateAction(
+                    TemplatesEnum.SIDEBAR_CLAIM_ACTION,
+                    SearchConfig.builder().withArea(AreaData.of(350,
+                            queueArea.topLeft().getY() - 12, 445,
+                            queueArea.bottomRight().getY() + 12))
+                            .withThreshold(87).withMaxAttempts(2).build());
+            if (!collect.isFound()) {
+                logWarning(routineLogTrainingLine("Completed " + slot.type()
+                        + " has no verified green sidebar claim control"));
+                return false;
+            }
+            tapInside(collect);
+            sleepTask(700);
+            RawImageData screenshot = emuManager.captureScreen(EMULATOR_NUMBER);
+            PointData handTarget = completedTroopHandTarget(screenshot);
+            if (handTarget == null) {
+                logWarning(routineLogTrainingLine("No verified completion bubble hand for " + slot.type()));
+                return false;
+            }
+            tapNear(handTarget);
+            sleepTask(800);
+            List<QueueSlot> after = inspectAllQueues();
+            if (!wasCompletedQueueCollected(slot.type(), after)) {
+                logWarning(routineLogTrainingLine("Completion click was not confirmed for " + slot.type()));
+                return false;
+            }
+            logInfo(routineLogTrainingLine("Collected completed " + slot.type()
+                    + " troops; sidebar no longer reports Completed"));
+        }
+        return true;
+    }
+
+    private PointData completedTroopHandTarget(RawImageData screenshot) {
+        if (screenshot == null) return null;
+        ImageSearchResultData hand = emuManager.locatePattern(EMULATOR_NUMBER,
+                screenshot, TemplatesEnum.SKIP_TUTORIAL_HAND,
+                new PointData(100, 250), new PointData(620, 850), 80.0);
+        if (hand != null && hand.isFound()) {
+            return new PointData(hand.getPoint().getX() + TRAINING_CLAIM_HAND_X_OFFSET,
+                    hand.getPoint().getY() + TRAINING_CLAIM_HAND_Y_OFFSET);
+        }
+        ImageSearchResultData mirror = emuManager.locatePattern(EMULATOR_NUMBER,
+                screenshot, TemplatesEnum.SKIP_TUTORIAL_HAND_MIRROR,
+                new PointData(100, 250), new PointData(620, 850), 80.0);
+        if (mirror != null && mirror.isFound()) {
+            return new PointData(mirror.getPoint().getX() - TRAINING_CLAIM_HAND_X_OFFSET,
+                    mirror.getPoint().getY() + TRAINING_CLAIM_HAND_Y_OFFSET);
+        }
+        return null;
+    }
+
+    static boolean wasCompletedQueueCollected(TroopTypeShape type, List<QueueSlot> inspected) {
+        return inspected.stream().anyMatch(slot -> slot.type() == type
+                && slot.status() == QueueMood.IDLE);
     }
 
     private List<LocalDateTime> trainAllReadyQueuesFlow(List<QueueSlot> readyQueues) {
