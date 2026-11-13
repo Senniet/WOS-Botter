@@ -218,9 +218,28 @@ public final class SidebarNavigator {
         }
 
         if (current.orElse(null) != target) {
-            taps.tapInside(CommonGameAreas.sidebarTab(target), 1, SECTION_SETTLE_MS);
+            RawImageData layoutFrame = emu.captureScreen(device);
+            BufferedImage layoutImage = ImageConverter.toBufferedImage(layoutFrame);
+            boolean currentLayout = SidebarFrameClassifier.isCurrentLayout(layoutImage);
+            taps.tapInside(currentLayout ? CommonGameAreas.sidebarTabCurrent(target)
+                    : CommonGameAreas.sidebarTab(target), 1, SECTION_SETTLE_MS);
+            log.debug("Sidebar section tap used " + (currentLayout ? "current" : "classic")
+                    + " geometry for " + target);
             TransitionObservation observation = awaitSection(section -> section.orElse(null) == target);
             current = observation.section();
+            if (current.orElse(null) != target && !observation.interrupted()
+                    && current.isPresent()) {
+                // A mixed-version frame can be classified while its tab geometry is
+                // ambiguous. Try the alternate tab position once, but only while
+                // the same sidebar is still visibly open.
+                boolean alternateCurrentLayout = !currentLayout;
+                log.info("Sidebar section did not change; checking alternate tab layout once: "
+                        + target + " initialLayout=" + (currentLayout ? "current" : "classic"));
+                taps.tapInside(alternateCurrentLayout ? CommonGameAreas.sidebarTabCurrent(target)
+                        : CommonGameAreas.sidebarTab(target), 1, SECTION_SETTLE_MS);
+                observation = awaitSection(section -> section.orElse(null) == target);
+                current = observation.section();
+            }
             if (current.orElse(null) != target) {
                 log.warn("Sidebar section selection failed: requested=" + target
                         + " observed=" + current.map(Enum::name).orElse("closed/unknown")

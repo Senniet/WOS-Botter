@@ -90,6 +90,15 @@ public final class CommonGameAreas {
         };
     }
 
+    /** Hit zones for the vertically shifted sidebar introduced by the updated UI. */
+    public static AreaData sidebarTabCurrent(SidebarSection section) {
+        return switch (section) {
+            case CITY -> region(9, 285, 146, 331);
+            case WILDERNESS -> region(155, 285, 293, 331);
+            case DAILY -> region(302, 285, 438, 331);
+        };
+    }
+
     public static final AreaData SIDEBAR_CONTENT = region(10, 300, 440, 880);
     public static final AreaData SIDEBAR_ROW_ICON_COLUMN = region(15, 300, 80, 880);
     public static final PointData SIDEBAR_RESET_FROM = point(360, 350);

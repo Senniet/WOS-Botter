@@ -51,6 +51,17 @@ class SidebarNavigatorOpenPolicyTest {
     }
 
     @Test
+    void currentSidebarClickAreasFollowShiftedTabSamples() {
+        for (SidebarSection section : SidebarSection.values()) {
+            var tap = CommonGameAreas.sidebarTabCurrent(section);
+            var sample = CommonGameAreas.sidebarTabSampleCurrent(section);
+            assertTrue(tap.topLeft().getY() <= sample.topLeft().getY());
+            assertTrue(tap.bottomRight().getY() >= sample.bottomRight().getY());
+            assertTrue(tap.topLeft().getY() > CommonGameAreas.sidebarTab(section).topLeft().getY());
+        }
+    }
+
+    @Test
     void acceptsASectionThatAppearsAfterTransientUnknownFrames() {
         Queue<Optional<SidebarSection>> frames = new ArrayDeque<>(List.of(
                 Optional.empty(), Optional.empty(), Optional.of(SidebarSection.WILDERNESS)));
