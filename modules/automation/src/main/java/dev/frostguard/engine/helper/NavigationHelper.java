@@ -32,6 +32,8 @@ public class NavigationHelper {
 
     private static final int MAX_INTEL_NAV_PASSES = 3;
     private static final int BANK_NAVIGATION_ATTEMPTS = 2;
+    private static final int UNKNOWN_SCREEN_PASSIVE_RECHECKS = 2;
+    private static final long UNKNOWN_SCREEN_PASSIVE_SETTLE_MS = 450L;
     private static final long DEALS_CAROUSEL_SETTLE_MS = 1000L;
     private static final long BANK_INTERFACE_SETTLE_MS = 1500L;
     private static final PointData DEALS_SWIPE_START = new PointData(630, 143);
@@ -708,8 +710,16 @@ public class NavigationHelper {
             // header arrow instead, and check location again after it closes a page.
             var back = findVerifiedBackArrow();
             if (!back.isFound()) {
-                throw new HomeNotFoundException("Unknown location; no verified screen back arrow; "
-                        + "refusing blind Android Back to protect against Quit game dialog");
+                if (shouldRecheckUnknownScreen(pass)) {
+                    broadcastDebug("No home/world anchor or verified back arrow on pass " + pass
+                            + "; passively rechecking after screen settle, without tapping");
+                    interruptibleWait(UNKNOWN_SCREEN_PASSIVE_SETTLE_MS);
+                    pass++;
+                    continue;
+                }
+                throw new HomeNotFoundException("Unknown location after passive checks; "
+                        + "no verified screen back arrow; refusing blind Android Back "
+                        + "to protect against Quit game dialog");
             }
             checkpoint.run();
             taps.tapInside(back);
@@ -718,6 +728,10 @@ public class NavigationHelper {
             pass++;
         }
         throw new HomeNotFoundException("Home not found after " + budget + " verified recovery attempts");
+    }
+
+    static boolean shouldRecheckUnknownScreen(int pass) {
+        return pass > 0 && pass <= UNKNOWN_SCREEN_PASSIVE_RECHECKS;
     }
 
     private boolean recoverVerifiedResourceSearch(Runnable checkpoint) {

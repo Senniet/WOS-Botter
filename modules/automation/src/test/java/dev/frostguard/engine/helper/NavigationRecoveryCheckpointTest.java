@@ -6,6 +6,8 @@ import dev.frostguard.engine.schedule.LaunchPoint;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class NavigationRecoveryCheckpointTest {
@@ -16,5 +18,12 @@ class NavigationRecoveryCheckpointTest {
         var preemption = TaskPreemptedException.because("higher priority work");
         assertSame(preemption, assertThrows(TaskPreemptedException.class,
                 () -> navigation.ensureCorrectScreenLocation(LaunchPoint.ANY, () -> { throw preemption; })));
+    }
+    @Test
+    void unknownScreenOnlyAllowsTwoPassiveChecksBeforeSafetyAbort() {
+        assertTrue(NavigationHelper.shouldRecheckUnknownScreen(1));
+        assertTrue(NavigationHelper.shouldRecheckUnknownScreen(2));
+        assertFalse(NavigationHelper.shouldRecheckUnknownScreen(3));
+        assertFalse(NavigationHelper.shouldRecheckUnknownScreen(0));
     }
 }
