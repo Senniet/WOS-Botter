@@ -2,8 +2,6 @@ package dev.frostguard.tasks.heroes;
 
 import dev.frostguard.vision.convert.GameTimeUtils;
 import dev.frostguard.vision.ocr.ResilientOcrExecutor;
-import dev.frostguard.vision.convert.GameTimeUtils;
-import dev.frostguard.vision.convert.GameTimeUtils;
 import dev.frostguard.api.configs.TemplatesEnum;
 import dev.frostguard.api.configs.TpDailyTaskEnum;
 import dev.frostguard.api.domain.ImageSearchResultData;
@@ -288,6 +286,7 @@ public class HeroRecruitmentRoutine extends DelayedTask {
                     + claimResult.getPoint());
             tapInside(claimResult);
             sleepTask(450);
+            dismissVerifiedRecruitmentRewards();
             // Never repeat a claim if the transition is uncertain.
             if (templateSearchHelper.locatePattern(TemplatesEnum.HERO_RECRUIT_CLAIM,
                     TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
@@ -297,6 +296,38 @@ public class HeroRecruitmentRoutine extends DelayedTask {
             }
         } else {
             logInfo(type + " recruitment reward not available yet.");
+        }
+    }
+
+    /** A successful free recruitment displays a Rewards page with a second
+     * orange "Recruit once" button that consumes a key. Only dismiss the
+     * verified Rewards overlay by tapping the empty area, never that button. */
+    private void dismissVerifiedRecruitmentRewards() {
+        var exitArea = TemplateSearchHelper.SearchConfig.builder()
+                .withMaxAttempts(2).withDelay(120).withThreshold(90)
+                .withCoordinates(new PointData(190, 1150), new PointData(525, 1240)).build();
+        ImageSearchResultData exitHint = ImageSearchResultData.miss();
+        for (int attempt = 0; attempt < 4; attempt++) {
+            exitHint = templateSearchHelper.locateAction(
+                    TemplatesEnum.SERVE_EMU_HERO_REWARDS_EXIT, exitArea);
+            if (exitHint.isFound()) break;
+            if (attempt < 3) sleepTask(250);
+        }
+        if (!exitHint.isFound()) return;
+        var title = templateSearchHelper.locatePattern(
+                TemplatesEnum.SERVE_EMU_HERO_REWARDS_TITLE,
+                TemplateSearchHelper.SearchConfig.builder()
+                        .withMaxAttempts(2).withDelay(120).withThreshold(88)
+                        .withCoordinates(new PointData(230, 215), new PointData(500, 355)).build());
+        if (!title.isFound()) {
+            logWarning("Hero recruitment shows exit text without a verified Rewards header; no blind tap");
+            return;
+        }
+        tapInside(new PointData(320, 912), new PointData(422, 1000));
+        sleepTask(300);
+        if (templateSearchHelper.locatePattern(
+                TemplatesEnum.SERVE_EMU_HERO_REWARDS_EXIT, exitArea).isFound()) {
+            logWarning("Hero recruitment Rewards overlay did not close after one safe tap; no second action");
         }
     }
 
