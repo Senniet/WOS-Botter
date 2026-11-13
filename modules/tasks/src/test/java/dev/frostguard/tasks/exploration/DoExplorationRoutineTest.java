@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.awt.Color;
 import java.awt.image.BufferedImage;
+import javax.imageio.ImageIO;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
@@ -60,6 +61,22 @@ class DoExplorationRoutineTest {
                 "Squad Power far exceeds the enemy. Start Quick Exploration?"));
         assertTrue(!DoExplorationRoutine.isQuickExplorationDialog(
                 "Purchase confirmation: are you sure?"));
+    }
+
+    @Test
+    void detectsRealMaskedQuickExplorationDialogAndCoversItsPromptText() throws IOException {
+        try (var stream = getClass().getResourceAsStream(
+                "/serveemu/quick-exploration-modal-masked.png")) {
+            assertTrue(stream != null, "Masked diagnostic frame missing");
+            BufferedImage frame = ImageIO.read(stream);
+            PointData button = DoExplorationRoutine.quickConfirmationButton(frame);
+            assertTrue(button != null, "Real dialog Confirm button must be recognized");
+            assertTrue(button.getX() > 450 && button.getX() < 620);
+            assertTrue(button.getY() >= 770 && button.getY() <= 870);
+            var text = DoExplorationRoutine.quickConfirmationTextArea(frame, button);
+            assertTrue(text.topLeft().getY() < 625);
+            assertTrue(text.bottomRight().getY() > 675);
+        }
     }
 
     @Test
