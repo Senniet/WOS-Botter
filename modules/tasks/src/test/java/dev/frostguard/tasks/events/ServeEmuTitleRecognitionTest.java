@@ -135,6 +135,20 @@ class ServeEmuTitleRecognitionTest {
                 190, 1140, 530, 1240));
     }
 
+    @Test void currentIntelJourneyExploreButtonMatchesHistoricalFailureFrame() throws Exception {
+        assertTrue(match("intelJourneyExplore", TemplatesEnum.SERVE_EMU_INTEL_JOURNEY_EXPLORE,
+                220, 565, 510, 690));
+        assertFalse(match("daily", TemplatesEnum.SERVE_EMU_INTEL_JOURNEY_EXPLORE,
+                220, 565, 510, 690));
+    }
+
+    @Test void currentIntelRescueButtonMatchesHistoricalFailureFrame() throws Exception {
+        assertTrue(match("intelSurvivorRescue", TemplatesEnum.SERVE_EMU_INTEL_SURVIVOR_RESCUE,
+                220, 565, 510, 690));
+        assertFalse(match("daily", TemplatesEnum.SERVE_EMU_INTEL_SURVIVOR_RESCUE,
+                220, 565, 510, 690));
+    }
+
     private static boolean match(String scene, TemplatesEnum template, int left, int top, int right, int bottom)
             throws Exception {
         BufferedImage image = ImageIO.read(Objects.requireNonNull(

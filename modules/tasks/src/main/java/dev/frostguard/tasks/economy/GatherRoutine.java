@@ -838,22 +838,16 @@ public class GatherRoutine extends DelayedTask {
             pressBack();
             return GatherDeployResult.SAME_TARGET;
         }
-        // A sent input is not evidence of a dispatched march. Never schedule
-        // another deployment when the old Deploy button stays on screen.
-        for (int attempt = 0; attempt < 4; attempt++) {
-            var stillPresent = templateSearchHelper.locatePattern(
-                    TemplatesEnum.SERVE_EMU_GATHER_DEPLOY,
-                    SearchConfig.builder().withMaxAttempts(1).withThreshold(90)
-                            .withArea(AreaData.of(400, 1140, 705, 1270)).build());
-            if (!stillPresent.isFound()) {
-                logInfo("Gather Deploy action acknowledged by formation screen transition");
-                return GatherDeployResult.DEPLOYED;
-            }
-            sleepTask(250);
+        // A disappearing button does not prove that the march departed. Only
+        // the verified World screen after one Deploy tap authorizes completion.
+        var launched = deploymentHelper.verifyLaunchTransition(TemplatesEnum.SERVE_EMU_GATHER_DEPLOY);
+        if (launched != dev.frostguard.engine.helper.DeploymentHelper.LaunchCheck.WORLD_VERIFIED) {
+            logWarning("Gather Deploy tap not confirmed by return to World: " + launched
+                    + "; not counting a dispatched march or sending another tap");
+            saveGatherFormationScreenshot("launch-world-unverified", type, level);
+            return GatherDeployResult.BLOCKED;
         }
-        logWarning("Gather Deploy remains visible after a single tap; refusing a second tap");
-        saveGatherFormationScreenshot("deploy-transition-unverified", type, level);
-        return GatherDeployResult.BLOCKED;
+        return GatherDeployResult.DEPLOYED;
     }
 
     private ImageSearchResultData locateConfirmedGatherDeployButton() {

@@ -85,7 +85,8 @@ private ImageSearchResultData awaitIntelAction(TemplatesEnum primary, SearchConf
     long started = System.nanoTime();
     long deadline = started + timeoutMillis * 1_000_000L;
     do {
-        ImageSearchResultData ready = templateSearchHelper.locateAction(primary, config);
+        ImageSearchResultData ready = templateSearchHelper.locateAction(
+                primary, config, legacyVariants);
         if (ready.isFound()) {
             logDebug(routineLogIntelligenceLine(primary + " ready after "
                     + ((System.nanoTime() - started) / 1_000_000L) + " ms"));
@@ -106,11 +107,22 @@ private ImageSearchResultData awaitIntelAction(TemplatesEnum primary, SearchConf
 
 // After tapping a command, proceed as soon as its modal button disappears.
 // Wait at most briefly for the click animation; do not tap the button twice.
+// Check all known renderings of the same button before confirming an
+// acknowledged tap. One missing template alone is not a state transition.
 private boolean awaitIntelActionAcknowledged(TemplatesEnum action, SearchConfig config,
-        long timeoutMillis) {
+        long timeoutMillis, TemplatesEnum... alternatives) {
     long deadline = System.nanoTime() + timeoutMillis * 1_000_000L;
     do {
-        if (!templateSearchHelper.locatePattern(action, config).isFound()) return true;
+        boolean stillPresent = templateSearchHelper.locatePattern(action, config).isFound();
+        if (!stillPresent && alternatives != null) {
+            for (TemplatesEnum alternative : alternatives) {
+                if (alternative != null && templateSearchHelper.locatePattern(alternative, config).isFound()) {
+                    stillPresent = true;
+                    break;
+                }
+            }
+        }
+        if (!stillPresent) return true;
         if (System.nanoTime() >= deadline) return false;
         sleepTask(160);
     } while (true);
@@ -1281,7 +1293,8 @@ private void handleSurvivorExclusive(ImageSearchResultData result) {
                         "intel-actions", "survivor-after-view")));
         ImageSearchResultData rescue = awaitIntelAction(
                 TemplatesEnum.INTEL_RESCUE_BUTTON_MODERN, INTEL_SURVIVOR_ACTION_SEARCH,
-                2900, TemplatesEnum.INTEL_RESCUE);
+                2900, TemplatesEnum.SERVE_EMU_INTEL_SURVIVOR_RESCUE,
+                TemplatesEnum.INTEL_RESCUE);
         if (!rescue.isFound()) {
             deferIntelMissingAction("Survivor", "Rescue", "survivor-rescue-missing");
             return;
@@ -1290,7 +1303,8 @@ private void handleSurvivorExclusive(ImageSearchResultData result) {
         tapInside(rescue);
         // Never count a Rescue unless the action has visibly left its modal.
         if (!awaitIntelActionAcknowledged(TemplatesEnum.INTEL_RESCUE_BUTTON_MODERN,
-                INTEL_SURVIVOR_ACTION_SEARCH, 1500)) {
+                INTEL_SURVIVOR_ACTION_SEARCH, 1700,
+                TemplatesEnum.SERVE_EMU_INTEL_SURVIVOR_RESCUE)) {
             deferIntelMissingAction("Survivor", "Rescue tap not acknowledged", "survivor-rescue-still-visible");
             return;
         }
@@ -1320,7 +1334,8 @@ private void handleJourneyExclusive(ImageSearchResultData result) {
                         "intel-actions", "journey-after-view")));
         ImageSearchResultData explore = awaitIntelAction(
                 TemplatesEnum.INTEL_EXPLORE_BUTTON_MODERN, INTEL_JOURNEY_ACTION_SEARCH,
-                2900, TemplatesEnum.INTEL_EXPLORE);
+                2900, TemplatesEnum.SERVE_EMU_INTEL_JOURNEY_EXPLORE,
+                TemplatesEnum.INTEL_EXPLORE);
         if (!explore.isFound()) {
             deferIntelMissingAction("Journey", "Explore", "journey-explore-missing");
             return;
@@ -1328,7 +1343,8 @@ private void handleJourneyExclusive(ImageSearchResultData result) {
 
         tapInside(explore);
         if (!awaitIntelActionAcknowledged(TemplatesEnum.INTEL_EXPLORE_BUTTON_MODERN,
-                INTEL_JOURNEY_ACTION_SEARCH, 1500)) {
+                INTEL_JOURNEY_ACTION_SEARCH, 1700,
+                TemplatesEnum.SERVE_EMU_INTEL_JOURNEY_EXPLORE)) {
             deferIntelMissingAction("Journey", "Explore tap not acknowledged", "journey-explore-still-visible");
             return;
         }

@@ -147,8 +147,8 @@ public class BeastSlayRoutine extends DelayedTask {
 					break;
 				}
 
-				ImageSearchResultData deploy = templateSearchHelper.locatePattern(
-						TemplatesEnum.DEPLOY_BUTTON, SearchConfigConstants.SINGLE_WITH_RETRIES);
+                ImageSearchResultData deploy = templateSearchHelper.locateAction(
+                        TemplatesEnum.DEPLOY_BUTTON, SearchConfigConstants.SINGLE_WITH_RETRIES);
 				if (!deploy.isFound()) {
 					logWarning("Deploy button not found after reading the formation screen.");
 					updateReschedule(LocalDateTime.now().plusMinutes(5));
@@ -165,13 +165,13 @@ public class BeastSlayRoutine extends DelayedTask {
 					break;
 				}
 
-				ImageSearchResultData deployStillPresent = templateSearchHelper.locatePattern(
-						TemplatesEnum.DEPLOY_BUTTON, SearchConfigConstants.SINGLE_WITH_2_RETRIES);
-				if (deployStillPresent.isFound()) {
-					logWarning("Deploy button remained visible; stamina and statistics were not updated.");
-					updateReschedule(LocalDateTime.now().plusMinutes(5));
-					break;
-				}
+                DeploymentHelper.LaunchCheck launch = deploymentHelper.verifyLaunchTransition();
+                if (launch != DeploymentHelper.LaunchCheck.WORLD_VERIFIED) {
+                    logWarning("Beast deploy not verified; outcome=" + launch
+                            + ". Stamina and statistics are not modified; no repeat tap.");
+                    updateReschedule(LocalDateTime.now().plusMinutes(5));
+                    break;
+                }
 
 				staminaHelper.subtractStamina(staminaCost, false);
 				currentStamina = staminaHelper.getCurrentStamina();
