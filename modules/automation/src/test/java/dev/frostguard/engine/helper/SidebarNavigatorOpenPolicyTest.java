@@ -51,6 +51,12 @@ class SidebarNavigatorOpenPolicyTest {
     }
 
     @Test
+    void fishingOverviewTabDoesNotHitTheHeader() {
+        assertTrue(CommonGameAreas.FISHING_TOURNAMENT_TAB.topLeft().getY() >= 180);
+        assertTrue(CommonGameAreas.FISHING_TOURNAMENT_TAB.bottomRight().getY() <= 280);
+    }
+
+    @Test
     void currentSidebarClickAreasFollowShiftedTabSamples() {
         for (SidebarSection section : SidebarSection.values()) {
             var tap = CommonGameAreas.sidebarTabCurrent(section);

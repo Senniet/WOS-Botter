@@ -1,6 +1,8 @@
 package dev.frostguard.engine.helper;
 
 import dev.frostguard.api.configs.TpMessageSeverityEnum;
+import dev.frostguard.api.configs.TemplatesEnum;
+import dev.frostguard.api.domain.AreaData;
 import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.api.domain.RawImageData;
 import dev.frostguard.engine.diagnostics.DiagnosticSnapshotStore;
@@ -115,6 +117,10 @@ public class StaminaHelper {
 
     // Reads the stable City/World HUD entry via bounded OCR retries, persists, then closes its dialog.
     public void updateStaminaFromHud() {
+        if (device != null && !verifiedStaminaHudAvailable()) {
+            emitWarn("Stamina HUD is not on a verified City/World screen; skipping OCR and Back cleanup");
+            return;
+        }
         emitDebug("Opening HUD stamina dialog");
         long startMs = System.currentTimeMillis();
 
@@ -141,6 +147,22 @@ public class StaminaHelper {
                 emitDebug("Press-back cleanup error: " + ex.getMessage());
             }
         }
+    }
+
+    private boolean verifiedStaminaHudAvailable() {
+        RawImageData frame = device.captureScreen(deviceSlot);
+        AreaData anchor = AreaData.of(590, 1145, 715, 1275);
+        for (TemplatesEnum template : new TemplatesEnum[] {
+                TemplatesEnum.SERVE_EMU_CITY_ANCHOR,
+                TemplatesEnum.SERVE_EMU_WORLD_ANCHOR,
+                TemplatesEnum.GAME_HOME_FURNACE,
+                TemplatesEnum.GAME_HOME_WORLD }) {
+            if (device.locatePattern(deviceSlot, frame, template,
+                    anchor.topLeft(), anchor.bottomRight(), 90).isFound()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
