@@ -29,7 +29,7 @@ class StaminaHelperHudReadTest {
 
         helper.updateStaminaFromHud();
 
-        assertEquals(List.of("open-hud", "read", "cleanup"), ui.events);
+        assertEquals(List.of("open-hud", "verify-dialog", "read", "cleanup"), ui.events);
         assertEquals(1, ui.dialogOpenCount);
         assertEquals(1, ui.ocrCount);
         assertEquals(5, ui.ocrAttempts);
@@ -47,7 +47,7 @@ class StaminaHelperHudReadTest {
         helper.updateStaminaFromHud();
 
         assertTrue(service.findCurrentStamina(9302L).isEmpty());
-        assertEquals(List.of("open-hud", "read", "snapshot", "cleanup"), ui.events);
+        assertEquals(List.of("open-hud", "verify-dialog", "read", "snapshot", "cleanup"), ui.events);
         assertEquals(1, ui.cleanupCount);
         assertEquals(1, helper.captureCount);
         assertTrue(helper.snapshotResult.startsWith("snapshot=logs/snapshot/stamina/"));
@@ -69,7 +69,7 @@ class StaminaHelperHudReadTest {
         helper.updateStaminaFromHud();
 
         assertTrue(service.findCurrentStamina(9303L).isEmpty());
-        assertEquals(List.of("open-hud", "read", "cleanup"), ui.events);
+        assertEquals(List.of("open-hud", "verify-dialog", "read", "cleanup"), ui.events);
         assertEquals(0, helper.captureCount);
         assertEquals(1, ui.cleanupCount);
         assertEquals("snapshot=disabled", helper.snapshotResult);
@@ -86,13 +86,30 @@ class StaminaHelperHudReadTest {
         helper.updateStaminaFromHud();
 
         assertTrue(service.findCurrentStamina(9304L).isEmpty());
-        assertEquals(List.of("open-hud", "read", "cleanup"), ui.events);
+        assertEquals(List.of("open-hud", "verify-dialog", "read", "cleanup"), ui.events);
         assertEquals(1, ui.cleanupCount);
+    }
+
+    @Test
+    void wrongScreenSkipsOcrAndBackAfterStaminaHudTap() {
+        StaminaService service = StaminaService.getServices();
+        RecordingHudUi ui = new RecordingHudUi(472);
+        ui.dialogVisible = false;
+        SnapshotStaminaHelper helper = new SnapshotStaminaHelper(service, 9310L, ui, workspace);
+
+        helper.updateStaminaFromHud();
+
+        assertEquals(List.of("open-hud", "verify-dialog", "snapshot"), ui.events);
+        assertEquals(0, ui.ocrCount);
+        assertEquals(0, ui.cleanupCount);
+        assertEquals(1, helper.captureCount);
+        assertTrue(service.findCurrentStamina(9310L).isEmpty());
     }
 
     private static final class RecordingHudUi implements StaminaHelper.HudStaminaUi {
         private final Integer reading;
         private boolean failRead;
+        private boolean dialogVisible = true;
         private final List<String> events = new ArrayList<>();
         private int dialogOpenCount;
         private int ocrCount;
@@ -108,6 +125,12 @@ class StaminaHelperHudReadTest {
         public void openStaminaDialog(int settleMs) {
             events.add("open-hud");
             dialogOpenCount++;
+        }
+
+        @Override
+        public boolean isStaminaDialogVisible() {
+            events.add("verify-dialog");
+            return dialogVisible;
         }
 
         @Override
