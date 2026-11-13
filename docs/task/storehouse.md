@@ -68,3 +68,11 @@ stamina copper. Six captures over about 1.5 s cover one bob. Overlay and
 preprocess scores: `./tools/storehouse-detection/detect.sh`. Template `chest3`
 BGR at 75 remains the OpenCV comparison winner; grey and dropped-blue do not
 recover the wood crops. See the tool README.
+
+## Daily mission progress
+
+Daily-mission progress is reported only when the Storehouse visit flow confirms
+at least one chest or stamina collection. If the visit ends in RETRY_ON_ERROR
+without any confirmed collection, the bounded retry is persisted and an
+unknown-outcome failure is propagated to the scheduler. A confirmed collection
+is retained as partial progress if a later action in the same visit is unknown.
