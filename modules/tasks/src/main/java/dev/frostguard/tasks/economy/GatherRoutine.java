@@ -717,7 +717,21 @@ public class GatherRoutine extends DelayedTask {
         sleepTask(2000);
         swipe(RES_TAB_SWIPE_START, RES_TAB_SWIPE_END);
         sleepTask(500);
-        return true;
+        boolean opened = isResourceSearchPanelVisible();
+        if (!opened) {
+            logWarning("Gather resource search did not open or show Meat/Wood after swipe; "
+                    + "not attempting resource selection or blind search taps.");
+        }
+        return opened;
+    }
+
+    private boolean isResourceSearchPanelVisible() {
+        SearchConfig config = SearchConfig.builder().withArea(AreaData.of(0, 835, 720, 995))
+                .withThreshold(90).withMaxAttempts(2).withDelay(200).build();
+        return templateSearchHelper.locatePattern(TemplatesEnum.GAME_HOME_SHORTCUTS_FARM_MEAT,
+                config).isFound()
+                || templateSearchHelper.locatePattern(TemplatesEnum.GAME_HOME_SHORTCUTS_FARM_WOOD,
+                        config).isFound();
     }
 
     private boolean selectTile(GatherType type) {
