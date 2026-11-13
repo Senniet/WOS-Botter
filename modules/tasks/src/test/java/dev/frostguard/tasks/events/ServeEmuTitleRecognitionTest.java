@@ -83,6 +83,13 @@ class ServeEmuTitleRecognitionTest {
                 625, 175, 715, 1160));
     }
 
+    @Test void legacyMailFooterRemainsRecognizedForBlueStacks() throws Exception {
+        assertTrue(match("mailReadClaimLegacy", TemplatesEnum.SERVE_EMU_MAIL_READ_CLAIM_LEGACY,
+                390, 1180, 720, 1279));
+        assertFalse(match("exploration", TemplatesEnum.SERVE_EMU_MAIL_READ_CLAIM_LEGACY,
+                390, 1180, 720, 1279));
+    }
+
     private static boolean match(String scene, TemplatesEnum template, int left, int top, int right, int bottom)
             throws Exception {
         BufferedImage image = ImageIO.read(Objects.requireNonNull(

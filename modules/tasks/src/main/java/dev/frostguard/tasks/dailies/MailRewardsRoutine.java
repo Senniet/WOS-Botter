@@ -41,9 +41,9 @@ private static final PointData MAIL_MENU_SEARCH_TOP_LEFT_VALUE = new PointData(6
 
 private static final PointData MAIL_MENU_SEARCH_BOTTOM_RIGHT_VALUE = new PointData(715, 1100);
 
-private static final PointData MAIL_MENU_OPEN_TOP_LEFT_VALUE = new PointData(70, 70);
+private static final PointData MAIL_MENU_OPEN_TOP_LEFT_VALUE = new PointData(75, 10);
 
-private static final PointData MAIL_MENU_OPEN_BOTTOM_RIGHT_VALUE = new PointData(195, 145);
+private static final PointData MAIL_MENU_OPEN_BOTTOM_RIGHT_VALUE = new PointData(175, 60);
 
 private static final PointData MAIL_LIST_INDICATORS_TOP_LEFT_VALUE = new PointData(625, 175);
 
@@ -63,13 +63,14 @@ private static final int CLAIM_BUTTON_TAP_DELAY_MS = 500;
 
 private static final int UNREAD_REPORT_OPEN_DELAY_MS = 500;
 
-private static final PointData TAB_ALLIANCE_VALUE = new PointData(230, 185);
+private static final PointData TAB_ALLIANCE_VALUE = new PointData(230, 120);
 
-private static final PointData TAB_SYSTEM_VALUE = new PointData(360, 185);
+private static final PointData TAB_SYSTEM_VALUE = new PointData(360, 120);
 
-private static final PointData TAB_REPORTS_VALUE = new PointData(500, 185);
+private static final PointData TAB_REPORTS_VALUE = new PointData(500, 120);
 
 private static final PointData[] MAIL_TAB_BUTTONS = { TAB_ALLIANCE_VALUE, TAB_SYSTEM_VALUE, TAB_REPORTS_VALUE };
+private static final PointData[] MAIL_TAB_BUTTONS_CURRENT = { new PointData(230, 185), new PointData(360, 185), new PointData(500, 185) };
 
 private static final String[] MAIL_TAB_NAMES = { "Alliance", "System", "Reports" };
 
@@ -129,15 +130,17 @@ private boolean redeemAllVisibleRewards() {
         }
         var claimRegion = SearchConfig.builder().withMaxAttempts(1).withThreshold(92)
                 .withArea(new AreaData(new PointData(390, 1180), new PointData(720, 1279))).build();
-        ImageSearchResultData before = templateSearchHelper.locatePattern(
-                TemplatesEnum.SERVE_EMU_MAIL_READ_CLAIM, claimRegion);
+        ImageSearchResultData before = templateSearchHelper.locateAction(
+                TemplatesEnum.SERVE_EMU_MAIL_READ_CLAIM, claimRegion,
+                TemplatesEnum.SERVE_EMU_MAIL_READ_CLAIM_LEGACY);
         if (!before.isFound()) {
             logWarning(routineLogMailRewardsLine("Read & Claim All control unverified; no blind footer taps"));
             return false;
         }
         sleepTask(150);
-        ImageSearchResultData after = templateSearchHelper.locatePattern(
-                TemplatesEnum.SERVE_EMU_MAIL_READ_CLAIM, claimRegion);
+        ImageSearchResultData after = templateSearchHelper.locateAction(
+                TemplatesEnum.SERVE_EMU_MAIL_READ_CLAIM, claimRegion,
+                TemplatesEnum.SERVE_EMU_MAIL_READ_CLAIM_LEGACY);
         if (!dev.frostguard.engine.helper.RecognitionConsensus.agrees(before, after, 12)) {
             logWarning(routineLogMailRewardsLine("Mail claim action unstable between frames"));
             return false;
@@ -298,8 +301,9 @@ private void hydrateConfiguration() {
     }
 
 private void handleAllMailTabs() {
+        PointData[] positions = isCurrentMailMenuVisible() ? MAIL_TAB_BUTTONS_CURRENT : MAIL_TAB_BUTTONS;
         for (int i = 0; i < MAIL_TAB_COUNT_VALUE; i++) {
-            PointData tabButton = MAIL_TAB_BUTTONS[i];
+            PointData tabButton = positions[i];
             String tabName = MAIL_TAB_NAMES[i];
 
             logInfo(routineLogMailRewardsLine("Processing " + tabName + " tab."));
