@@ -60,6 +60,8 @@ public class PetAdventureChestRoutine extends DelayedTask {
 	private static final int TARGET_STAMINA_FOR_REFRESH = 40;
 	private static final int MAX_CHEST_START_ITERATIONS = 12;
 
+	private boolean confirmedDailyMissionProgress;
+
 	private static final SearchConfig CHEST_CANDIDATES = SearchConfig.builder()
 			.withMaxAttempts(3)
 			.withThreshold(90)
@@ -127,7 +129,7 @@ public class PetAdventureChestRoutine extends DelayedTask {
 
 	@Override
 	public boolean provideDailyMissionProgress() {
-		return true;
+		return confirmedDailyMissionProgress;
 	}
 
 	// ========================================================================
@@ -148,6 +150,8 @@ public class PetAdventureChestRoutine extends DelayedTask {
 	 */
 	@Override
 	protected void execute() {
+
+		confirmedDailyMissionProgress = false;
 
 		// Validate stamina before proceeding
 		if (!staminaHelper.checkStaminaOrReschedule(
@@ -319,7 +323,8 @@ public class PetAdventureChestRoutine extends DelayedTask {
 			for (TemplatesEnum chestTemplate : CHEST_PRIORITY) {
 				ChestStartResult result = attemptToStartChest(chestTemplate);
 
-				if (result == ChestStartResult.STARTED) {
+				if (countsAsProgress(result)) {
+					confirmedDailyMissionProgress = true;
 					foundAnyChest = true;
 					break;
 				} else if (result == ChestStartResult.NO_ATTEMPTS) {
@@ -533,10 +538,14 @@ public class PetAdventureChestRoutine extends DelayedTask {
 	// HELPER ENUMS
 	// ========================================================================
 
+	static boolean countsAsProgress(ChestStartResult outcome) {
+		return outcome == ChestStartResult.STARTED;
+	}
+
 	/**
 	 * Result of attempting to start a chest adventure.
 	 */
-	private enum ChestStartResult {
+	enum ChestStartResult {
 		/** Chest was idle and In Adventure confirmed the start. */
 		STARTED,
 
