@@ -18,6 +18,8 @@ import dev.frostguard.engine.schedule.LaunchPoint;
 import dev.frostguard.engine.service.StatisticsService;
 
 import java.time.LocalDateTime;
+import java.awt.image.BufferedImage;
+import java.util.Locale;
 
 public class DoExplorationRoutine extends DelayedTask {
 
@@ -32,6 +34,8 @@ public class DoExplorationRoutine extends DelayedTask {
     private static final PointData FIGHT_BUTTON_BOTTOM_RIGHT = new PointData(670, 1220);
     private static final PointData VICTORY_CONTINUE_TOP_LEFT = new PointData(400, 990);
     private static final PointData VICTORY_CONTINUE_BOTTOM_RIGHT = new PointData(658, 1038);
+
+    private boolean battleOutcomeUnknown;
 
     private static final long MAX_FIGHTING_WINDOW_MS = 120_000L;
     private static final long RESULT_SEARCH_START_DELAY_MS = 15_000L;
@@ -77,7 +81,12 @@ public class DoExplorationRoutine extends DelayedTask {
             logWarning("Exploration fighting window reached 2 minutes. Rescheduling...");
         }
 
-        rescheduleInOneHour();
+        if (battleOutcomeUnknown) {
+            logWarning("Exploration outcome remains unknown. Retrying in 10 minutes, not recording completion.");
+            reschedule(LocalDateTime.now().plusMinutes(10));
+        } else {
+            rescheduleInOneHour();
+        }
     }
 
     private boolean openExplorationScreen() {
@@ -145,6 +154,13 @@ public class DoExplorationRoutine extends DelayedTask {
         while (!isFightingWindowExpired(fightingStartedAt)) {
             logInfo("Starting exploration battle #" + battleNumber + "...");
             startBattle();
+            if (!resolveQuickExplorationConfirmation()) {
+                battleOutcomeUnknown = true;
+                logWarning("Quick Exploration confirmation could not be verified; "
+                        + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+                                "exploration", "quick-confirm-unresolved"));
+                return false;
+            }
 
             logInfo("Waiting " + RESULT_SEARCH_START_DELAY_MS / 1_000L
                     + " seconds before battle result detection...");
@@ -161,6 +177,7 @@ public class DoExplorationRoutine extends DelayedTask {
                 handleDefeat();
                 return false;
             } else {
+                battleOutcomeUnknown = true;
                 logWarning("Battle locked: Neither victory nor defeat appeared after battle animation.");
                 return false;
             }
@@ -181,6 +198,70 @@ public class DoExplorationRoutine extends DelayedTask {
         }
         logInfo("Tapping fight button...");
         tapInside(FIGHT_BUTTON_TOP_LEFT, FIGHT_BUTTON_BOTTOM_RIGHT);
+    }
+
+    /**
+     * A stronger squad can trigger an extra modal after Fight. Without acknowledging
+     * it, the battle never starts, and retrying Fight only repeats the same action.
+     * Require a stable pair of orange Cancel and blue Confirm buttons on two frames.
+     */
+    boolean resolveQuickExplorationConfirmation() {
+        sleepTask(450);
+        BufferedImage first = ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER));
+        PointData target = quickConfirmationButton(first);
+        if (target == null) return true;
+        sleepTask(250);
+        BufferedImage second = ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER));
+        PointData confirmed = quickConfirmationButton(second);
+        if (confirmed == null || Math.abs(target.getY() - confirmed.getY()) > 12) {
+            logWarning("Orange/blue confirmation dialog appeared but did not remain stable.");
+            return false;
+        }
+        logInfo("Paired Cancel/Confirm modal verified on two frames after Fight; confirming quick battle.");
+        tapInside(new PointData(confirmed.getX() - 12, confirmed.getY() - 9),
+                new PointData(confirmed.getX() + 12, confirmed.getY() + 9));
+        sleepTask(650);
+        BufferedImage after = ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER));
+        if (quickConfirmationButton(after) != null) {
+            logWarning("Quick Exploration confirmation remained after Confirm tap.");
+            return false;
+        }
+        logInfo("Quick Exploration confirmation dismissed; waiting for battle outcome.");
+        return true;
+    }
+
+    static boolean isQuickExplorationDialog(String text) {
+        if (text == null) return false;
+        String normalized = text.toLowerCase(Locale.ROOT).replaceAll("[^a-z]", "");
+        return normalized.contains("quickexploration")
+                && (normalized.contains("squadpower") || normalized.contains("exceedstheenemy"));
+    }
+
+    static PointData quickConfirmationButton(BufferedImage frame) {
+        if (frame == null) return null;
+        int w = frame.getWidth(), h = frame.getHeight();
+        if (w < 300 || h < 300) return null;
+        int bestScore = 0, bestY = -1;
+        // A dialog has orange Cancel on the left and blue Confirm on the right,
+        // on the same horizontal band. This avoids tapping unrelated blue controls.
+        for (int y = h * 25 / 100; y < h * 83 / 100; y += 3) {
+            int orange = 0, blue = 0;
+            for (int x = w * 8 / 100; x < w * 44 / 100; x += 3) {
+                int rgb = frame.getRGB(x, y);
+                int r = (rgb >> 16) & 255, g = (rgb >> 8) & 255, b = rgb & 255;
+                if (r > 205 && g > 65 && g < 190 && b < 80) orange++;
+            }
+            for (int x = w * 57 / 100; x < w * 92 / 100; x += 3) {
+                int rgb = frame.getRGB(x, y);
+                int r = (rgb >> 16) & 255, g = (rgb >> 8) & 255, b = rgb & 255;
+                if (r < 125 && g > 105 && g < 220 && b > 180 && b > r + 70) blue++;
+            }
+            if (orange >= w / 55 && blue >= w / 55 && orange + blue > bestScore) {
+                bestScore = orange + blue;
+                bestY = y;
+            }
+        }
+        return bestY < 0 ? null : new PointData(w * 74 / 100, bestY);
     }
 
     private void handleVictory() {

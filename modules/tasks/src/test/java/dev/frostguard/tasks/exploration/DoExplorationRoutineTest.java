@@ -9,6 +9,8 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.awt.Color;
+import java.awt.image.BufferedImage;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
@@ -50,6 +52,30 @@ class DoExplorationRoutineTest {
         AccountDescriptor profile = profile();
 
         assertTrue(profile.getConfig(ConfigurationKeyEnum.DO_EXPLORATION_QUICK_DEPLOY_BOOL, Boolean.class));
+    }
+
+    @Test
+    void identifiesSpecificQuickExplorationMessageOnly() {
+        assertTrue(DoExplorationRoutine.isQuickExplorationDialog(
+                "Squad Power far exceeds the enemy. Start Quick Exploration?"));
+        assertTrue(!DoExplorationRoutine.isQuickExplorationDialog(
+                "Purchase confirmation: are you sure?"));
+    }
+
+    @Test
+    void recognizesPairedDialogButtonsAndRejectsUnrelatedBlueButton() {
+        BufferedImage frame = new BufferedImage(720, 1280, BufferedImage.TYPE_INT_RGB);
+        for (int y = 760; y < 825; y++) {
+            for (int x = 45; x < 345; x++) frame.setRGB(x, y, new Color(255, 115, 0).getRGB());
+            for (int x = 390; x < 680; x++) frame.setRGB(x, y, new Color(50, 150, 245).getRGB());
+        }
+        PointData button = DoExplorationRoutine.quickConfirmationButton(frame);
+        assertTrue(button != null);
+        assertEquals(720 * 74 / 100, button.getX());
+        assertTrue(button.getY() >= 760 && button.getY() < 825);
+        for (int y = 760; y < 825; y++)
+            for (int x = 45; x < 345; x++) frame.setRGB(x, y, Color.BLACK.getRGB());
+        assertTrue(DoExplorationRoutine.quickConfirmationButton(frame) == null);
     }
 
     private TestableDoExplorationRoutine routineWithQuickDeploy(boolean enabled) {
