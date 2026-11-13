@@ -291,6 +291,39 @@ public abstract class EmulatorInstance {
     }
 
     private RawImageData captureScreenshotLocked(String idx, String serial) {
+        // A one-shot fresh capture may recover ddmlib shell stalls without
+        // restarting the remote serve-emu or repeating any gameplay actions.
+        return retryTransientCapture(() -> captureScreenshotAttempt(idx, serial), () -> {
+            LOG.warn("Transient ADB screencap failure for device {}; retrying one fresh frame", idx);
+            invalidateDeviceCache(idx);
+            sleep(350);
+        });
+    }
+
+    static <T> T retryTransientCapture(Supplier<T> capture, Runnable prepareRetry) {
+        try {
+            return capture.get();
+        } catch (RuntimeException failure) {
+            if (Thread.currentThread().isInterrupted() || !isTransientCaptureFailure(failure)) {
+                throw failure;
+            }
+            prepareRetry.run();
+            if (Thread.currentThread().isInterrupted()) throw failure;
+            return capture.get();
+        }
+    }
+
+    static boolean isTransientCaptureFailure(Throwable failure) {
+        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+            if (cause instanceof com.android.ddmlib.ShellCommandUnresponsiveException
+                    || cause instanceof com.android.ddmlib.TimeoutException
+                    || cause instanceof java.io.IOException
+                    || cause instanceof ADBConnectionException) return true;
+        }
+        return false;
+    }
+
+    private RawImageData captureScreenshotAttempt(String idx, String serial) {
         ByteArrayOutputStream buf = new ByteArrayOutputStream(720 * 1280 * 4 + 64);
         try {
             IDevice d = getCachedDevice(idx);

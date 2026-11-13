@@ -30,8 +30,6 @@ private static final int MAIL_MENU_OPEN_VERIFICATION_RETRIES_VALUE = 5;
 
 private static final int UNCLAIMED_REWARDS_SEARCH_RETRIES_VALUE = 3;
 
-private static final int MAIL_TAB_COUNT_VALUE = 3;
-
 private static final int ERROR_RETRY_MINUTES_VALUE = 10;
 
 private static final int DEFAULT_OFFSET_MINUTES_VALUE = Integer.parseInt(
@@ -63,18 +61,22 @@ private static final int CLAIM_BUTTON_TAP_DELAY_MS = 500;
 
 private static final int UNREAD_REPORT_OPEN_DELAY_MS = 500;
 
-private static final PointData TAB_ALLIANCE_VALUE = new PointData(230, 120);
+record MailTab(String name, PointData tabPosition, boolean systemReports) { }
 
-private static final PointData TAB_SYSTEM_VALUE = new PointData(360, 120);
-
-private static final PointData TAB_REPORTS_VALUE = new PointData(500, 120);
-
-private static final PointData[] MAIL_TAB_BUTTONS = { TAB_ALLIANCE_VALUE, TAB_SYSTEM_VALUE, TAB_REPORTS_VALUE };
-private static final PointData[] MAIL_TAB_BUTTONS_CURRENT = { new PointData(230, 185), new PointData(360, 185), new PointData(500, 185) };
-
-private static final String[] MAIL_TAB_NAMES = { "Alliance", "System", "Reports" };
-
-private static final int SYSTEM_TAB_INDEX = 1;
+static List<MailTab> tabPlan(boolean currentUi) {
+    if (currentUi) {
+        return List.of(
+            new MailTab("Wars", new PointData(85,185), false),
+            new MailTab("Alliance", new PointData(230,185), false),
+            new MailTab("System", new PointData(360,185), true),
+            new MailTab("Reports", new PointData(500,185), false),
+            new MailTab("Starred", new PointData(630,185), false));
+    }
+    return List.of(
+        new MailTab("Alliance", new PointData(230,120), false),
+        new MailTab("System", new PointData(360,120), true),
+        new MailTab("Reports", new PointData(500,120), false));
+}
 
 private int scheduleOffsetMinutes;
 
@@ -91,8 +93,15 @@ public MailRewardsRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
             return;
         }
 
-        handleAllMailTabs();
+        boolean allTabsVerified = handleAllMailTabs();
         dismissMailMenu();
+        if (!allTabsVerified) {
+            LocalDateTime retryAt = LocalDateTime.now().plusMinutes(ERROR_RETRY_MINUTES_VALUE);
+            logWarning(routineLogMailRewardsLine("One or more mail tabs remained unverified; "
+                    + "retrying at " + retryAt.format(DATETIME_FORMATTER)));
+            reschedule(retryAt);
+            return;
+        }
         queueNextRun();
     }
 
@@ -147,8 +156,39 @@ private boolean redeemAllVisibleRewards() {
         }
         logInfo(routineLogMailRewardsLine("Read & Claim All confirmed; tapping once"));
         tapInside(after);
-        sleepTask(300);
+        sleepTask(350);
+        boolean rewardsVisible = false;
+        for (int attempt = 0; attempt < 3; attempt++) {
+            if (mailRewardsOverlayVisible()) {
+                rewardsVisible = true;
+                break;
+            }
+            if (attempt < 2) sleepTask(200);
+        }
+        if (rewardsVisible) {
+            logInfo(routineLogMailRewardsLine("Rewards overlay verified; dismissing via its exit footer once"));
+            tapInside(AreaData.of(292, 1145, 430, 1203));
+            sleepTask(550);
+            if (mailRewardsOverlayVisible()) {
+                logWarning(routineLogMailRewardsLine("Rewards overlay remained open; refusing further mail actions"));
+                return false;
+            }
+        }
+        if (!confirmMailMenuOpened()) {
+            logWarning(routineLogMailRewardsLine("Mail menu not confirmed after reward claim; "
+                    + "not interpreting obscured unread markers as success"));
+            return false;
+        }
         return true;
+    }
+
+private boolean mailRewardsOverlayVisible() {
+        SearchConfig titleRegion = SearchConfig.builder().withMaxAttempts(1)
+                .withThreshold(90).withArea(AreaData.of(40, 245, 680, 425)).build();
+        return templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_REWARDS_BANNER,
+                titleRegion).isFound()
+                || templateSearchHelper.locatePattern(TemplatesEnum.SHARED_REWARDS_BANNER_CURRENT,
+                        titleRegion).isFound();
     }
 
 private Evidence findUnreadMailEvidence() {
@@ -300,15 +340,19 @@ private void hydrateConfiguration() {
         logDebug(routineLogMailRewardsLine("Configuration loaded - Schedule offset: " + scheduleOffsetMinutes + " minutes"));
     }
 
-private void handleAllMailTabs() {
-        PointData[] positions = isCurrentMailMenuVisible() ? MAIL_TAB_BUTTONS_CURRENT : MAIL_TAB_BUTTONS;
-        for (int i = 0; i < MAIL_TAB_COUNT_VALUE; i++) {
-            PointData tabButton = positions[i];
-            String tabName = MAIL_TAB_NAMES[i];
-
-            logInfo(routineLogMailRewardsLine("Processing " + tabName + " tab."));
-            handleMailTab(tabButton, tabName, i == SYSTEM_TAB_INDEX);
+private boolean handleAllMailTabs() {
+        boolean completed = true;
+        boolean currentUi = isCurrentMailMenuVisible();
+        for (MailTab tab : tabPlan(currentUi)) {
+            if (!confirmMailMenuOpened()) {
+                logWarning(routineLogMailRewardsLine("Mail tab loop lost the Mail page; "
+                        + "stopping before any further tab taps"));
+                return false;
+            }
+            logInfo(routineLogMailRewardsLine("Processing " + tab.name() + " tab"));
+            if (!handleMailTab(tab.tabPosition(), tab.name(), tab.systemReports())) completed = false;
         }
+        return completed;
     }
 
 private void switchToTabFlow(PointData tabButton) {
@@ -365,14 +409,20 @@ private boolean openUpMailMenu() {
         return confirmMailMenuOpened();
     }
 
-private void handleMailTab(PointData tabButton, String tabName, boolean openUnreadReports) {
+private boolean handleMailTab(PointData tabButton, String tabName, boolean openUnreadReports) {
         switchToTabFlow(tabButton);
+        if (!confirmMailMenuOpened()) {
+            logWarning(routineLogMailRewardsLine(tabName + " tab navigation left the Mail screen"));
+            return false;
+        }
         MailClaimResult result = claimMailRewards(tabName);
         if (openUnreadReports
                 && result.decision() == Decision.STOP_NO_PROGRESS
                 && !result.remainingEvidence().isEmpty()) {
             openUnreadSystemReports(result.remainingEvidence());
+            return confirmMailMenuOpened() && findUnreadMailEvidence().isEmpty();
         }
+        return result.decision() == Decision.COMPLETE;
     }
 
 private void queueNextRun() {

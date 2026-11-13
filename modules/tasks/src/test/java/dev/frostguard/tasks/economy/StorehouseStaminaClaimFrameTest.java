@@ -19,8 +19,8 @@ class StorehouseStaminaClaimFrameTest {
 
     private static final PointData CLAIM_AREA_TOP_LEFT = new PointData(200, 900);
     private static final PointData CLAIM_AREA_BOTTOM_RIGHT = new PointData(520, 1020);
-    private static final PointData TITLE_AREA_TOP_LEFT = new PointData(170, 750);
-    private static final PointData TITLE_AREA_BOTTOM_RIGHT = new PointData(550, 825);
+    private static final PointData TITLE_AREA_TOP_LEFT = new PointData(150, 740);
+    private static final PointData TITLE_AREA_BOTTOM_RIGHT = new PointData(560, 885);
     private static final PointData TOOLTIP_TITLE_AREA_TOP_LEFT = new PointData(45, 670);
     private static final PointData TOOLTIP_TITLE_AREA_BOTTOM_RIGHT = new PointData(300, 750);
     private static final double MATCH_THRESHOLD = 88;
@@ -38,6 +38,17 @@ class StorehouseStaminaClaimFrameTest {
     void detectsStorehouseRewardTitleAndClaimInTheExpandedButtonArea() throws IOException {
         byte[] frame = encoded("stamina-reward-claim-visible.png");
 
+        assertTrue(matches(frame, TemplatesEnum.STOREHOUSE_STAMINA_REWARD_TITLE,
+                TITLE_AREA_TOP_LEFT, TITLE_AREA_BOTTOM_RIGHT));
+        assertTrue(matches(frame, TemplatesEnum.STOREHOUSE_STAMINA_CLAIM_TEXT,
+                CLAIM_AREA_TOP_LEFT, CLAIM_AREA_BOTTOM_RIGHT));
+        assertFalse(matches(frame, TemplatesEnum.STOREHOUSE_STAMINA_TOOLTIP_TITLE,
+                TOOLTIP_TITLE_AREA_TOP_LEFT, TOOLTIP_TITLE_AREA_BOTTOM_RIGHT));
+    }
+
+    @Test
+    void currentWosSennie121LiveClaimDialogMatchesWithoutTooltip() throws IOException {
+        byte[] frame = encoded("stamina-live-20261113-redacted.png");
         assertTrue(matches(frame, TemplatesEnum.STOREHOUSE_STAMINA_REWARD_TITLE,
                 TITLE_AREA_TOP_LEFT, TITLE_AREA_BOTTOM_RIGHT));
         assertTrue(matches(frame, TemplatesEnum.STOREHOUSE_STAMINA_CLAIM_TEXT,

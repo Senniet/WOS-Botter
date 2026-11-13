@@ -35,8 +35,9 @@ public class DoExplorationRoutine extends DelayedTask {
     private static final PointData QUICK_DEPLOY_BOTTOM_RIGHT = new PointData(330, 1220);
     private static final PointData FIGHT_BUTTON_TOP_LEFT = new PointData(390, 1170);
     private static final PointData FIGHT_BUTTON_BOTTOM_RIGHT = new PointData(670, 1220);
-    private static final PointData VICTORY_CONTINUE_TOP_LEFT = new PointData(400, 990);
-    private static final PointData VICTORY_CONTINUE_BOTTOM_RIGHT = new PointData(658, 1038);
+    // Verified live Victory screen: "Tap anywhere to exit" at the footer.
+    private static final PointData VICTORY_CONTINUE_TOP_LEFT = new PointData(290, 1140);
+    private static final PointData VICTORY_CONTINUE_BOTTOM_RIGHT = new PointData(430, 1205);
 
     private boolean battleOutcomeUnknown;
 
@@ -196,8 +197,12 @@ public class DoExplorationRoutine extends DelayedTask {
                                 "exploration", "quick-confirm-unresolved"));
                 return false;
             }
-            if (alreadyPending == QuickDialogOutcome.NOT_PRESENT) startBattle();
-            else logInfo("Previous Quick Exploration confirmation handled; not tapping Fight again");
+            if (alreadyPending == QuickDialogOutcome.NOT_PRESENT) {
+                if (!startBattle()) {
+                    battleOutcomeUnknown = true;
+                    return false;
+                }
+            } else logInfo("Previous Quick Exploration confirmation handled; not tapping Fight again");
 
             logInfo("Waiting " + RESULT_SEARCH_START_DELAY_MS
                     + "ms before checking the result and any late confirmation...");
@@ -208,7 +213,7 @@ public class DoExplorationRoutine extends DelayedTask {
             logInfo("Waiting for battle result...");
             BattleResult battleResult = waitForBattleResult(fightingStartedAt);
             if (battleResult == BattleResult.VICTORY) {
-                handleVictory();
+                if (!handleVictory()) return false;
                 battleNumber++;
             } else if (battleResult == BattleResult.DEFEAT) {
                 handleDefeat();
@@ -228,18 +233,55 @@ public class DoExplorationRoutine extends DelayedTask {
         return true;
     }
 
-    void startBattle() {
-        boolean useQuickDeploy = profile.getConfig(
-                ConfigurationKeyEnum.DO_EXPLORATION_QUICK_DEPLOY_BOOL, Boolean.class);
-        if (useQuickDeploy) {
-            logInfo("Tapping quick deploy...");
-            tapInside(QUICK_DEPLOY_TOP_LEFT, QUICK_DEPLOY_BOTTOM_RIGHT);
-            sleepTask(QUICK_DEPLOY_DELAY_MS);
-        } else {
-            logInfo("Quick Deploy is disabled. Keeping the saved exploration formation.");
+    boolean startBattle() {
+        boolean useQuickDeploy = Boolean.TRUE.equals(profile.getConfig(
+                ConfigurationKeyEnum.DO_EXPLORATION_QUICK_DEPLOY_BOOL, Boolean.class));
+        // Both actions must belong to Squad Settings. The earlier fixed taps
+        // could hit World, Victory, or a loading frame instead of starting combat.
+        ImageSearchResultData fight = findVerifiedSquadAction(TemplatesEnum.INTEL_JOURNEY_FIGHT_LIVE);
+        if (!fight.isFound()) {
+            logWarning("Exploration Fight not confirmed on Squad Settings; "
+                    + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+                            "exploration", "squad-fight-missing"));
+            return false;
         }
-        logInfo("Tapping fight button...");
-        tapInside(FIGHT_BUTTON_TOP_LEFT, FIGHT_BUTTON_BOTTOM_RIGHT);
+        if (useQuickDeploy) {
+            ImageSearchResultData quick = findVerifiedSquadAction(TemplatesEnum.EXPLORATION_QUICK_DEPLOY_LIVE);
+            if (!quick.isFound()) {
+                logWarning("Quick Deploy is enabled but no matching button was confirmed; "
+                        + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+                                "exploration", "quick-deploy-missing"));
+                return false;
+            }
+            logInfo("Verified Quick Deploy; selecting a fresh formation");
+            tapVerifiedSquadAction(quick);
+            sleepTask(QUICK_DEPLOY_DELAY_MS);
+            fight = findVerifiedSquadAction(TemplatesEnum.INTEL_JOURNEY_FIGHT_LIVE);
+            if (!fight.isFound()) {
+                logWarning("Fight button no longer visible after Quick Deploy; refusing blind fight tap");
+                return false;
+            }
+        } else {
+            logInfo("Quick Deploy disabled; retaining saved formation");
+        }
+        logInfo("Verified Fight on Squad Settings; tapping once");
+        tapVerifiedSquadAction(fight);
+        return true;
+    }
+
+    /** Tap the center of the positively located button, not a hardcoded screen box. */
+    private void tapVerifiedSquadAction(ImageSearchResultData match) {
+        PointData center = match.getPoint();
+        tapInside(new PointData(center.getX() - 26, center.getY() - 18),
+                new PointData(center.getX() + 26, center.getY() + 18));
+    }
+
+    ImageSearchResultData findVerifiedSquadAction(TemplatesEnum action) {
+        AreaData searchArea = action == TemplatesEnum.EXPLORATION_QUICK_DEPLOY_LIVE
+                ? AreaData.of(30, 1145, 360, 1275) : AreaData.of(365, 1145, 710, 1275);
+        return templateSearchHelper.locateAction(action,
+                SearchConfig.builder().withMaxAttempts(1).withThreshold(90)
+                        .withArea(searchArea).build());
     }
 
     /** A short bounded scan handles a modal that animates in after the Explore tap. */
@@ -352,12 +394,24 @@ public class DoExplorationRoutine extends DelayedTask {
         return new PointData(w * 71 / 100, (minY + maxY) / 2);
     }
 
-    private void handleVictory() {
-        logInfo("Victory! Continue...");
-        StatisticsService.obtain().addToCounter(profile, "Exploration Fights Won", 1);
-        logInfo("Tapping victory continue area...");
+    private boolean handleVictory() {
+        logInfo("Exploration Victory detected; exiting through verified footer");
         tapInside(VICTORY_CONTINUE_TOP_LEFT, VICTORY_CONTINUE_BOTTOM_RIGHT);
-        sleepTask(VICTORY_CONTINUE_DELAY_MS);
+        sleepTask(600);
+        if (isTemplateFound(TemplatesEnum.EXPLORATION_VICTORY)) {
+            // Allow the result animation to settle once; never tap twice without
+            // a fresh recognized Victory frame.
+            sleepTask(300);
+            if (isTemplateFound(TemplatesEnum.EXPLORATION_VICTORY)) {
+                logWarning("Exploration Victory did not close; stopping without another Fight tap; "
+                        + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+                                "exploration", "victory-exit-unverified"));
+                battleOutcomeUnknown = true;
+                return false;
+            }
+        }
+        StatisticsService.obtain().addToCounter(profile, "Exploration Fights Won", 1);
+        return true;
     }
 
     private void handleDefeat() {

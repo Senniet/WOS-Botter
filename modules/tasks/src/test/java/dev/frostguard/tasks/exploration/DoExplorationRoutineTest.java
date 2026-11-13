@@ -21,6 +21,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class DoExplorationRoutineTest {
 
@@ -36,8 +37,8 @@ class DoExplorationRoutineTest {
         routine.startBattle();
 
         assertEquals(List.of(
-                new PointData(55, 1170),
-                new PointData(390, 1170)), routine.tapTopLefts);
+                new PointData(179, 1178),
+                new PointData(502, 1178)), routine.tapTopLefts);
         assertEquals(List.of(300L), routine.sleepDurations);
     }
 
@@ -47,8 +48,16 @@ class DoExplorationRoutineTest {
 
         routine.startBattle();
 
-        assertEquals(List.of(new PointData(390, 1170)), routine.tapTopLefts);
+        assertEquals(List.of(new PointData(502, 1178)), routine.tapTopLefts);
         assertEquals(List.of(), routine.sleepDurations);
+    }
+
+    @Test
+    void blocksFightWhenSquadSettingsCannotBeVerified() {
+        TestableDoExplorationRoutine routine = routineWithQuickDeploy(true);
+        routine.blockSquadActions = true;
+        assertFalse(routine.startBattle());
+        assertEquals(List.of(), routine.tapTopLefts);
     }
 
     @Test
@@ -157,6 +166,7 @@ class DoExplorationRoutineTest {
     }
 
     private static final class TestableDoExplorationRoutine extends DoExplorationRoutine {
+        private boolean blockSquadActions;
         private final List<PointData> tapTopLefts = new ArrayList<>();
         private final List<Long> sleepDurations = new ArrayList<>();
         private final java.util.Queue<DoExplorationRoutine.QuickDialogOutcome> simulatedModalOutcomes =
@@ -164,6 +174,15 @@ class DoExplorationRoutineTest {
 
         private TestableDoExplorationRoutine(AccountDescriptor profile) {
             super(profile, TpDailyTaskEnum.DO_EXPLORATION);
+        }
+
+        @Override
+        dev.frostguard.api.domain.ImageSearchResultData findVerifiedSquadAction(
+                dev.frostguard.api.configs.TemplatesEnum action) {
+            if (blockSquadActions) return dev.frostguard.api.domain.ImageSearchResultData.miss();
+            int x = action == dev.frostguard.api.configs.TemplatesEnum.EXPLORATION_QUICK_DEPLOY_LIVE
+                    ? 205 : 528;
+            return dev.frostguard.api.domain.ImageSearchResultData.hit(x, 1196, 99);
         }
 
         @Override

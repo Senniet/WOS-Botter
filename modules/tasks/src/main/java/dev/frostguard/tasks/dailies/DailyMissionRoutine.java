@@ -27,18 +27,16 @@ private static final int SAFETY_RESCHEDULE_MINUTES_VALUE = 30;
 
 private static final int UNVERIFIED_RETRY_MINUTES = 5;
 
-// One tap closes the reward overlay; extra taps also close the underlying Daily screen.
-private static final int POPUP_DISMISS_TAP_COUNT_VALUE = 1;
+// More than one reward overlay can appear after Claim All (e.g. milestone chest).
+// Each tap is gated by an actual recognized Rewards banner.
+private static final int MAX_VERIFIED_REWARD_DISMISSALS = 4;
+private static final AreaData REWARD_EXIT_FOOTER = AreaData.of(290, 1140, 430, 1205);
 
 private static final int MAX_INDIVIDUAL_CLAIMS = 20;
 
 private static final int CLAIM_PROGRESS_TOLERANCE_PIXELS = 20;
 
 private static final PointData DAILY_MISSIONS_BUTTON_VALUE = new PointData(50, 1050);
-
-private static final PointData POPUP_DISMISS_MIN_VALUE = new PointData(10, 100);
-
-private static final PointData POPUP_DISMISS_MAX_VALUE = new PointData(600, 120);
 
 private static final SearchConfig DAILY_SCREEN_TITLE_SEARCH = SearchConfig.builder()
 		.withMaxAttempts(3)
@@ -106,13 +104,13 @@ public DailyMissionRoutine(AccountDescriptor profile, TpDailyTaskEnum dailyMissi
 		return LaunchPoint.ANY;
 	}
 
-private void configureRecurringBehaviorFlow() {
-		boolean shouldRecur = !autoScheduleEnabled;
-		setRecurring(shouldRecur);
-
-		logInfo(routineLogDailyMissionLine(String.format("Task recurring: %s (auto-schedule: %s)",
-				shouldRecur, autoScheduleEnabled)));
-	}
+void configureRecurringBehaviorFlow() {
+        // Auto-schedule changes the timing, not whether this task is recurring.
+        // TaskQueue permanently drops non-recurring tasks after each execution.
+        setRecurring(true);
+        logInfo(routineLogDailyMissionLine("Daily Mission remains scheduled (auto="
+                + autoScheduleEnabled + ")"));
+    }
 
 private boolean switchToDailyMissionsTabFlow() {
 		ImageSearchResultData dailyScreenTitle = currentDailyTitle();
@@ -212,8 +210,8 @@ private boolean redeemRewardsIndividually() {
 			logDebug(routineLogDailyMissionLine("Collecting individual reward #" + claimedCount + " at " + claimPoint));
 
 			tapNear(claimPoint);
-			dismissRewardPopupsFlow();
-			sleepTask(500);
+            if (!dismissRewardPopupsFlow()) return false;
+            sleepTask(350);
 
 			ImageSearchResultData nextClaim = seekForIndividualClaimButton();
 			if (nextClaim.isFound() && sameClaimTarget(claimPoint, nextClaim.getPoint())) {
@@ -232,35 +230,52 @@ private boolean redeemRewardsIndividually() {
 		return false;
 	}
 
-private void hydrateTaskConfiguration() {
-		this.autoScheduleEnabled = profile.getConfig(
-				ConfigurationKeyEnum.DAILY_MISSION_AUTO_SCHEDULE_BOOL,
-				Boolean.class);
-
-		this.checkOffsetMinutes = profile.getConfig(
-				ConfigurationKeyEnum.DAILY_MISSION_OFFSET_INT,
-				Integer.class);
+void hydrateTaskConfiguration() {
+        this.autoScheduleEnabled = Boolean.TRUE.equals(profile.getConfig(
+                ConfigurationKeyEnum.DAILY_MISSION_AUTO_SCHEDULE_BOOL, Boolean.class));
+        Integer configuredOffset = profile.getConfig(
+                ConfigurationKeyEnum.DAILY_MISSION_OFFSET_INT, Integer.class);
+        int defaultOffset = Integer.parseInt(
+                ConfigurationKeyEnum.DAILY_MISSION_OFFSET_INT.getDefaultValue());
+        this.checkOffsetMinutes = configuredOffset == null
+                ? defaultOffset : Math.max(1, configuredOffset);
 
 		logInfo(routineLogDailyMissionLine(String.format("Configuration - Auto-schedule: %s, Check offset: %d minutes",
 				autoScheduleEnabled, checkOffsetMinutes)));
 	}
 
-private void dismissRewardPopupsFlow() {
-		tapInside(
-				POPUP_DISMISS_MIN_VALUE,
-				POPUP_DISMISS_MAX_VALUE,
-				POPUP_DISMISS_TAP_COUNT_VALUE,
-				150
-
-		);
-	}
+private boolean dismissRewardPopupsFlow() {
+        for (int dismissal = 0; dismissal < MAX_VERIFIED_REWARD_DISMISSALS; dismissal++) {
+            if (currentDailyTitle().isFound()) return true;
+            SearchConfig bannerArea = SearchConfig.builder().withMaxAttempts(1)
+                    .withThreshold(90).withArea(AreaData.of(40, 245, 680, 425)).build();
+            ImageSearchResultData rewards = templateSearchHelper.locateAction(
+                    TemplatesEnum.SERVE_EMU_REWARDS_BANNER, bannerArea,
+                    TemplatesEnum.SHARED_REWARDS_BANNER_CURRENT);
+            if (!rewards.isFound()) {
+                sleepTask(300);
+                if (currentDailyTitle().isFound()) return true;
+                logWarning(routineLogDailyMissionLine("Neither Daily Missions nor Rewards was recognized; "
+                        + captureDailyDiagnostic("daily-reward-transition-unknown")));
+                return false;
+            }
+            logInfo(routineLogDailyMissionLine("Dismissing verified Rewards overlay "
+                    + (dismissal + 1) + "/" + MAX_VERIFIED_REWARD_DISMISSALS));
+            tapInside(REWARD_EXIT_FOOTER);
+            sleepTask(650);
+        }
+        if (currentDailyTitle().isFound()) return true;
+        logWarning(routineLogDailyMissionLine("Reward overlays exceeded safe dismissal limit; "
+                + captureDailyDiagnostic("daily-rewards-remain-open")));
+        return false;
+    }
 
 private boolean redeemAllRewardsAtOnce(ImageSearchResultData claimAllResult) {
 		logInfo(routineLogDailyMissionLine("'Claim All' button detected. Collecting all rewards at once"));
 		tapInside(claimAllResult);
         sleepTask(750);
-		dismissRewardPopupsFlow();
-        sleepTask(400);
+        if (!dismissRewardPopupsFlow()) return false;
+        sleepTask(250);
         if (seekForClaimAllButton().isFound()) {
             logWarning(routineLogDailyMissionLine("Claim All is still visible after tapping; "
                     + captureDailyDiagnostic("claim-all-unverified")));
@@ -348,10 +363,18 @@ private boolean redeemAllRewards() {
     }
 
 private void dismissInterface() {
-		pressBack();
-		sleepTask(500);
-
-	}
+        if (!currentDailyTitle().isFound()) {
+            logWarning(routineLogDailyMissionLine("Daily screen not visible during cleanup; "
+                    + "refusing blind Back or close taps"));
+            return;
+        }
+        // Current Daily Missions has a visible X at the top-right of the
+        // verified modal. Unlike Android Back, this cannot summon Quit Game.
+        tapInside(AreaData.of(662, 133, 707, 186));
+        sleepTask(350);
+        if (currentDailyTitle().isFound()) logWarning(routineLogDailyMissionLine(
+                "Daily Missions remained visible after verified close action"));
+    }
 
 private void queueManualMode() {
 		LocalDateTime now = LocalDateTime.now();

@@ -21,6 +21,13 @@ import dev.frostguard.engine.nav.SidebarSection;
 class SidebarNavigatorOpenPolicyTest {
 
     @Test
+    void retryKeepsModernGeometryWhenBothLiveFramesConfirmModernTabs() {
+        assertTrue(SidebarNavigator.tabRetryUsesCurrentLayout(true, true));
+        assertFalse(SidebarNavigator.tabRetryUsesCurrentLayout(true, false));
+        assertTrue(SidebarNavigator.tabRetryUsesCurrentLayout(false, false));
+    }
+
+    @Test
     void usesShortSettleThenVerifiesSidebarByPolling() {
         assertEquals(500, SidebarNavigator.SIDEBAR_OPEN_SETTLE_MS);
         assertTrue(SidebarNavigator.TRANSITION_POLL_CHECKS >= 5);

@@ -65,12 +65,10 @@ public VipRoutine(AccountDescriptor profile, TpDailyTaskEnum tpDailyTask) {
 			return;
 		}
 
+        // Daily rewards automation must never initiate a VIP purchase,
+        // regardless of the stored monthly-purchase setting or UI version.
         if (buyMonthlyVip) {
-            if (isCurrentVipMenuVisible()) {
-                logWarning(routineLogVipLine("Monthly VIP purchase bypassed in current UI: no purchases authorized by automation"));
-            } else {
-                manageMonthlyVipPurchase();
-            }
+            logWarning(routineLogVipLine("Monthly VIP purchase disabled for automated daily rewards; no spending permitted"));
         }
 
 		redeemDailyChestRewards();
