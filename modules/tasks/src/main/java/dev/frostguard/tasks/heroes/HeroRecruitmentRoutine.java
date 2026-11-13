@@ -10,6 +10,7 @@ import dev.frostguard.api.domain.PointData;
 import dev.frostguard.api.domain.AreaData;
 import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.api.domain.OcrSettingsData;
+import dev.frostguard.engine.error.TaskOutcomeUnknownException;
 import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.schedule.LaunchPoint;
 import dev.frostguard.engine.helper.TemplateSearchHelper;
@@ -91,6 +92,9 @@ public class HeroRecruitmentRoutine extends DelayedTask {
     /** Helper for flexible OCR-based time recognition */
     private final ResilientOcrExecutor<Duration> timeHelper;
 
+    private boolean confirmedDailyMissionProgress;
+    private boolean unknownClaimOutcome;
+
     // ===============================
     // CONSTRUCTOR
     // ===============================
@@ -130,6 +134,8 @@ public class HeroRecruitmentRoutine extends DelayedTask {
     @Override
     protected void execute() {
 
+        confirmedDailyMissionProgress = false;
+        unknownClaimOutcome = false;
         if (currentHeroRecruitmentVisible()) {
             processCurrentFreeRecruitment();
             return;
@@ -156,6 +162,10 @@ public class HeroRecruitmentRoutine extends DelayedTask {
 
         logInfo("Next hero recruitment check scheduled for: " + nextExecution.format(DATETIME_FORMATTER));
         reschedule(nextExecution);
+        if (shouldFailOnUnknownOutcome(unknownClaimOutcome, confirmedDailyMissionProgress)) {
+            throw new TaskOutcomeUnknownException(
+                    "Hero recruitment claim could not be confirmed; bounded retry scheduled without recording completion.");
+        }
     }
 
     private boolean currentHeroRecruitmentVisible() {
@@ -215,8 +225,9 @@ public class HeroRecruitmentRoutine extends DelayedTask {
             if (!reward) {
                 logWarning("Hero free recruitment reward not verified; refusing further presses");
                 reschedule(LocalDateTime.now().plusMinutes(5));
-                return;
+                throw new TaskOutcomeUnknownException("Hero free recruitment reward was not verified");
             }
+            confirmedDailyMissionProgress = true;
             claimed++;
         }
         logInfo("Hero Recruitment modern free claims: " + claimed + "; no keys or gems spent");
@@ -259,6 +270,7 @@ public class HeroRecruitmentRoutine extends DelayedTask {
             tapInside(confirmed);
             sleepTask(450);
             if (currentHeroRecruitmentVisible() && !pointsChestBadgeVisible()) {
+                confirmedDailyMissionProgress = true;
                 logInfo("Recruitment Points Chest claimed and red badge disappeared (no keys or gems spent)");
             } else {
                 logWarning("Recruitment Points Chest result unverified; not retrying the tap");
@@ -377,7 +389,17 @@ public class HeroRecruitmentRoutine extends DelayedTask {
             PointData ocrTopLeft,
             PointData ocrBottomRight) {
 
-        checkAndClaimRecruitment(type, searchMin, searchMax, claimMin, claimMax);
+        ClaimOutcome claimOutcome = checkAndClaimRecruitment(type, searchMin, searchMax, claimMin, claimMax);
+        if (countsAsProgress(claimOutcome)) {
+            confirmedDailyMissionProgress = true;
+        }
+        if (shouldUseUnknownRetry(claimOutcome)) {
+            unknownClaimOutcome = true;
+            logWarning(type + " recruitment claim remains available after the tap. "
+                    + "The result is unknown; no second tap will be sent in this run.");
+            return new RecruitmentResult(getFallbackTime(), false);
+        }
+
         LocalDateTime nextTime = extractNextRecruitmentTime(type, ocrTopLeft, ocrBottomRight);
 
         if (nextTime != null) {
@@ -396,16 +418,37 @@ public class HeroRecruitmentRoutine extends DelayedTask {
      * @param searchMax Bottom-right corner of search region
      * @param claimMin  Top-left corner of claim tap region
      * @param claimMax  Bottom-right corner of claim tap region
-     * @return true if reward was claimed, false if not available
+     * @return confirmed, unavailable, or unknown claim outcome
      */
-    private void checkAndClaimRecruitment(
+    private ClaimOutcome checkAndClaimRecruitment(
             String type,
             PointData searchMin,
             PointData searchMax,
             PointData claimMin,
             PointData claimMax) {
 
-        ImageSearchResultData claimResult = templateSearchHelper.locatePattern(
+        ImageSearchResultData claimResult = locateRecruitmentClaimButton(searchMin, searchMax);
+        if (!claimResult.isFound()) {
+            logInfo(type + " recruitment reward not available yet.");
+            return ClaimOutcome.NOT_AVAILABLE;
+        }
+
+        logInfo(type + " recruitment reward available. Claiming now.");
+        tapInside(claimMin, claimMax);
+        sleepTask(1000); // Wait for claim animation
+
+        ImageSearchResultData remainingClaim = locateRecruitmentClaimButton(searchMin, searchMax);
+        if (!remainingClaim.isFound()) {
+            logInfo(type + " recruitment claim confirmed: claim button is no longer visible.");
+            return ClaimOutcome.CONFIRMED;
+        }
+
+        logWarning(type + " recruitment claim button remains visible after the tap.");
+        return ClaimOutcome.UNKNOWN;
+    }
+
+    private ImageSearchResultData locateRecruitmentClaimButton(PointData searchMin, PointData searchMax) {
+        return templateSearchHelper.locatePattern(
                 TemplatesEnum.HERO_RECRUIT_CLAIM,
                 TemplateSearchHelper.SearchConfig.builder()
                         .withMaxAttempts(1)
@@ -413,14 +456,6 @@ public class HeroRecruitmentRoutine extends DelayedTask {
                         .withDelay(300L)
                         .withCoordinates(searchMin, searchMax)
                         .build());
-
-        if (claimResult.isFound()) {
-            logInfo(type + " recruitment reward available. Claiming now.");
-            tapInside(claimMin, claimMax);
-            sleepTask(1000); // Wait for claim animation
-        } else {
-            logInfo(type + " recruitment reward not available yet.");
-        }
     }
 
     /**
@@ -549,7 +584,7 @@ public class HeroRecruitmentRoutine extends DelayedTask {
      */
     @Override
     public boolean provideDailyMissionProgress() {
-        return true;
+        return confirmedDailyMissionProgress;
     }
 
     /**
@@ -575,6 +610,24 @@ public class HeroRecruitmentRoutine extends DelayedTask {
      * @param nextTime Next availability time (or fallback if extraction failed)
      * @param success  Whether OCR extraction was successful
      */
+    static boolean countsAsProgress(ClaimOutcome outcome) {
+        return outcome == ClaimOutcome.CONFIRMED;
+    }
+
+    static boolean shouldUseUnknownRetry(ClaimOutcome outcome) {
+        return outcome == ClaimOutcome.UNKNOWN;
+    }
+
+    static boolean shouldFailOnUnknownOutcome(boolean unknownClaimOutcome, boolean confirmedProgress) {
+        return unknownClaimOutcome && !confirmedProgress;
+    }
+
+    enum ClaimOutcome {
+        CONFIRMED,
+        NOT_AVAILABLE,
+        UNKNOWN
+    }
+
     private record RecruitmentResult(LocalDateTime nextTime, boolean success) {
     }
 }
