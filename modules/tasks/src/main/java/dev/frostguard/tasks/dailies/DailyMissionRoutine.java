@@ -43,7 +43,7 @@ private static final SearchConfig DAILY_SCREEN_TITLE_SEARCH = SearchConfig.build
 		.withMaxAttempts(3)
 		.withDelay(300)
 		.withThreshold(87)
-		.withArea(new AreaData(new PointData(180, 70), new PointData(540, 170)))
+		.withArea(new AreaData(new PointData(120, 80), new PointData(600, 225)))
 		.build();
 
 private static final SearchConfig DAILY_TAB_BUTTON_SEARCH = SearchConfig.builder()
@@ -150,7 +150,7 @@ private ImageSearchResultData currentDailyTitle() {
         if (original.isFound()) return original;
         return templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_DAILY_TITLE,
                 SearchConfig.builder().withMaxAttempts(2).withDelay(150)
-                        .withThreshold(90).withArea(AreaData.of(170, 105, 545, 210)).build());
+                        .withThreshold(90).withArea(AreaData.of(120, 80, 600, 225)).build());
     }
 
 private ImageSearchResultData seekForIndividualClaimButton() {
@@ -322,16 +322,18 @@ private LocalDateTime queueAtOffsetTime(LocalDateTime proposedTime, LocalDateTim
 	}
 
 private boolean redeemAllRewards() {
-		logInfo(routineLogDailyMissionLine("Scanning for claim buttons"));
-
-		ImageSearchResultData claimAllResult = seekForClaimAllButton();
-
-		if (claimAllResult.isFound()) {
-			return redeemAllRewardsAtOnce(claimAllResult);
-		} else {
-			return redeemRewardsIndividually();
-		}
-	}
+        logInfo(routineLogDailyMissionLine("Scanning for claim buttons"));
+        ImageSearchResultData claimAllResult = seekForClaimAllButton();
+        boolean claimed = claimAllResult.isFound()
+                ? redeemAllRewardsAtOnce(claimAllResult)
+                : redeemRewardsIndividually();
+        if (claimed && !currentDailyTitle().isFound()) {
+            logWarning(routineLogDailyMissionLine("Claim flow ended outside verified Daily Missions screen; "
+                    + captureDailyDiagnostic("daily-postclaim-screen-unverified")));
+            return false;
+        }
+        return claimed;
+    }
 
 private void dismissInterface() {
 		pressBack();
