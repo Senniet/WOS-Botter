@@ -7,6 +7,11 @@ import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.api.domain.RawImageData;
 import dev.frostguard.engine.diagnostics.DiagnosticSnapshotStore;
 import dev.frostguard.engine.emulator.EmulatorController;
+import dev.frostguard.engine.error.ADBConnectionException;
+import dev.frostguard.engine.error.ProfileCooldownException;
+import dev.frostguard.engine.error.ProfileInReconnectStateException;
+import dev.frostguard.engine.error.StopExecutionException;
+import dev.frostguard.engine.error.TaskPreemptedException;
 import dev.frostguard.engine.input.TapInteractionService;
 import dev.frostguard.engine.input.TapJitterPolicy;
 import dev.frostguard.engine.nav.CommonGameAreas;
@@ -162,6 +167,7 @@ public class StaminaHelper {
                 persistence.setStamina(accountKey, reading);
             }
         } catch (Exception ex) {
+            propagateControlFailure(ex);
             emitWarn("Stamina update error: " + ex.getMessage());
         } finally {
             // An unexpected screen might be Chief Profile or a mission page.
@@ -174,6 +180,21 @@ public class StaminaHelper {
                 }
             }
         }
+    }
+
+    static void propagateControlFailure(Throwable failure) {
+        // The OCR transport may wrap an ADB or scheduler signal inside an
+        // ordinary RuntimeException. Such failures must reach TaskQueue.
+        java.util.Set<Throwable> seen = java.util.Collections.newSetFromMap(
+                new java.util.IdentityHashMap<>());
+        for (Throwable cause = failure; cause != null && seen.add(cause); cause = cause.getCause()) {
+            if (cause instanceof StopExecutionException stop) throw stop;
+            if (cause instanceof TaskPreemptedException preempted) throw preempted;
+            if (cause instanceof ProfileInReconnectStateException reconnect) throw reconnect;
+            if (cause instanceof ProfileCooldownException cooldown) throw cooldown;
+            if (cause instanceof ADBConnectionException adb) throw adb;
+        }
+        if (Thread.currentThread().isInterrupted()) throw StopExecutionException.userCancelled();
     }
 
     private boolean verifiedStaminaHudAvailable() {
