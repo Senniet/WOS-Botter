@@ -60,7 +60,17 @@ private static final long JOURNEY_INITIAL_RESULT_WAIT_MILLIS = 4_000L;
 
 private static final long JOURNEY_RESULT_POLL_MILLIS = 500L;
 
-private static final AreaData JOURNEY_VICTORY_CONTINUE_AREA = AreaData.of(400, 990, 658, 1038);
+// Current victory results close from the visible "Tap anywhere to exit"
+// footer; tapping the rewards content around y=1010 does not dismiss them.
+private static final AreaData JOURNEY_VICTORY_CONTINUE_AREA = AreaData.of(290, 1150, 430, 1205);
+
+static final SearchConfig INTEL_JOURNEY_FIGHT_ACTION_SEARCH = SearchConfig.builder()
+        .withMaxAttempts(1).withDelay(0L).withThreshold(90)
+        .withArea(AreaData.of(365, 1145, 705, 1275)).build();
+
+static AreaData journeyVictoryContinueArea() {
+    return JOURNEY_VICTORY_CONTINUE_AREA;
+}
 
 // View is confined to the Intel mission modal. A real saved frame from
 // 2026-11-11 scored 89.56%, below the old default of 90.
@@ -1348,7 +1358,26 @@ private void handleJourneyExclusive(ImageSearchResultData result) {
             deferIntelMissingAction("Journey", "Explore tap not acknowledged", "journey-explore-still-visible");
             return;
         }
-        // Avoid a blind tap at (520,1200). Poll the result as soon as it appears.
+        // Modern Journey opens Squad Settings after Explore. The old flow
+        // skipped Fight entirely, then waited 30 seconds for a victory that
+        // could not happen. Never tap the formation screen without confirming
+        // the green Fight action on two fresh frames.
+        ImageSearchResultData fight = awaitIntelAction(TemplatesEnum.INTEL_JOURNEY_FIGHT_LIVE,
+                INTEL_JOURNEY_FIGHT_ACTION_SEARCH, 4000);
+        if (fight.isFound()) {
+            tapInside(fight);
+            logInfo(routineLogIntelligenceLine("Journey Fight tapped after verified Squad Settings action"));
+        } else if (!templateSearchHelper.locatePattern(TemplatesEnum.EXPLORATION_VICTORY,
+                SearchConfigConstants.DEFAULT_SINGLE).isFound()) {
+            // Older builds can jump directly to Victory after Explore.
+            // Only skip Fight when the actual victory artwork is confirmed.
+            deferIntelMissingAction("Journey", "Fight/Victory", "journey-fight-missing");
+            return;
+        } else {
+            logInfo(routineLogIntelligenceLine("Journey already at verified Victory; no Fight tap required"));
+        }
+        // Fight starts the battle. Only a verified Victory is success;
+        // otherwise retain the existing bounded retry and no stamina debit.
         long deadline = System.nanoTime() + JOURNEY_RESULT_TIMEOUT_MILLIS * 1_000_000L;
 
 		ImageSearchResultData victory = ImageSearchResultData.miss();
