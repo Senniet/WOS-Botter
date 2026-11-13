@@ -6,6 +6,7 @@ import dev.frostguard.api.configs.TpDailyTaskEnum;
 import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.api.domain.ImageSearchResultData;
 import dev.frostguard.api.domain.PointData;
+import dev.frostguard.api.domain.OcrSettingsData;
 import dev.frostguard.api.domain.AreaData;
 import dev.frostguard.api.domain.SizeData;
 import dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig;
@@ -64,16 +65,14 @@ public class DoExplorationRoutine extends DelayedTask {
         QuickDialogOutcome pending = inspectQuickExplorationConfirmation();
         if (pending != QuickDialogOutcome.NOT_PRESENT) {
             if (pending == QuickDialogOutcome.CONFIRMED) {
-                BattleResult resumed = waitForBattleResult(System.nanoTime());
-                if (resumed == BattleResult.VICTORY) handleVictory();
-                else if (resumed == BattleResult.DEFEAT) handleDefeat();
-                else logWarning("Previously pending Quick Exploration has an unknown outcome; not starting a new battle");
+                logInfo("Resumed Quick Exploration confirmed; skipping all regular battle taps");
+                rescheduleInOneHour();
             } else {
                 logWarning("Pending Quick Exploration modal is unresolved; "
                         + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
                                 "exploration", "quick-confirm-unresolved"));
+                reschedule(LocalDateTime.now().plusMinutes(10));
             }
-            reschedule(LocalDateTime.now().plusMinutes(10));
             return;
         }
         logInfo("Opening exploration screen...");
@@ -95,6 +94,22 @@ public class DoExplorationRoutine extends DelayedTask {
 
         logInfo("Exploring...");
         tapExploreButton(exploreButton);
+        // Live serve-emu: the strength confirmation appears immediately after
+        // Explore, before the formation screen. Do not tap Quick Deploy or Fight
+        // through it; the confirmed shortcut executes the battle automatically.
+        QuickDialogOutcome afterExplore = awaitQuickConfirmationAfterExplore();
+        if (afterExplore == QuickDialogOutcome.CONFIRMED) {
+            logInfo("Quick Exploration started directly after Explore; no formation or Fight taps needed");
+            rescheduleInOneHour();
+            return;
+        }
+        if (afterExplore == QuickDialogOutcome.UNRESOLVED) {
+            logWarning("Explore opened an unverified confirmation; no battle input sent; "
+                    + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+                            "exploration", "quick-confirm-unresolved"));
+            reschedule(LocalDateTime.now().plusMinutes(10));
+            return;
+        }
 
         boolean fightingWindowReached = fightUntilStoppedOrExpired();
         if (fightingWindowReached) {
@@ -198,6 +213,9 @@ public class DoExplorationRoutine extends DelayedTask {
             } else if (battleResult == BattleResult.DEFEAT) {
                 handleDefeat();
                 return false;
+            } else if (battleResult == BattleResult.QUICK_CONFIRMED) {
+                logInfo("Late Quick Exploration confirmation completed; stopping manual battle taps");
+                return false;
             } else {
                 battleOutcomeUnknown = true;
                 logWarning(battleResult == BattleResult.CONFIRMATION_UNRESOLVED
@@ -224,9 +242,19 @@ public class DoExplorationRoutine extends DelayedTask {
         tapInside(FIGHT_BUTTON_TOP_LEFT, FIGHT_BUTTON_BOTTOM_RIGHT);
     }
 
+    /** A short bounded scan handles a modal that animates in after the Explore tap. */
+    QuickDialogOutcome awaitQuickConfirmationAfterExplore() {
+        for (int attempt = 0; attempt < 4; attempt++) {
+            QuickDialogOutcome outcome = inspectQuickExplorationConfirmation();
+            if (outcome != QuickDialogOutcome.NOT_PRESENT) return outcome;
+            if (attempt < 3) sleepTask(350);
+        }
+        return QuickDialogOutcome.NOT_PRESENT;
+    }
+
     /**
-     * The confirmation may appear several seconds after Fight. Inspect it on
-     * every battle-result poll, rather than only in a 450ms post-tap window.
+     * The confirmation usually follows Explore but can animate in late. Inspect
+     * after Explore and during result polling rather than sending blind Fight taps.
      * Never confirm any other orange/blue modal without matching its text.
      */
     QuickDialogOutcome inspectQuickExplorationConfirmation() {
@@ -244,13 +272,14 @@ public class DoExplorationRoutine extends DelayedTask {
         try {
             AreaData textArea = quickConfirmationTextArea(second, confirmed);
             wording = emuManager.readText(EMULATOR_NUMBER,
-                    textArea.topLeft(), textArea.bottomRight());
+                    textArea.topLeft(), textArea.bottomRight(), OcrSettingsData.forTextBlock());
         } catch (IOException | OcrException error) {
             logWarning("Quick confirmation OCR could not be verified: " + error.getClass().getSimpleName());
             return QuickDialogOutcome.UNRESOLVED;
         }
         if (!isQuickExplorationDialog(wording)) {
-            logWarning("Refusing to confirm a visually similar modal without the Quick Exploration wording");
+            logWarning("Refusing to confirm visually similar modal; Quick Exploration text not verified (OCR length="
+                    + (wording == null ? 0 : wording.length()) + ")");
             return QuickDialogOutcome.UNRESOLVED;
         }
         logInfo("Quick Exploration text and Cancel/Confirm buttons verified; tapping Confirm once");
@@ -262,7 +291,7 @@ public class DoExplorationRoutine extends DelayedTask {
             logWarning("Quick Exploration confirmation remained after one Confirm tap");
             return QuickDialogOutcome.UNRESOLVED;
         }
-        logInfo("Quick Exploration confirmation dismissed; battle outcome still needs verification");
+        logInfo("Quick Exploration confirmation dismissed; no additional manual Fight taps required");
         return QuickDialogOutcome.CONFIRMED;
     }
 
@@ -287,6 +316,7 @@ public class DoExplorationRoutine extends DelayedTask {
         int w = frame.getWidth(), h = frame.getHeight();
         if (w < 300 || h < 300) return null;
         int bestScore = 0, bestY = -1;
+        java.util.List<Integer> pairedRows = new java.util.ArrayList<>();
         // A dialog has orange Cancel on the left and blue Confirm on the right,
         // on the same horizontal band. This avoids tapping unrelated blue controls.
         for (int y = h * 25 / 100; y < h * 83 / 100; y += 3) {
@@ -301,12 +331,25 @@ public class DoExplorationRoutine extends DelayedTask {
                 int r = (rgb >> 16) & 255, g = (rgb >> 8) & 255, b = rgb & 255;
                 if (r < 125 && g > 105 && g < 220 && b > 180 && b > r + 70) blue++;
             }
-            if (orange >= w / 55 && blue >= w / 55 && orange + blue > bestScore) {
-                bestScore = orange + blue;
-                bestY = y;
+            if (orange >= w / 55 && blue >= w / 55) {
+                pairedRows.add(y);
+                if (orange + blue > bestScore) {
+                    bestScore = orange + blue;
+                    bestY = y;
+                }
             }
         }
-        return bestY < 0 ? null : new PointData(w * 74 / 100, bestY);
+        if (bestY < 0) return null;
+        // Prefer the visual centre, not the highest-scoring line near a rounded
+        // border. The verified live button is centred around (512, 822) on 720x1280.
+        int minY = bestY, maxY = bestY;
+        for (int row : pairedRows) {
+            if (Math.abs(row - bestY) <= h * 8 / 100) {
+                minY = Math.min(minY, row);
+                maxY = Math.max(maxY, row);
+            }
+        }
+        return new PointData(w * 71 / 100, (minY + maxY) / 2);
     }
 
     private void handleVictory() {
@@ -337,8 +380,7 @@ public class DoExplorationRoutine extends DelayedTask {
             }
             if (modal == QuickDialogOutcome.CONFIRMED) {
                 logInfo("Quick Exploration modal resolved during battle result polling");
-                attempt = 1;
-                continue;
+                return BattleResult.QUICK_CONFIRMED;
             }
             if (attempt <= 2 || attempt % 5 == 0) logInfo("Battle result detection attempt #" + attempt + "...");
             if (isTemplateFound(TemplatesEnum.EXPLORATION_VICTORY)) {
@@ -425,6 +467,7 @@ public class DoExplorationRoutine extends DelayedTask {
         VICTORY,
         DEFEAT,
         NOT_FOUND,
-        CONFIRMATION_UNRESOLVED
+        CONFIRMATION_UNRESOLVED,
+        QUICK_CONFIRMED
     }
 }
