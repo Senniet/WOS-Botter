@@ -106,6 +106,13 @@ class ServeEmuTitleRecognitionTest {
                 190, 1150, 525, 1240));
     }
 
+    @Test void intelRescueActionIsDetectedInSavedSurvivorModal() throws Exception {
+        assertTrue(match("intelSurvivorRescue", TemplatesEnum.SERVE_EMU_INTEL_SURVIVOR_RESCUE,
+                220, 565, 510, 690));
+        assertFalse(match("daily", TemplatesEnum.SERVE_EMU_INTEL_SURVIVOR_RESCUE,
+                220, 565, 510, 690));
+    }
+
     private static boolean match(String scene, TemplatesEnum template, int left, int top, int right, int bottom)
             throws Exception {
         BufferedImage image = ImageIO.read(Objects.requireNonNull(
