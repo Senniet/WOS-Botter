@@ -58,7 +58,10 @@ public class DailyLabyrinthRoutine extends DelayedTask {
             }
 
             // The Daily sidebar opens the currently active Land of Heroes dungeon directly.
-            executeCurrentChallenge();
+            if (!executeCurrentChallenge()) {
+                rescheduleOneHourLater("No verified Land of Heroes challenge action completed");
+                return;
+            }
 
             reschedule(GameTimeUtils.dailyResetTime());
 
