@@ -78,6 +78,8 @@ public class EmulatorController {
             case MUMU     -> new MuMuEmulatorInstance(dir);
             case MEMU     -> new MEmuEmulatorInstance(dir);
             case LDPLAYER -> new LDPlayerEmulatorInstance(dir);
+            case BLUESTACKS -> new BlueStacksEmulatorInstance(dir);
+            case SERVE_EMU -> new ServeEmuEmulatorInstance(dir);
         };
         LOG.info("Backend: {}", kind.getDisplayName());
 
@@ -148,7 +150,7 @@ public class EmulatorController {
             LOG.info("{} acquired emulator launch lock (dev {})", label(i), i);
             backend.launchEmulator(i);
 
-            long delayMs = readLaunchDelayMs();
+            long delayMs = backend instanceof ServeEmuEmulatorInstance ? 0 : readLaunchDelayMs();
             if (delayMs > 0) {
                 LOG.info("Waiting {} ms before allowing another emulator launch...", delayMs);
                 Thread.sleep(delayMs);

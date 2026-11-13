@@ -1,6 +1,9 @@
 package dev.frostguard.engine.helper;
 
 import java.awt.image.BufferedImage;
+import java.time.Instant;
+import java.util.Locale;
+import dev.frostguard.engine.diagnostics.DiagnosticSnapshotStore;
 import java.util.Optional;
 import java.util.function.Predicate;
 
@@ -30,12 +33,12 @@ public final class SidebarNavigator {
     static final int TRANSITION_POLL_MS = 200;
     static final int TRANSITION_POLL_CHECKS = 9;
     static final int MAX_TRIGGER_TAPS = 2;
-    static final int SIDEBAR_OPEN_SETTLE_MS = 2_000;
-    static final int SCROLL_SETTLE_MS = 2_000;
+    static final int SIDEBAR_OPEN_SETTLE_MS = 500;
+    static final int SCROLL_SETTLE_MS = 450;
     static final int SCROLL_DISTANCE_PX = 120;
     private static final int SCROLL_DURATION_MS = 500;
     private static final int MAX_BOUNDARY_STEPS = 10;
-    private static final int DESTINATION_SETTLE_MS = 2_000;
+    private static final int DESTINATION_SETTLE_MS = 700;
     private static final int ROW_ICON_THRESHOLD = 88;
     private static final int ROW_ACTION_THRESHOLD = 88;
     private static final int GO_LEFT_OFFSET = 315;
@@ -123,8 +126,35 @@ public final class SidebarNavigator {
         if (bottomScan.rowIcon().isFound()) {
             return SidebarRowLookup.fromRow(bottomScan.rowIcon());
         }
-        log.info("Sidebar destination unavailable after bounded icon scan: " + destination
-                + " bottomBoundary=" + bottomScan.boundaryReached());
+        // Sidebar retains its scroll position across tasks. A downward-only scan
+        // misses destinations above the current viewport, even after reaching
+        // the bottom. Reverse over the entire content range before declaring
+        // the destination absent.
+        ScrollScanResult topScan = scan(destination, ScrollDirection.TOWARD_TOP, bottomScan.frame());
+        if (!topScan.completed()) {
+            log.warn("Sidebar upward scan interrupted or section changed: " + destination);
+            return SidebarRowLookup.sidebarUnavailable();
+        }
+        if (topScan.rowIcon().isFound()) {
+            log.info("Sidebar destination recovered on upward scan: " + destination);
+            return SidebarRowLookup.fromRow(topScan.rowIcon());
+        }
+        String evidence = "snapshot=disabled";
+        DiagnosticSnapshotStore diagnostics = DiagnosticSnapshotStore.forCurrentWorkspace();
+        if (diagnostics.isEnabled()) {
+            try {
+                evidence = "snapshot=" + diagnostics.write(topScan.frame(), "sidebar",
+                        destination.name().toLowerCase(Locale.ROOT) + "-missing",
+                        Instant.now()).orElse("not-saved");
+            } catch (RuntimeException failure) {
+                if (failure instanceof java.util.concurrent.CancellationException
+                        || Thread.currentThread().isInterrupted()) throw failure;
+                evidence = "snapshot=unavailable(" + failure.getClass().getSimpleName() + ")";
+            }
+        }
+        log.warn("Sidebar destination unavailable after two-way bounded scan: " + destination
+                + " bottomBoundary=" + bottomScan.boundaryReached()
+                + " topBoundary=" + topScan.boundaryReached() + " " + evidence);
         return SidebarRowLookup.fromRow(ImageSearchResultData.miss());
     }
 
@@ -188,9 +218,28 @@ public final class SidebarNavigator {
         }
 
         if (current.orElse(null) != target) {
-            taps.tapInside(CommonGameAreas.sidebarTab(target), 1, SECTION_SETTLE_MS);
+            RawImageData layoutFrame = emu.captureScreen(device);
+            BufferedImage layoutImage = ImageConverter.toBufferedImage(layoutFrame);
+            boolean currentLayout = SidebarFrameClassifier.isCurrentLayout(layoutImage);
+            taps.tapInside(currentLayout ? CommonGameAreas.sidebarTabCurrent(target)
+                    : CommonGameAreas.sidebarTab(target), 1, SECTION_SETTLE_MS);
+            log.debug("Sidebar section tap used " + (currentLayout ? "current" : "classic")
+                    + " geometry for " + target);
             TransitionObservation observation = awaitSection(section -> section.orElse(null) == target);
             current = observation.section();
+            if (current.orElse(null) != target && !observation.interrupted()
+                    && current.isPresent()) {
+                // A mixed-version frame can be classified while its tab geometry is
+                // ambiguous. Try the alternate tab position once, but only while
+                // the same sidebar is still visibly open.
+                boolean alternateCurrentLayout = !currentLayout;
+                log.info("Sidebar section did not change; checking alternate tab layout once: "
+                        + target + " initialLayout=" + (currentLayout ? "current" : "classic"));
+                taps.tapInside(alternateCurrentLayout ? CommonGameAreas.sidebarTabCurrent(target)
+                        : CommonGameAreas.sidebarTab(target), 1, SECTION_SETTLE_MS);
+                observation = awaitSection(section -> section.orElse(null) == target);
+                current = observation.section();
+            }
             if (current.orElse(null) != target) {
                 log.warn("Sidebar section selection failed: requested=" + target
                         + " observed=" + current.map(Enum::name).orElse("closed/unknown")
@@ -287,7 +336,12 @@ public final class SidebarNavigator {
 
     private boolean isRootScreen(RawImageData frame) {
         double threshold = SearchConfigConstants.DEFAULT_SINGLE.getThreshold();
-        return emu.locatePattern(device, frame, TemplatesEnum.GAME_HOME_FURNACE, threshold).isFound()
+        AreaData lowerRight = AreaData.of(590, 1145, 715, 1275);
+        return emu.locatePattern(device, frame, TemplatesEnum.SERVE_EMU_CITY_ANCHOR,
+                    lowerRight.topLeft(), lowerRight.bottomRight(), 90).isFound()
+                || emu.locatePattern(device, frame, TemplatesEnum.SERVE_EMU_WORLD_ANCHOR,
+                    lowerRight.topLeft(), lowerRight.bottomRight(), 90).isFound()
+                || emu.locatePattern(device, frame, TemplatesEnum.GAME_HOME_FURNACE, threshold).isFound()
                 || emu.locatePattern(device, frame, TemplatesEnum.GAME_HOME_WORLD, threshold).isFound();
     }
 
@@ -359,7 +413,9 @@ public final class SidebarNavigator {
 
     private enum ScrollDirection {
         TOWARD_BOTTOM(CommonGameAreas.SIDEBAR_SCROLL_TOWARD_BOTTOM_FROM,
-                CommonGameAreas.SIDEBAR_SCROLL_TOWARD_BOTTOM_TO);
+                CommonGameAreas.SIDEBAR_SCROLL_TOWARD_BOTTOM_TO),
+        TOWARD_TOP(CommonGameAreas.SIDEBAR_SCROLL_TOWARD_BOTTOM_TO,
+                CommonGameAreas.SIDEBAR_SCROLL_TOWARD_BOTTOM_FROM);
 
         private final PointData from;
         private final PointData to;

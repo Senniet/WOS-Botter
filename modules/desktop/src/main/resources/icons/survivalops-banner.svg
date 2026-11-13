@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="260" viewBox="0 0 1920 260">
+
+<rect width="1920" height="260" fill="#11304b"/>
+<path d="M695 0 L1500 0 L1070 260 L825 260Z" fill="#155079" opacity=".15"/>
+<circle cx="1531" cy="62" r="43" fill="#acdced" opacity=".55"/>
+<circle cx="1531" cy="62" r="60" fill="#acdced" opacity=".08"/>
+<g fill="#d7eeff" opacity=".48">
+ <circle cx="1095" cy="35" r="1.8"/><circle cx="1340" cy="25" r="1.2"/><circle cx="1666" cy="50" r="1.3"/><circle cx="1789" cy="38" r="1.6"/>
+ <circle cx="1594" cy="101" r="1.1"/><circle cx="985" cy="80" r="1.6"/><circle cx="1210" cy="62" r="1.1"/>
+</g>
+<!-- distant snowy ridge -->
+<path d="M650 255 825 132 936 200 1103 58 1240 191 1378 80 1511 184 1633 63 1816 182 1920 110 1920 260Z" fill="#3a6987"/>
+<path d="M825 132 876 158 890 168 855 164Z M1103 58 1155 132 1115 117 1094 135 1069 118Z M1378 80 1436 143 1391 123 1373 143 1351 130Z M1633 63 1703 125 1650 115 1625 127 1605 118Z" fill="#cce6f1"/>
+<!-- middle-distance ridges -->
+<path d="M720 260 946 120 1112 247 1304 110 1435 225 1650 115 1822 240 1920 172 1920 260Z" fill="#234a69"/>
+<path d="M946 120 1002 165 960 151 941 169 925 158Z M1304 110 1355 160 1314 146 1295 165 1276 148Z M1650 115 1704 162 1661 150 1639 171 1625 155Z" fill="#8ec5de" opacity=".83"/>
+<!-- foreground frosted hills -->
+<path d="M620 260 814 208 925 260 1118 196 1270 260 1454 184 1605 260 1784 207 1920 245 1920 260Z" fill="#0d314b"/>
+<path d="M1210 260 1380 218 1485 260 1652 216 1820 260 1920 233 1920 260Z" fill="#0b243a"/>
+<!-- watch tower and pine silhouettes right -->
+<g fill="#071725">
+ <path d="M1710 235 1730 152 1753 235Z M1700 196 1730 132 1761 196Z"/>
+ <path d="M1790 235 1820 111 1854 235Z M1780 188 1820 91 1864 188Z"/>
+ <path d="M1880 251 1901 153 1924 251Z M1866 201 1901 132 1935 201Z"/>
+ <path d="M1604 242 1633 148 1658 242Z M1593 202 1633 130 1671 202Z"/>
+ <path d="M1722 235 L1722 116 L1760 116 L1760 235 M1714 120 L1741 101 L1769 120Z" fill="#0a1826"/>
+</g>
+<path d="M1722 117 H1760 M1727 153 H1756 M1732 192 H1750" stroke="#6197b8" stroke-width="3" opacity=".65"/>
+<circle cx="1741" cy="118" r="3.7" fill="#57dff9"/>
+<!-- subtle horizon and technical glints -->
+<path d="M850 217 Q1138 168 1327 210 T1920 207" fill="none" stroke="#4cbce4" stroke-width="1.3" opacity=".25"/>
+<path d="M840 232 H1900" fill="none" stroke="#2a668c" stroke-width="1" opacity=".37"/>
+<path d="M0 0 H1080 L900 260 H0Z" fill="#061727" opacity=".89"/>
+<path d="M0 0 H760 L1000 260 H0Z" fill="#071b2d" opacity=".31"/>
+<path d="M0 259 H1920" stroke="#30bcf4" stroke-width="3" opacity=".8"/>
+</svg>

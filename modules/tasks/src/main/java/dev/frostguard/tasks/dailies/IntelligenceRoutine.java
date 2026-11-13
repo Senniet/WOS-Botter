@@ -20,6 +20,7 @@ import dev.frostguard.engine.schedule.LaunchPoint;
 import dev.frostguard.engine.schedule.TaskQueue;
 import dev.frostguard.engine.service.StaminaService;
 import dev.frostguard.engine.service.StatisticsService;
+import dev.frostguard.tasks.diagnostics.TaskDiagnosticSnapshots;
 import dev.frostguard.engine.service.TaskManagementService;
 import dev.frostguard.vision.convert.GameTimeUtils;
 import dev.frostguard.vision.ocr.ResilientOcrExecutor;
@@ -33,6 +34,9 @@ import java.util.function.Consumer;
 import java.util.List;
 
 public class IntelligenceRoutine extends DelayedTask {
+
+    @Override
+    protected boolean acceptsInjections() { return false; }
 
 private static final int MIN_STAMINA_REQUIRED_FLOOR = 30;
 
@@ -54,9 +58,102 @@ private static final long JOURNEY_RESULT_TIMEOUT_MILLIS = 30_000L;
 
 private static final long JOURNEY_INITIAL_RESULT_WAIT_MILLIS = 4_000L;
 
-private static final long JOURNEY_RESULT_POLL_MILLIS = 1_000L;
+private static final long JOURNEY_RESULT_POLL_MILLIS = 500L;
 
 private static final AreaData JOURNEY_VICTORY_CONTINUE_AREA = AreaData.of(400, 990, 658, 1038);
+
+// View is confined to the Intel mission modal. A real saved frame from
+// 2026-11-11 scored 89.56%, below the old default of 90.
+static final SearchConfig INTEL_VIEW_ACTION_SEARCH = SearchConfig.builder()
+        .withMaxAttempts(1).withDelay(0L).withThreshold(88)
+        .withArea(AreaData.of(205, 850, 535, 1015))
+        .build();
+
+// Text label images are thin and sensitive to anti-aliasing. Require two
+// agreeing frames, retrying after the View -> wilderness transition settles.
+static final SearchConfig INTEL_SURVIVOR_ACTION_SEARCH = SearchConfig.builder()
+        .withMaxAttempts(1).withDelay(0L).withThreshold(89)
+        .withArea(AreaData.of(220, 565, 510, 690)).build();
+static final SearchConfig INTEL_JOURNEY_ACTION_SEARCH = SearchConfig.builder()
+        .withMaxAttempts(1).withDelay(0L).withThreshold(89)
+        .withArea(AreaData.of(220, 565, 510, 690)).build();
+
+// Poll for readiness rather than sleeping 2 s for every modal. All matches
+// are still verified in two independently captured frames by locateAction.
+private ImageSearchResultData awaitIntelAction(TemplatesEnum primary, SearchConfig config,
+        long timeoutMillis, TemplatesEnum... legacyVariants) {
+    long started = System.nanoTime();
+    long deadline = started + timeoutMillis * 1_000_000L;
+    do {
+        ImageSearchResultData ready = templateSearchHelper.locateAction(
+                primary, config, legacyVariants);
+        if (ready.isFound()) {
+            logDebug(routineLogIntelligenceLine(primary + " ready after "
+                    + ((System.nanoTime() - started) / 1_000_000L) + " ms"));
+            return ready;
+        }
+        if (System.nanoTime() >= deadline) break;
+        sleepTask(140);
+    } while (true);
+    // One compatibility attempt for older artwork, with two-frame confirmation.
+    for (TemplatesEnum old : legacyVariants) {
+        ImageSearchResultData fallback = templateSearchHelper.locateAction(old,
+                SearchConfig.builder().withArea(config.getArea())
+                        .withMaxAttempts(1).withThreshold(86).build());
+        if (fallback.isFound()) return fallback;
+    }
+    return ImageSearchResultData.miss();
+}
+
+// After tapping a command, proceed as soon as its modal button disappears.
+// Wait at most briefly for the click animation; do not tap the button twice.
+// Check all known renderings of the same button before confirming an
+// acknowledged tap. One missing template alone is not a state transition.
+private boolean awaitIntelActionAcknowledged(TemplatesEnum action, SearchConfig config,
+        long timeoutMillis, TemplatesEnum... alternatives) {
+    long deadline = System.nanoTime() + timeoutMillis * 1_000_000L;
+    do {
+        boolean stillPresent = templateSearchHelper.locatePattern(action, config).isFound();
+        if (!stillPresent && alternatives != null) {
+            for (TemplatesEnum alternative : alternatives) {
+                if (alternative != null && templateSearchHelper.locatePattern(alternative, config).isFound()) {
+                    stillPresent = true;
+                    break;
+                }
+            }
+        }
+        if (!stillPresent) return true;
+        if (System.nanoTime() >= deadline) return false;
+        sleepTask(160);
+    } while (true);
+}
+
+private void deferIntelMissingAction(String mission, String action, String snapshotKind) {
+    String snapshot = TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+            "intel-actions", snapshotKind);
+    logWarning(routineLogIntelligenceLine(mission + " " + action
+            + " not verified on screen; " + snapshot
+            + ". No blind Back tap; retrying in five minutes."));
+    markWorkIncomplete("Intel " + mission + ": " + action + " unavailable");
+    reschedule(LocalDateTime.now().plusMinutes(5));
+    processingTask = false;
+}
+
+
+// Hero formation screens may use a different sized Deploy label.
+// Recognition requires the action to be confirmed in two successive frames.
+static final SearchConfig INTEL_DEPLOY_ACTION_SEARCH = SearchConfig.builder()
+        .withMaxAttempts(2).withDelay(250).withThreshold(88)
+        .withArea(AreaData.of(425, 1135, 710, 1279)).build();
+
+private ImageSearchResultData findIntelDeploy() {
+    return templateSearchHelper.locateAction(TemplatesEnum.INTEL_DEPLOY_BUTTON_MODERN,
+            INTEL_DEPLOY_ACTION_SEARCH, TemplatesEnum.DEPLOY_BUTTON);
+}
+
+private String intelDiagnostic(String kind) {
+    return TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER, "intel-deploy", kind);
+}
 
 private static final SearchConfig INTEL_CLAIM_ALL_SEARCH = SearchConfig.builder()
 		.withMaxAttempts(2)
@@ -171,6 +268,9 @@ public IntelligenceRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
 		IntelCyclePolicy.Decision entryDecision = intelCyclePolicy.evaluateDailyAvailability(
 				dailyIntelAvailable, LocalDateTime.now(), ZoneId.systemDefault());
 		if (entryDecision.action() == IntelCyclePolicy.Action.WAIT_FOR_NEXT_REFRESH) {
+			logInfo(routineLogIntelligenceLine("Daily unavailable evidence; "
+					+ TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+							"intel", "daily-not-available")));
 			logInfo(routineLogIntelligenceLine("Daily sidebar has no green Intel availability evidence and no "
 					+ "Intel cycle is active. Planning the next UTC Intel refresh at: "
 					+ entryDecision.nextRun().format(DATETIME_FORMATTER)));
@@ -185,7 +285,9 @@ public IntelligenceRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
 		}
 		boolean intelMissionsDetected = hasVisibleIntelMissionFlow();
 		if (!intelMissionsDetected) {
-			logInfo(routineLogIntelligenceLine("Daily reported Intel, but no enabled mission marker was detected."));
+			logWarning(routineLogIntelligenceLine("No enabled Intel mission marker detected; "
+					+ TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+							"intel", "mission-markers-missing")));
 			tryRescheduleFromCooldownFlow();
 			processingTask = false;
 			return;
@@ -388,7 +490,10 @@ private void tryRescheduleFromCooldownFlow() {
 		}
 
 		if (cooldown == null) {
-			logWarning(routineLogIntelligenceLine("Could not read cooldown timer via OCR. Planning next run in 10 minutes."));
+			logWarning(routineLogIntelligenceLine("Could not read cooldown timer via OCR; "
+					+ TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+							"intel", "cooldown-unreadable")
+					+ ". Planning next run in 10 minutes."));
 			reschedule(LocalDateTime.now().plusMinutes(10));
 			pressBack();
 			return;
@@ -1169,64 +1274,82 @@ private void manageRescheduling(boolean anyIntelProcessed, boolean nonBeastIntel
 	}
 
 private void handleSurvivor(ImageSearchResultData result) {
+    runExclusiveUiTransaction(() -> handleSurvivorExclusive(result));
+}
+
+private void handleSurvivorExclusive(ImageSearchResultData result) {
 		tapInside(result);
-		sleepTask(2000);
 
-		ImageSearchResultData view = templateSearchHelper.locatePattern(TemplatesEnum.INTEL_VIEW, SearchConfigConstants.SINGLE_WITH_RETRIES);
+        ImageSearchResultData view = awaitIntelAction(TemplatesEnum.INTEL_VIEW,
+                INTEL_VIEW_ACTION_SEARCH, 2400);
 		if (!view.isFound()) {
-			logWarning(routineLogIntelligenceLine("Could not find the 'View' button for the survivor. Going back."));
-			pressBack();
-			return;
+            deferIntelMissingAction("Survivor", "View", "survivor-view-missing");
+            return;
 		}
 
-		tapInside(view);
-		sleepTask(500);
+        tapInside(view);
+        logInfo(routineLogIntelligenceLine("Survivor after View: "
+                + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+                        "intel-actions", "survivor-after-view")));
+        ImageSearchResultData rescue = awaitIntelAction(
+                TemplatesEnum.INTEL_RESCUE_BUTTON_MODERN, INTEL_SURVIVOR_ACTION_SEARCH,
+                2900, TemplatesEnum.SERVE_EMU_INTEL_SURVIVOR_RESCUE,
+                TemplatesEnum.INTEL_RESCUE);
+        if (!rescue.isFound()) {
+            deferIntelMissingAction("Survivor", "Rescue", "survivor-rescue-missing");
+            return;
+        }
 
-		ImageSearchResultData rescue = templateSearchHelper.locatePattern(TemplatesEnum.INTEL_RESCUE, SearchConfigConstants.SINGLE_WITH_RETRIES);
-		if (!rescue.isFound()) {
-			logWarning(routineLogIntelligenceLine("Could not find the 'Rescue' button for the survivor. Going back."));
-			pressBack();
-			pressBack();
-
-			return;
-		}
-
-		tapInside(rescue);
-		sleepTask(800);
-		intelScreenHelper.returnToIntelFromWilderness();
+        tapInside(rescue);
+        // Never count a Rescue unless the action has visibly left its modal.
+        if (!awaitIntelActionAcknowledged(TemplatesEnum.INTEL_RESCUE_BUTTON_MODERN,
+                INTEL_SURVIVOR_ACTION_SEARCH, 1700,
+                TemplatesEnum.SERVE_EMU_INTEL_SURVIVOR_RESCUE)) {
+            deferIntelMissingAction("Survivor", "Rescue tap not acknowledged", "survivor-rescue-still-visible");
+            return;
+        }
+        intelScreenHelper.returnToIntelFromWilderness();
 		survivorMissionsSincePause++;
 		StaminaService.getServices().subtractStamina(profile.getId(), SURVIVOR_STAMINA_COST_VALUE);
 		StatisticsService.obtain().addToCounter(profile, "Intel Survivor Camps", 1);
 	}
 
 private void handleJourney(ImageSearchResultData result) {
+    runExclusiveUiTransaction(() -> handleJourneyExclusive(result));
+}
+
+private void handleJourneyExclusive(ImageSearchResultData result) {
 		tapInside(result);
-		sleepTask(2000);
 
-		ImageSearchResultData view = templateSearchHelper.locatePattern(TemplatesEnum.INTEL_VIEW, SearchConfigConstants.SINGLE_WITH_RETRIES);
+        ImageSearchResultData view = awaitIntelAction(TemplatesEnum.INTEL_VIEW,
+                INTEL_VIEW_ACTION_SEARCH, 2400);
 		if (!view.isFound()) {
-			logWarning(routineLogIntelligenceLine("Could not find the 'View' button for the journey. Going back."));
-			pressBack();
-			return;
+            deferIntelMissingAction("Journey", "View", "journey-view-missing");
+            return;
 		}
 
-		tapInside(view);
-		sleepTask(500);
+        tapInside(view);
+        logInfo(routineLogIntelligenceLine("Journey after View: "
+                + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+                        "intel-actions", "journey-after-view")));
+        ImageSearchResultData explore = awaitIntelAction(
+                TemplatesEnum.INTEL_EXPLORE_BUTTON_MODERN, INTEL_JOURNEY_ACTION_SEARCH,
+                2900, TemplatesEnum.SERVE_EMU_INTEL_JOURNEY_EXPLORE,
+                TemplatesEnum.INTEL_EXPLORE);
+        if (!explore.isFound()) {
+            deferIntelMissingAction("Journey", "Explore", "journey-explore-missing");
+            return;
+        }
 
-		ImageSearchResultData explore = templateSearchHelper.locatePattern(TemplatesEnum.INTEL_EXPLORE, SearchConfigConstants.SINGLE_WITH_RETRIES);
-		if (!explore.isFound()) {
-			logWarning(routineLogIntelligenceLine("Could not find the 'Explore' button for the journey. Going back."));
-			pressBack();
-			pressBack();
-
-			return;
-		}
-
-		tapInside(explore);
-		sleepTask(500);
-		tapNear(new PointData(520, 1200));
-		long deadline = System.nanoTime() + JOURNEY_RESULT_TIMEOUT_MILLIS * 1_000_000L;
-		sleepTask(JOURNEY_INITIAL_RESULT_WAIT_MILLIS);
+        tapInside(explore);
+        if (!awaitIntelActionAcknowledged(TemplatesEnum.INTEL_EXPLORE_BUTTON_MODERN,
+                INTEL_JOURNEY_ACTION_SEARCH, 1700,
+                TemplatesEnum.SERVE_EMU_INTEL_JOURNEY_EXPLORE)) {
+            deferIntelMissingAction("Journey", "Explore tap not acknowledged", "journey-explore-still-visible");
+            return;
+        }
+        // Avoid a blind tap at (520,1200). Poll the result as soon as it appears.
+        long deadline = System.nanoTime() + JOURNEY_RESULT_TIMEOUT_MILLIS * 1_000_000L;
 
 		ImageSearchResultData victory = ImageSearchResultData.miss();
 		while (System.nanoTime() < deadline) {
@@ -1254,6 +1377,10 @@ private void handleJourney(ImageSearchResultData result) {
 	}
 
 private void handleBeast(ImageSearchResultData beast) {
+    runExclusiveUiTransaction(() -> handleBeastExclusive(beast));
+}
+
+private void handleBeastExclusive(ImageSearchResultData beast) {
 		if (marchQueueLimitReached) {
 			logInfo(routineLogIntelligenceLine("Beast detected but march queue is full. Skipping deployment but marking as detected."));
 			return;
@@ -1267,7 +1394,7 @@ private void handleBeast(ImageSearchResultData beast) {
 		tapInside(beast);
 		sleepTask(2000);
 
-		ImageSearchResultData view = templateSearchHelper.locatePattern(TemplatesEnum.INTEL_VIEW, SearchConfigConstants.SINGLE_WITH_RETRIES);
+		ImageSearchResultData view = templateSearchHelper.locateAction(TemplatesEnum.INTEL_VIEW, INTEL_VIEW_ACTION_SEARCH);
 		if (!view.isFound()) {
 			logWarning(routineLogIntelligenceLine("Could not find the 'View' button for the beast. Going back."));
 			pressBack();
@@ -1296,12 +1423,15 @@ private void handleBeast(ImageSearchResultData beast) {
 		}
 
 
-		ImageSearchResultData deployButton = templateSearchHelper.locatePattern(TemplatesEnum.DEPLOY_BUTTON,
-				SearchConfigConstants.SINGLE_WITH_RETRIES);
+        logInfo(routineLogIntelligenceLine("Formation screen reached after Attack; "
+                + intelDiagnostic("formation-after-attack")));
+        ImageSearchResultData deployButton = findIntelDeploy();
 		if (!deployButton.isFound()) {
 			logWarning(routineLogIntelligenceLine(
-					"Deploy screen was not confirmed after Attack. No march was sent; retrying in 5 minutes."));
-			reschedule(LocalDateTime.now().plusMinutes(5));
+					"Deploy screen was not confirmed after Attack; " + intelDiagnostic("deploy-button-missing-after-attack")
+                            + ". No march was sent; retrying in 5 minutes."));
+			markWorkIncomplete("Intel Beast: Deploy button not confirmed after Attack");
+            reschedule(LocalDateTime.now().plusMinutes(5));
 			processingTask = false;
 			return;
 		}
@@ -1328,7 +1458,8 @@ private void handleBeast(ImageSearchResultData beast) {
 		int spentStamina = deployment.staminaCost();
 		if (deploymentHelper.hasNoDeployableTroops()) {
 			logWarning(routineLogIntelligenceLine(
-					"Deployment has no available troops. No march was sent; retrying in 5 minutes."));
+					"Deployment has no available troops; " + intelDiagnostic("formation-troops-empty")
+                            + ". No march was sent; retrying in 5 minutes."));
 			pressBack();
 			reschedule(LocalDateTime.now().plusMinutes(5));
 			processingTask = false;
@@ -1336,7 +1467,8 @@ private void handleBeast(ImageSearchResultData beast) {
 		}
 		if (deploymentHelper.isDeployCostRed()) {
 			logWarning(routineLogIntelligenceLine(
-					"Deployment stamina cost is red. No march was sent or deducted; retrying in 5 minutes."));
+					"Deployment stamina cost is red; " + intelDiagnostic("formation-stamina-red")
+                            + ". No march was sent or deducted; retrying in 5 minutes."));
 			pressBack();
 			reschedule(LocalDateTime.now().plusMinutes(5));
 			processingTask = false;
@@ -1346,7 +1478,8 @@ private void handleBeast(ImageSearchResultData beast) {
 		IntelDeploymentPreflight.Decision preflight = IntelDeploymentPreflight.assess(travelTimeSeconds);
 		if (!preflight.allowed()) {
 			logWarning(routineLogIntelligenceLine("Deployment refused before tapping Deploy: "
-					+ preflight.evidence() + ". Retrying in 5 minutes."));
+					+ preflight.evidence() + "; " + intelDiagnostic("preflight-rejected")
+                        + ". Retrying in 5 minutes."));
 			pressBack();
 			reschedule(LocalDateTime.now().plusMinutes(5));
 			processingTask = false;
@@ -1354,10 +1487,12 @@ private void handleBeast(ImageSearchResultData beast) {
 		}
 
 
-		ImageSearchResultData deploy = templateSearchHelper.locatePattern(TemplatesEnum.DEPLOY_BUTTON, SearchConfigConstants.SINGLE_WITH_RETRIES);
+		ImageSearchResultData deploy = findIntelDeploy();
 		if (!deploy.isFound()) {
-			logError(routineLogIntelligenceLine("Deploy button not detected. Planning next run to try again in 5 minutes."));
-			reschedule(LocalDateTime.now().plusMinutes(5));
+			logError(routineLogIntelligenceLine("Deploy button not detected after formation setup; " + intelDiagnostic("deploy-button-missing-before-click")
+                    + ". Planning next run to try again in 5 minutes."));
+			markWorkIncomplete("Intel Beast: Deploy button missing before click");
+            reschedule(LocalDateTime.now().plusMinutes(5));
 			processingTask = false;
 
 			return;
@@ -1396,16 +1531,33 @@ private void handleBeast(ImageSearchResultData beast) {
 			return;
 		}
 
-		deploy = templateSearchHelper.locatePattern(TemplatesEnum.DEPLOY_BUTTON, SearchConfigConstants.SINGLE_WITH_RETRIES);
-		if (deploy.isFound()) {
-			logWarning(routineLogIntelligenceLine("Deploy button still present after deployment attempt. March may not have completed. Planning next run in 5 minutes."));
-			reschedule(LocalDateTime.now().plusMinutes(5));
-			processingTask = false;
+		deploy = templateSearchHelper.locatePattern(TemplatesEnum.INTEL_DEPLOY_BUTTON_MODERN,
+                INTEL_DEPLOY_ACTION_SEARCH);
+        if (deploy.isFound()) {
+            logWarning(routineLogIntelligenceLine("Deploy button still visible after tap; "
+                    + intelDiagnostic("deploy-still-visible") + ". No verified march; retrying later."));
+            markWorkIncomplete("Intel Beast: Deploy still visible after tap");
+            reschedule(LocalDateTime.now().plusMinutes(5));
+            processingTask = false;
+            return;
+        }
 
-			return;
-		}
+        // Disappearance alone does not prove that the march started. Confirm
+        // the world HUD before updating stamina, statistics, or mission progress.
+        ImageSearchResultData verifiedWorld = templateSearchHelper.locatePattern(
+                TemplatesEnum.GAME_HOME_WORLD,
+                SearchConfig.builder().withMaxAttempts(3).withDelay(400)
+                        .withThreshold(85).build());
+        if (!verifiedWorld.isFound()) {
+            logWarning(routineLogIntelligenceLine("Deploy disappeared, but no World screen was confirmed; "
+                    + intelDiagnostic("deploy-transition-unknown") + ". No progress deducted."));
+            markWorkIncomplete("Intel Beast: launch transition not confirmed");
+            reschedule(LocalDateTime.now().plusMinutes(5));
+            processingTask = false;
+            return;
+        }
 
-		logInfo(routineLogIntelligenceLine("Beast march deployed finished cleanly."));
+        logInfo(routineLogIntelligenceLine("Beast march deployment verified on World screen."));
 		beastMarchSent = true;
 		intelMarchesRemaining = Math.max(0, intelMarchesRemaining - 1);
 		if (intelMarchesRemaining <= 0) {

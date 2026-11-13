@@ -57,6 +57,10 @@ public class TaskFailureIncidentService {
     public synchronized FailureDecision recordFailure(TaskFailureReport report) {
         TaskFailureStreakData streak = streakRepository.recordFailure(
                 report.profileId(), report.taskKey(), report.signature(), LocalDateTime.now());
+        // Internally handled failures must be visible to the LAN diagnostic inbox too.
+        // The reporter is asynchronous and sends only a task identifier/signature here.
+        dev.frostguard.engine.diagnostics.LanDiagnosticReporter.failure(
+                report.taskName(), report.signature());
         if (streak.consecutiveFailures() < report.escalationThreshold()) {
             return new FailureDecision(
                     streak.consecutiveFailures(), false, report.retryAt(), Optional.empty());

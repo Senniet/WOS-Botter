@@ -72,6 +72,7 @@ public class InitializeRoutine extends DelayedTask {
 
 	// ========== Home Screen Detection Constants ==========
 	private static final int MAX_HOME_SCREEN_ATTEMPTS = 10;
+    private static final int MAX_EMULATOR_READY_PROBES = 4;
 	private static final int RESOURCE_DOWNLOAD_TIMEOUT_MINUTES = 10;
 	private static final int RESOURCE_DOWNLOAD_POLL_DELAY_MS = 5000;
 	private static final int MAX_RESOURCE_DOWNLOAD_ATTEMPTS =
@@ -112,6 +113,7 @@ public class InitializeRoutine extends DelayedTask {
 	private int closeableOverlayDismissals = 0;
 	private int trekExitHintDismissals = 0;
 	private String lastVerifiedStartupState = "initialization started";
+	private String lastHomePatternEvidence = "not yet inspected";
 	private RawImageData lastStartupFrame;
 	private final DiagnosticSnapshotStore startupSnapshots = DiagnosticSnapshotStore.forCurrentWorkspace();
 
@@ -197,17 +199,26 @@ public class InitializeRoutine extends DelayedTask {
 		logInfo("Checking emulator status...");
 
 		if (!isStarted) {
-			awaitEmulatorRunning(
-					() -> emuManager.isRunning(EMULATOR_NUMBER),
-					() -> {
-						logInfo("Emulator not found. Attempting to start it...");
-						emuManager.launchEmulator(EMULATOR_NUMBER);
-					},
-					() -> {
-						logInfo("Waiting 10 seconds before checking again.");
-						sleepTask(10000); // Wait for emulator to start
-					},
-					this::checkPreemption);
+            try {
+                awaitEmulatorRunning(
+                        () -> emuManager.isRunning(EMULATOR_NUMBER),
+                        () -> {
+                            logInfo("Emulator not found. Attempting to start it once...");
+                            emuManager.launchEmulator(EMULATOR_NUMBER);
+                        },
+                        () -> {
+                            logInfo("Waiting 10 seconds before checking ADB again.");
+                            sleepTask(10000);
+                        },
+                        this::checkPreemption);
+            } catch (IllegalStateException unavailable) {
+                dev.frostguard.engine.diagnostics.LanDiagnosticReporter.failure(
+                        "initialize", "emulator-adb-not-ready");
+                LocalDateTime retry = LocalDateTime.now().plusMinutes(5);
+                logWarning("Initialize: emulator/ADB not ready after " + MAX_EMULATOR_READY_PROBES
+                        + " probes; deferring instead of remaining in Executing. Retry at " + retry);
+                throw new ProfileCooldownException("Emulator is not yet reachable over ADB", retry);
+            }
 			isStarted = true;
 			lastVerifiedStartupState = "emulator running";
 			logInfo("Emulator is running.");
@@ -215,19 +226,22 @@ public class InitializeRoutine extends DelayedTask {
 	}
 
 	static void awaitEmulatorRunning(BooleanSupplier isRunning, Runnable launch,
-			Runnable retryDelay, Runnable checkPreemption) {
-		while (true) {
-			checkPreemption.run();
-			boolean running = isRunning.getAsBoolean();
-			checkPreemption.run();
-			if (running) {
-				return;
-			}
-			launch.run();
-			checkPreemption.run();
-			retryDelay.run();
-		}
-	}
+            Runnable retryDelay, Runnable checkPreemption) {
+        for (int probe = 0; probe < MAX_EMULATOR_READY_PROBES; probe++) {
+            checkPreemption.run();
+            boolean running = isRunning.getAsBoolean();
+            checkPreemption.run();
+            if (running) return;
+            // Launch only once: additional launches while ADB is disconnected
+            // risk spawning duplicate emulator instances.
+            if (probe == 0) {
+                launch.run();
+                checkPreemption.run();
+            }
+            if (probe + 1 < MAX_EMULATOR_READY_PROBES) retryDelay.run();
+        }
+        throw new IllegalStateException("Emulator/ADB did not become ready after bounded probes");
+    }
 
 	/**
 	 * Verifies that Whiteout Survival is installed on the emulator.
@@ -277,7 +291,21 @@ public class InitializeRoutine extends DelayedTask {
 						EMULATOR_NUMBER, serial, inspection, lastVerifiedStartupState),
 				() -> emuManager.captureScreen(EMULATOR_NUMBER),
 				this::logWarning,
-				this::sleepTask);
+				this::sleepTask,
+				(attempt, failure) -> {
+					checkPreemption();
+					emuManager.invalidateAllCaches(EMULATOR_NUMBER);
+					if (emuManager.isRunning(EMULATOR_NUMBER)) {
+						logWarning("Emulator process exists but ADB is offline; restarting ADB bridge once.");
+						emuManager.restartAdbServer();
+					} else {
+						logWarning("Emulator no longer running after ADB failure; requesting one restart.");
+						isStarted = false;
+						emuManager.launchEmulator(EMULATOR_NUMBER);
+						isStarted = true;
+					}
+					checkPreemption();
+				});
 		lastStartupFrame = frame;
 		return frame;
 	}
@@ -369,8 +397,8 @@ public class InitializeRoutine extends DelayedTask {
 			}
 
 			// Passive checks and later recoveries do not retain a screenshot.
-			logWarning("Home screen not found on an unsupported startup screen. "
-					+ "Waiting 5 seconds for a passive state change before retrying...");
+			logWarning("Home screen not found on an unsupported startup screen ("
+					+ lastHomePatternEvidence + "). Waiting 5 seconds for a passive state change before retrying...");
 			sleepTask(5000);
 			attempts++;
 		}
@@ -708,6 +736,10 @@ public class InitializeRoutine extends DelayedTask {
 		ImageSearchResultData world = emuManager.locatePattern(
 				EMULATOR_NUMBER, frame, TemplatesEnum.GAME_HOME_WORLD, STARTUP_PATTERN_THRESHOLD);
 
+		lastHomePatternEvidence = "capture=" + frame.getWidth() + "x" + frame.getHeight()
+				+ ", furnaceScore=" + String.format(java.util.Locale.ROOT, "%.1f", home.getMatchScore())
+				+ ", worldScore=" + String.format(java.util.Locale.ROOT, "%.1f", world.getMatchScore())
+				+ ", threshold=" + STARTUP_PATTERN_THRESHOLD;
 		return home.isFound() || world.isFound();
 	}
 

@@ -305,7 +305,10 @@ public class TaskQueue {
             int runningRank  = rankingStrategy.getPriority(ctx.getTask());
             int incomingRank = rankingStrategy.getPriority(replacement);
             if (runningRank > incomingRank) { emitInfo("Preemption blocked - active task outranks"); }
-            else { emitWarn("Interrupting " + ctx.getTask().getTaskName() + " for: " + rule.getRuleName()); shouldSignal = true; }
+            else if (ctx.getTask().isExclusiveUiTransaction()) {
+                emitInfo("Preemption queued until UI transaction completes: "
+                        + ctx.getTask().getTaskName() + " -> " + rule.getRuleName());
+            } else { emitWarn("Interrupting " + ctx.getTask().getTaskName() + " for: " + rule.getRuleName()); shouldSignal = true; }
         }
 
         if (taskBacklog.remove(replacement)) emitInfo("Moved " + replacement.getTaskName() + " to NOW");
@@ -699,17 +702,26 @@ public class TaskQueue {
             }
             long elapsed = (System.currentTimeMillis() - t0) / 1000;
             LocalDateTime scheduledAfterRun = task.getScheduled();
-            emitInfoTask(task, "Completed: " + task.getTaskName() + " scheduled="
-                    + (scheduledAfterRun != null ? scheduledAfterRun.format(TS_FMT) : "none"));
-            AnalyticsService.getInstance().trackTaskCompleted(task.getTaskName(), "success", elapsed);
-            ok = true;
-            checkDailyMissionFollow(task);
-            try {
-                TaskFailureIncidentService.obtain().recordSuccess(
-                        profile.getId(), incidentTaskKey(task));
-            } catch (RuntimeException exception) {
-                emitWarnTask(task, "Could not reset persistent task-failure state: "
-                        + exception.getMessage());
+            if (task.getIncompleteWorkReason() != null) {
+                emitWarnTask(task, "DEFERRED (not completed): " + task.getTaskName()
+                        + "; reason=" + task.getIncompleteWorkReason()
+                        + "; scheduled=" + (scheduledAfterRun != null
+                                ? scheduledAfterRun.format(TS_FMT) : "none"));
+                AnalyticsService.getInstance().trackTaskCompleted(task.getTaskName(), "deferred", elapsed);
+                ok = false;
+            } else {
+                emitInfoTask(task, "Completed: " + task.getTaskName() + " scheduled="
+                        + (scheduledAfterRun != null ? scheduledAfterRun.format(TS_FMT) : "none"));
+                AnalyticsService.getInstance().trackTaskCompleted(task.getTaskName(), "success", elapsed);
+                ok = true;
+                checkDailyMissionFollow(task);
+                try {
+                    TaskFailureIncidentService.obtain().recordSuccess(
+                            profile.getId(), incidentTaskKey(task));
+                } catch (RuntimeException exception) {
+                    emitWarnTask(task, "Could not reset persistent task-failure state: "
+                            + exception.getMessage());
+                }
             }
         } catch (dev.frostguard.engine.error.TaskPreemptedException ex) {
             emitWarnTask(task, "PREEMPTED: " + ex.getReasoning());
@@ -721,6 +733,8 @@ public class TaskQueue {
                 ok = false;
             } else {
                 routeError(task, ex);
+                dev.frostguard.engine.diagnostics.LanDiagnosticReporter.failure(
+                        task.getTaskName(), ex.getClass().getSimpleName());
                 AnalyticsService.getInstance().trackTaskCompleted(task.getTaskName(), "failed", (System.currentTimeMillis()-t0)/1000);
                 ok = false;
             }

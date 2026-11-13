@@ -10,6 +10,7 @@ import dev.frostguard.api.domain.MarchSlotState;
 import dev.frostguard.api.domain.PointData;
 import dev.frostguard.data.entity.DailyTask;
 import dev.frostguard.data.repository.DailyTaskRepository;
+import dev.frostguard.engine.helper.FormationDeployDetector;
 import dev.frostguard.engine.helper.MarchSlotAvailabilityEstimator;
 import dev.frostguard.engine.helper.StaminaTopUpResult;
 import dev.frostguard.engine.nav.CommonGameAreas;
@@ -175,7 +176,21 @@ private record RallyLaunchResult(RallyLaunchOutcome outcome, String detail) {
             if (!staminaCouldSupportRally())
                 return;
 
-            List<MarchSlotState> marchQueue = marchHelper.readMarchQueue();
+            List<MarchSlotState> marchQueue;
+            try {
+                marchQueue = readMarchQueueAfterWorldTransition();
+            } catch (IllegalStateException unavailable) {
+                if (!"Could not open the requested sidebar section".equals(unavailable.getMessage())) {
+                    throw unavailable;
+                }
+                LocalDateTime retryAt = LocalDateTime.now().plusMinutes(1);
+                logWarning(routineLogPolarTerrorHuntingLine(
+                        "March queue sidebar unavailable after world transition; "
+                        + "preserving " + deployedCount + " confirmed rally deployment(s) and retrying at "
+                        + GameTimeUtils.formatCountdown(retryAt)));
+                reschedule(retryAt);
+                return;
+            }
             if (marchQueue.stream().noneMatch(MarchSlotState::isIdle)) {
                 LocalDateTime retryAt = resolveNoSlotRetry(marchQueue);
                 logInfo(routineLogPolarTerrorHuntingLine(String.format(
@@ -390,7 +405,12 @@ private RallyLaunchResult launchSingleRallyFlow(int polarLevel, boolean useFlag,
             logInfo(routineLogPolarTerrorHuntingLine("Formation setup: flag #" + flagNumber + " confirmed"));
         } else {
             logInfo(routineLogPolarTerrorHuntingLine("Formation setup: no flag configured, using Equalize"));
-            deploymentHelper.tapEqualize();
+            if (!deploymentHelper.tapEqualize()) {
+                String snapshot = TaskDiagnosticSnapshots.capture(
+                        emuManager, EMULATOR_NUMBER, "polarterror", "equalize-not-found");
+                return fail(RallyLaunchOutcome.DEPLOY_NOT_FOUND,
+                        "Formation screen not confirmed: Equalize button missing; " + snapshot);
+            }
             sleepTask(500);
         }
 
@@ -403,11 +423,15 @@ private RallyLaunchResult launchSingleRallyFlow(int polarLevel, boolean useFlag,
         long travelTimeSeconds = deployment.travelTimeSeconds();
         int rallyStaminaCost = deployment.staminaCost();
 
-        ImageSearchResultData deploy = templateSearchHelper.locatePattern(
-                TemplatesEnum.DEPLOY_BUTTON,
-                SearchConfigConstants.SINGLE_WITH_RETRIES);
+        ImageSearchResultData deploy = findFormationDeployButton();
         if (!deploy.isFound()) {
-            String detail = "Deploy button not found after formation setup; known causes: no troops, flag locked, autojoin consumed the march slot, or unexpected formation screen";
+            String screenText = inspectFormationFooterText();
+            String snapshot = TaskDiagnosticSnapshots.capture(
+                    emuManager, EMULATOR_NUMBER, "polarterror", "deploy-not-found");
+            String detail = "Deploy button not recognized after formation setup (Intel and shared rally templates checked); "
+                    + "footerText=" + screenText + "; "
+                    + snapshot + ". Enable Diagnostic Screenshots in Emulator Settings if disabled;"
+                    + " check troops, march slots, overlays, or an unexpected formation screen";
             logWarning(routineLogPolarTerrorHuntingLine("Deployment decision: " + detail));
             return fail(RallyLaunchOutcome.DEPLOY_NOT_FOUND, detail);
         }
@@ -432,9 +456,7 @@ private RallyLaunchResult launchSingleRallyFlow(int polarLevel, boolean useFlag,
                 return fail(outcome, "Stamina refill ended with " + refill.status());
             }
 
-            deploy = templateSearchHelper.locatePattern(
-                    TemplatesEnum.DEPLOY_BUTTON,
-                    SearchConfigConstants.SINGLE_WITH_RETRIES);
+            deploy = findFormationDeployButton();
             if (!deploy.isFound()) {
                 return fail(RallyLaunchOutcome.STAMINA_REFILL_FAILED, "Deploy button not restored after stamina refill");
             }
@@ -456,9 +478,7 @@ private RallyLaunchResult launchSingleRallyFlow(int polarLevel, boolean useFlag,
                     "Another player's troops are already marching toward this target; the rally was cancelled");
         }
 
-        deploy = templateSearchHelper.locatePattern(
-                TemplatesEnum.DEPLOY_BUTTON,
-                SearchConfigConstants.SINGLE_WITH_RETRIES);
+        deploy = findFormationDeployButton();
         if (deploy.isFound()) {
             logWarning(routineLogPolarTerrorHuntingLine(String.format(
                     "Deployment result: Deploy still visible at %s score=%.2f; rally not confirmed",
@@ -500,6 +520,65 @@ private RallyLaunchResult launchSingleRallyFlow(int polarLevel, boolean useFlag,
         return ok("Rally deployed and World anchor verified");
     }
 
+/**
+ * Read-only diagnostic: OCR cannot establish a safe click coordinate. Keep
+ * the result bounded and never use its text to send a march automatically.
+ */
+private String inspectFormationFooterText() {
+        try {
+            String raw = emuManager.readText(EMULATOR_NUMBER,
+                    new PointData(60, 1160), new PointData(700, 1275),
+                    CommonOCRSettings.SHOP_TAB_TEXT_SETTINGS, false);
+            if (raw == null || raw.isBlank()) return "empty";
+            String clean = raw.replaceAll("[\r\n\t]+", " ")
+                    .replaceAll("[^a-zA-Z0-9 ?!.,:()/-]", "");
+            return "'" + clean.substring(0, Math.min(100, clean.length())) + "'";
+        } catch (Exception ex) {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new java.util.concurrent.CancellationException("Formation OCR interrupted");
+            }
+            return "unavailable(" + ex.getClass().getSimpleName() + ")";
+        }
+    }
+
+/**
+ * The generic deploy template originates from Intel and does not always match
+ * the rally formation button. Try the shared rally button as an alternative,
+ * but never tap at a guessed coordinate: both paths require an actual match.
+ * The post-tap flow independently verifies that the game returned to World.
+ */
+private ImageSearchResultData findFormationDeployButton() {
+        ImageSearchResultData template = templateSearchHelper.locateAction(
+                TemplatesEnum.DEPLOY_BUTTON,
+                SearchConfigConstants.SINGLE_WITH_RETRIES,
+                TemplatesEnum.RALLY_DEPLOY_BUTTON);
+        if (template.isFound()) return template;
+
+        // A confirmed Equalize button plus two independent formation frames
+        // provides stronger evidence than guessing from the blue bar alone.
+        try {
+            var first = FormationDeployDetector.detect(
+                    dev.frostguard.vision.convert.ImageConverter.toBufferedImage(
+                            emuManager.captureScreen(EMULATOR_NUMBER)));
+            if (!first.isFound()) return ImageSearchResultData.miss();
+            sleepTask(220);
+            var second = FormationDeployDetector.detect(
+                    dev.frostguard.vision.convert.ImageConverter.toBufferedImage(
+                            emuManager.captureScreen(EMULATOR_NUMBER)));
+            if (dev.frostguard.engine.helper.RecognitionConsensus.agrees(first, second, 8)) {
+                logInfo(routineLogPolarTerrorHuntingLine(
+                        "Formation Deploy confirmed by two-frame blue-button/label geometry"));
+                return second;
+            }
+        } catch (RuntimeException exception) {
+            if (exception instanceof java.util.concurrent.CancellationException
+                    || Thread.currentThread().isInterrupted()) throw exception;
+            logWarning(routineLogPolarTerrorHuntingLine(
+                    "Formation Deploy pixel inspection unavailable: " + exception.getClass().getSimpleName()));
+        }
+        return ImageSearchResultData.miss();
+    }
+
 // Backing out of the confirmation returns to the formation screen, from where one more back press
 // reaches World. Neither stamina nor a march slot has been spent at that point.
 private void leaveSameTargetDialog() {
@@ -515,6 +594,27 @@ private void leaveSameTargetDialog() {
             logWarning(routineLogPolarTerrorHuntingLine(
                     "World anchor not verified after cancelling; the next run re-navigates"));
         }
+    }
+
+/**
+ * After a successful rally the world transition may still animate, leaving
+ * the sidebar temporarily unavailable. Recheck once, never assume a slot is
+ * free and never undo a previously confirmed deployment on this failure.
+ */
+private List<MarchSlotState> readMarchQueueAfterWorldTransition() {
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            checkPreemption();
+            try {
+                return marchHelper.readMarchQueue();
+            } catch (IllegalStateException unavailable) {
+                if (!"Could not open the requested sidebar section".equals(unavailable.getMessage())
+                        || attempt == 2) throw unavailable;
+                logWarning(routineLogPolarTerrorHuntingLine(
+                        "Wilderness sidebar not ready after rally; allowing screen to settle before retry"));
+                sleepTask(1800);
+            }
+        }
+        throw new IllegalStateException("March queue retry exhausted");
     }
 
 // Picks the next useful wake-up when every march slot is busy. Rallies this routine launched itself
@@ -663,6 +763,14 @@ private SpecialRewardsStatus inspectSpecialRewards() {
                 this::readVisibleSpecialRewardsCount,
                 () -> swipe(new PointData(363, 1088), new PointData(363, 1030)),
                 this::sleepTask);
+        if (result == PolarSpecialRewardsScanner.Result.NOT_FOUND) {
+            String snapshot = TaskDiagnosticSnapshots.capture(
+                    emuManager, EMULATOR_NUMBER, "polarterror", "special-rewards-unreadable");
+            logWarning(routineLogPolarTerrorHuntingLine(
+                    "Special rewards counter unreadable after "
+                    + PolarSpecialRewardsScanner.MAX_SWIPES + " swipes; "
+                    + snapshot + ". Skipping rally rather than assuming rewards remain."));
+        }
         tapNear(CommonGameAreas.POLAR_REWARD_DETAILS_CLOSE);
         sleepTask(500);
         return switch (result) {

@@ -6,8 +6,13 @@ import dev.frostguard.api.configs.TpDailyTaskEnum;
 import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.api.domain.ImageSearchResultData;
 import dev.frostguard.api.domain.PointData;
+import dev.frostguard.api.domain.AreaData;
 import dev.frostguard.api.domain.OcrSettingsData;
 import dev.frostguard.engine.nav.SearchConfigConstants;
+import dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig;
+import dev.frostguard.engine.helper.RecognitionConsensus;
+import dev.frostguard.engine.helper.GreenLabelActionDetector;
+import dev.frostguard.vision.convert.ImageConverter;
 import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.schedule.LaunchPoint;
 import dev.frostguard.vision.convert.GameTimeUtils;
@@ -60,9 +65,13 @@ public VipRoutine(AccountDescriptor profile, TpDailyTaskEnum tpDailyTask) {
 			return;
 		}
 
-		if (buyMonthlyVip) {
-			manageMonthlyVipPurchase();
-		}
+        if (buyMonthlyVip) {
+            if (isCurrentVipMenuVisible()) {
+                logWarning(routineLogVipLine("Monthly VIP purchase bypassed in current UI: no purchases authorized by automation"));
+            } else {
+                manageMonthlyVipPurchase();
+            }
+        }
 
 		redeemDailyChestRewards();
 
@@ -151,19 +160,41 @@ private void manageMonthlyVipPurchase() {
 	}
 
 private void redeemDailyChestRewards() {
-		logInfo(routineLogVipLine("Collecting daily VIP chest rewards"));
+        if (isCurrentVipMenuVisible()) {
+            var locked = templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_VIP_LOCKED,
+                    SearchConfig.builder().withMaxAttempts(1).withThreshold(90)
+                            .withArea(AreaData.of(515, 760, 675, 886)).build());
+            if (locked.isFound()) {
+                logInfo(routineLogVipLine("Daily VIP Free Bundle is locked; skipping without opening a paid offer"));
+                return;
+            }
+            ImageSearchResultData freeClaim = verifiedFreeVipClaim(
+                    new GreenLabelActionDetector.Region(505, 755, 688, 882));
+            if (!freeClaim.isFound()) {
+                logInfo(routineLogVipLine("VIP Daily Bundle has no verified free Claim button; skipping"));
+                return;
+            }
+            tapInside(freeClaim);
+            sleepTask(350);
+            logInfo(routineLogVipLine("Verified VIP free Claim pressed once"));
+            return;
+        }
+        // Retain the old supported UI only if its exact VIP screen is visible.
+        if (templateSearchHelper.locatePattern(TemplatesEnum.VIP_MENU,
+                SearchConfigConstants.DEFAULT_SINGLE).isFound()) {
+            tapInside(DAILY_CHEST_REWARDS_TOP_LEFT_VALUE, DAILY_CHEST_REWARDS_BOTTOM_RIGHT_VALUE, 1, 300);
+        }
+    }
 
-		tapInside(
-				DAILY_CHEST_REWARDS_TOP_LEFT_VALUE,
-				DAILY_CHEST_REWARDS_BOTTOM_RIGHT_VALUE,
-				3,
-				300);
-
-		sleepTask(500);
-
-
-		logDebug(routineLogVipLine("Daily chest rewards collected"));
-	}
+    private ImageSearchResultData verifiedFreeVipClaim(GreenLabelActionDetector.Region region) {
+        var first = GreenLabelActionDetector.detect(
+                ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER)), region);
+        if (!first.isFound()) return ImageSearchResultData.miss();
+        sleepTask(160);
+        var second = GreenLabelActionDetector.detect(
+                ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER)), region);
+        return RecognitionConsensus.agrees(first, second, 12) ? second : ImageSearchResultData.miss();
+    }
 
 private void purchaseMonthlyVipFlow(PointData unlockButtonPoint) {
 
@@ -190,19 +221,49 @@ private void purchaseMonthlyVipFlow(PointData unlockButtonPoint) {
 	}
 
 private void redeemVipPointRewards() {
-		logInfo(routineLogVipLine("Collecting VIP point rewards"));
-
-		tapInside(
-				VIP_POINT_REWARDS_TOP_LEFT_VALUE,
-				VIP_POINT_REWARDS_BOTTOM_RIGHT_VALUE,
-				3,
-				300);
-
-		sleepTask(500);
-
-
-		logDebug(routineLogVipLine("VIP point rewards collected"));
-	}
+        if (isCurrentVipMenuVisible()) {
+            ImageSearchResultData calendar = templateSearchHelper.locateAction(
+                    TemplatesEnum.SERVE_EMU_VIP_CALENDAR,
+                    SearchConfig.builder().withMaxAttempts(2).withDelay(150).withThreshold(90)
+                            .withArea(AreaData.of(568, 285, 690, 403)).build());
+            if (!calendar.isFound()) {
+                logInfo(routineLogVipLine("VIP sign-in calendar not confirmed; no blind reward tap"));
+                return;
+            }
+            tapInside(calendar);
+            sleepTask(400);
+            boolean signIn = templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_VIP_SIGNIN,
+                    SearchConfig.builder().withMaxAttempts(2).withDelay(150).withThreshold(90)
+                            .withArea(AreaData.of(40, 265, 510, 385)).build()).isFound();
+            if (!signIn) {
+                logWarning(routineLogVipLine("Calendar tapped but Sign-in Streak screen unverified"));
+                return;
+            }
+            // Only the free, green-labelled Claim action is eligible; the
+            // "tomorrow" banner and shop buttons are never pressed blindly.
+            ImageSearchResultData free = verifiedFreeVipClaim(
+                    new GreenLabelActionDetector.Region(180, 985, 545, 1148));
+            if (free.isFound()) {
+                tapInside(free);
+                sleepTask(300);
+                logInfo(routineLogVipLine("Sign-in Streak free claim tapped once"));
+            } else {
+                logInfo(routineLogVipLine("Sign-in Streak has no verified free claim today"));
+            }
+            if (templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_VIP_SIGNIN,
+                    SearchConfig.builder().withMaxAttempts(1).withThreshold(90)
+                            .withArea(AreaData.of(40, 265, 510, 385)).build()).isFound()) {
+                tapInside(new PointData(607, 298), new PointData(659, 360));
+                sleepTask(250);
+            }
+            return;
+        }
+        // Old VIP UI support remains in place; never press the modern shopping
+        // cart location as though it were a free VIP point reward.
+        if (templateSearchHelper.locatePattern(TemplatesEnum.VIP_MENU,
+                SearchConfigConstants.DEFAULT_SINGLE).isFound())
+            tapInside(VIP_POINT_REWARDS_TOP_LEFT_VALUE, VIP_POINT_REWARDS_BOTTOM_RIGHT_VALUE, 1, 300);
+    }
 
 private void hydrateConfiguration() {
 		Boolean configuredBuyVip = profile.getConfig(
@@ -258,28 +319,41 @@ private String routineLogVipLine(String note) {
         return "VipRoutine | " + note;
     }
 
-private void dismissVipMenu() {
-		logDebug(routineLogVipLine("Closing VIP menu"));
-		pressBack();
-		sleepTask(500);
+private boolean isCurrentVipMenuVisible() {
+        return templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_VIP_TITLE,
+                SearchConfig.builder().withMaxAttempts(1).withThreshold(90)
+                        .withArea(AreaData.of(78, 70, 195, 150)).build()).isFound();
+    }
 
-	}
+private void dismissVipMenu() {
+        if (isCurrentVipMenuVisible()) {
+            tapInside(new PointData(12, 75), new PointData(73, 139));
+            sleepTask(250);
+            return;
+        }
+        if (templateSearchHelper.locatePattern(TemplatesEnum.VIP_MENU,
+                SearchConfigConstants.DEFAULT_SINGLE).isFound()) {
+            pressBack();
+            sleepTask(350);
+        }
+    }
 
 private boolean openUpVipMenu() {
-		logDebug(routineLogVipLine("Entering VIP menu"));
+        if (isCurrentVipMenuVisible()) return true;
+        var hud = templateSearchHelper.locateAction(TemplatesEnum.SERVE_EMU_VIP_HUD,
+                SearchConfig.builder().withMaxAttempts(2).withDelay(120)
+                        .withThreshold(90).withArea(AreaData.of(426, 105, 544, 170)).build());
+        if (hud.isFound()) {
+            tapInside(hud);
+            sleepTask(300);
+            return isCurrentVipMenuVisible();
+        }
+        // Classic BlueStacks navigation: only accept its existing, verified
+        // VIP template as a postcondition.
+        tapInside(VIP_MENU_BUTTON_TOP_LEFT_VALUE, VIP_MENU_BUTTON_BOTTOM_RIGHT_VALUE);
+        sleepTask(500);
+        return templateSearchHelper.locatePattern(TemplatesEnum.VIP_MENU,
+                SearchConfigConstants.DEFAULT_SINGLE).isFound();
+    }
 
-		tapInside(VIP_MENU_BUTTON_TOP_LEFT_VALUE, VIP_MENU_BUTTON_BOTTOM_RIGHT_VALUE);
-		sleepTask(1000);
-
-
-		ImageSearchResultData vipMenu = templateSearchHelper.locatePattern(
-				TemplatesEnum.VIP_MENU,
-				SearchConfigConstants.DEFAULT_SINGLE);
-
-		if (!vipMenu.isFound()) {
-			return false;
-		}
-
-		return true;
-	}
 }

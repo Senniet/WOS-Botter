@@ -8,6 +8,10 @@ import dev.frostguard.api.domain.AreaData;
 import dev.frostguard.api.domain.ImageSearchResultData;
 import dev.frostguard.api.domain.PointData;
 import dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig;
+import dev.frostguard.engine.helper.GreenLabelActionDetector;
+import dev.frostguard.engine.helper.RecognitionConsensus;
+import dev.frostguard.vision.convert.ImageConverter;
+import dev.frostguard.tasks.diagnostics.TaskDiagnosticSnapshots;
 import dev.frostguard.engine.nav.SearchConfigConstants;
 import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.schedule.LaunchPoint;
@@ -36,7 +40,7 @@ private static final PointData POPUP_DISMISS_MAX_VALUE = new PointData(600, 120)
 private static final SearchConfig DAILY_SCREEN_TITLE_SEARCH = SearchConfig.builder()
 		.withMaxAttempts(3)
 		.withDelay(300)
-		.withThreshold(90)
+		.withThreshold(87)
 		.withArea(new AreaData(new PointData(180, 70), new PointData(540, 170)))
 		.build();
 
@@ -46,6 +50,11 @@ private static final SearchConfig DAILY_TAB_BUTTON_SEARCH = SearchConfig.builder
 		.withThreshold(90)
 		.withArea(new AreaData(new PointData(300, 1050), new PointData(720, 1200)))
 		.build();
+
+private static final GreenLabelActionDetector.Region DAILY_CLAIM_ALL_REGION =
+        new GreenLabelActionDetector.Region(230, 985, 495, 1070);
+private static final GreenLabelActionDetector.Region DAILY_CLAIM_REGION =
+        new GreenLabelActionDetector.Region(515, 528, 692, 634);
 
 private boolean autoScheduleEnabled;
 
@@ -65,7 +74,14 @@ public DailyMissionRoutine(AccountDescriptor profile, TpDailyTaskEnum dailyMissi
 		if (claimFlowCompleted) {
 			StatisticsService.obtain().addToCounter(profile, "Daily Missions Claimed", 1);
 		}
-		dismissInterface();
+        // Never press Android Back when the Daily Missions screen was never
+        // confirmed. On a City/World HUD that can open the game's Quit prompt.
+        if (dailyScreenReached) {
+            dismissInterface();
+        } else {
+            logWarning(routineLogDailyMissionLine(
+                    "Daily Missions was not confirmed; skipping blind Back cleanup"));
+        }
 
 		configureRecurringBehaviorFlow();
 		queueNextExecution();
@@ -85,21 +101,21 @@ private void configureRecurringBehaviorFlow() {
 	}
 
 private boolean switchToDailyMissionsTabFlow() {
-		ImageSearchResultData dailyScreenTitle = templateSearchHelper.locatePattern(
-				TemplatesEnum.DAILY_MISSION_SCREEN_TITLE,
-				DAILY_SCREEN_TITLE_SEARCH);
+		ImageSearchResultData dailyScreenTitle = currentDailyTitle();
 
 		if (dailyScreenTitle.isFound()) {
 			logDebug(routineLogDailyMissionLine("Daily missions screen already selected"));
 			return true;
 		}
 
-		ImageSearchResultData dailyTabButton = templateSearchHelper.locatePattern(
-				TemplatesEnum.DAILY_MISSION_DAILY_TAB_BUTTON,
-				DAILY_TAB_BUTTON_SEARCH);
+        ImageSearchResultData dailyTabButton = templateSearchHelper.locateAction(
+                TemplatesEnum.DAILY_MISSION_DAILY_TAB_BUTTON,
+                DAILY_TAB_BUTTON_SEARCH,
+                TemplatesEnum.SERVE_EMU_DAILY_TAB_BUTTON);
 
 		if (!dailyTabButton.isFound()) {
-			logWarning(routineLogDailyMissionLine("Daily tab button not detected. Skipping claims"));
+			logWarning(routineLogDailyMissionLine("Daily tab button not detected. Skipping claims; "
+                    + captureDailyDiagnostic("daily-tab-unrecognized")));
 			return false;
 		}
 
@@ -107,11 +123,10 @@ private boolean switchToDailyMissionsTabFlow() {
 		tapInside(dailyTabButton);
 		sleepTask(500);
 
-		dailyScreenTitle = templateSearchHelper.locatePattern(
-				TemplatesEnum.DAILY_MISSION_SCREEN_TITLE,
-				DAILY_SCREEN_TITLE_SEARCH);
+		dailyScreenTitle = currentDailyTitle();
 		if (!dailyScreenTitle.isFound()) {
-			logWarning(routineLogDailyMissionLine("Daily missions title not detected after tab switch. Skipping claims"));
+			logWarning(routineLogDailyMissionLine("Daily missions title not detected after tab switch. Skipping claims; "
+                    + captureDailyDiagnostic("daily-title-unrecognized")));
 			return false;
 		}
 
@@ -119,13 +134,22 @@ private boolean switchToDailyMissionsTabFlow() {
 		return true;
 	}
 
+private ImageSearchResultData currentDailyTitle() {
+        ImageSearchResultData original = templateSearchHelper.locatePattern(
+                TemplatesEnum.DAILY_MISSION_SCREEN_TITLE, DAILY_SCREEN_TITLE_SEARCH);
+        if (original.isFound()) return original;
+        return templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_DAILY_TITLE,
+                SearchConfig.builder().withMaxAttempts(2).withDelay(150)
+                        .withThreshold(90).withArea(AreaData.of(170, 105, 545, 210)).build());
+    }
+
 private ImageSearchResultData seekForIndividualClaimButton() {
 		ImageSearchResultData claimButton = templateSearchHelper.locatePattern(
 				TemplatesEnum.DAILY_MISSION_CLAIM_BUTTON,
 				SearchConfigConstants.DEFAULT_SINGLE);
 
 		if (!claimButton.isFound()) {
-			return claimButton;
+            return verifiedGreenAction(DAILY_CLAIM_REGION);
 		}
 
 		ImageSearchResultData disabledClaimButton = templateSearchHelper.locatePattern(
@@ -156,7 +180,8 @@ private LocalDateTime queueFinalCheckBeforeReset(LocalDateTime gameReset) {
 	}
 
 private boolean redeemRewardsIndividually() {
-		logWarning(routineLogDailyMissionLine("'Claim All' button not detected. Collecting missions individually"));
+		logWarning(routineLogDailyMissionLine("'Claim All' button not detected; "
+                + captureDailyDiagnostic("claim-all-missing") + ". Collecting individually."));
 
 		int claimedCount = 0;
 
@@ -215,24 +240,49 @@ private void dismissRewardPopupsFlow() {
 		);
 	}
 
-private void redeemAllRewardsAtOnce(ImageSearchResultData claimAllResult) {
+private boolean redeemAllRewardsAtOnce(ImageSearchResultData claimAllResult) {
 		logInfo(routineLogDailyMissionLine("'Claim All' button detected. Collecting all rewards at once"));
-
 		tapInside(claimAllResult);
+        sleepTask(750);
 		dismissRewardPopupsFlow();
+        sleepTask(400);
+        if (seekForClaimAllButton().isFound()) {
+            logWarning(routineLogDailyMissionLine("Claim All is still visible after tapping; "
+                    + captureDailyDiagnostic("claim-all-unverified")));
+            return false;
+        }
+        logInfo(routineLogDailyMissionLine("Claim All no longer visible after tap."));
+        return true;
 	}
 
 private ImageSearchResultData seekForClaimAllButton() {
-		return templateSearchHelper.locatePattern(
-				TemplatesEnum.DAILY_MISSION_CLAIMALL_BUTTON,
-				SearchConfigConstants.DEFAULT_SINGLE);
-	}
+        ImageSearchResultData match = templateSearchHelper.locatePattern(
+                TemplatesEnum.DAILY_MISSION_CLAIMALL_BUTTON,
+                SearchConfigConstants.DEFAULT_SINGLE);
+        return match.isFound() ? match : verifiedGreenAction(DAILY_CLAIM_ALL_REGION);
+    }
+
+    private ImageSearchResultData verifiedGreenAction(GreenLabelActionDetector.Region region) {
+        ImageSearchResultData first = GreenLabelActionDetector.detect(
+                ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER)), region);
+        if (!first.isFound()) return ImageSearchResultData.miss();
+        sleepTask(250);
+        ImageSearchResultData second = GreenLabelActionDetector.detect(
+                ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER)), region);
+        return RecognitionConsensus.agrees(first, second, 8) ? second : ImageSearchResultData.miss();
+    }
+
+    private String captureDailyDiagnostic(String kind) {
+        return TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER, "daily-missions", kind);
+    }
 
 private void reachDailyMissions() {
 		logInfo(routineLogDailyMissionLine("Moving to daily missions interface"));
 
-		tapNear(DAILY_MISSIONS_BUTTON_VALUE);
-		sleepTask(3000);
+        if (currentDailyTitle().isFound()) return;
+        tapNear(DAILY_MISSIONS_BUTTON_VALUE);
+        // The next step verifies the title/tab, so a long fixed pause is unnecessary.
+        sleepTask(450);
 
 	}
 
@@ -263,8 +313,7 @@ private boolean redeemAllRewards() {
 		ImageSearchResultData claimAllResult = seekForClaimAllButton();
 
 		if (claimAllResult.isFound()) {
-			redeemAllRewardsAtOnce(claimAllResult);
-			return true;
+			return redeemAllRewardsAtOnce(claimAllResult);
 		} else {
 			return redeemRewardsIndividually();
 		}

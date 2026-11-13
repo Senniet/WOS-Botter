@@ -4,6 +4,8 @@ import dev.frostguard.api.domain.AreaData;
 import dev.frostguard.api.domain.ImageSearchResultData;
 import dev.frostguard.api.domain.PointData;
 import dev.frostguard.engine.emulator.EmulatorController;
+import java.util.Objects;
+import java.util.function.BooleanSupplier;
 
 /**
  * Single shared interaction layer for all production tap input.
@@ -120,6 +122,28 @@ public class TapInteractionService {
             tapNear(result.getPoint(), TapJitterPolicy.DEFAULT_POINT_JITTER_RADIUS, count, delayMs);
         }
         return true;
+    }
+
+    /**
+     * Outcome of one non-repeatable action with an explicit UI postcondition.
+     * UNKNOWN never means success; callers can back off or save diagnostics.
+     */
+    public enum VerifiedActionResult { VERIFIED, UNKNOWN, TARGET_MISSING }
+
+    /**
+     * Tap a detected target exactly once, then independently observe the game
+     * state. Never resend an uncertain command: sending marches, upgrades or
+     * purchases twice may have irreversible effects.
+     *
+     * @param expectedState fresh-screen predicate supplied by the caller
+     */
+    public VerifiedActionResult tapAndVerify(ImageSearchResultData target,
+                                              BooleanSupplier expectedState) {
+        Objects.requireNonNull(expectedState, "expectedState");
+        if (target == null || !target.isFound()) return VerifiedActionResult.TARGET_MISSING;
+        tapInside(target);
+        return expectedState.getAsBoolean()
+                ? VerifiedActionResult.VERIFIED : VerifiedActionResult.UNKNOWN;
     }
 
     // ── known UI areas ──────────────────────────────────────────────

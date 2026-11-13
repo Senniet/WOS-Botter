@@ -21,8 +21,9 @@ import dev.frostguard.engine.nav.SidebarSection;
 class SidebarNavigatorOpenPolicyTest {
 
     @Test
-    void allowsSidebarAnimationToFinishBeforeClassifyingIt() {
-        assertEquals(2_000, SidebarNavigator.SIDEBAR_OPEN_SETTLE_MS);
+    void usesShortSettleThenVerifiesSidebarByPolling() {
+        assertEquals(500, SidebarNavigator.SIDEBAR_OPEN_SETTLE_MS);
+        assertTrue(SidebarNavigator.TRANSITION_POLL_CHECKS >= 5);
     }
 
     @Test
@@ -30,7 +31,7 @@ class SidebarNavigatorOpenPolicyTest {
         assertEquals(SidebarNavigator.SCROLL_DISTANCE_PX,
                 Math.abs(CommonGameAreas.SIDEBAR_SCROLL_TOWARD_BOTTOM_FROM.getY()
                         - CommonGameAreas.SIDEBAR_SCROLL_TOWARD_BOTTOM_TO.getY()));
-        assertEquals(2_000, SidebarNavigator.SCROLL_SETTLE_MS);
+        assertEquals(450, SidebarNavigator.SCROLL_SETTLE_MS);
     }
 
     @Test
@@ -46,6 +47,23 @@ class SidebarNavigatorOpenPolicyTest {
         for (SidebarDestination destination : SidebarDestination.values()) {
             assertNotEquals(TemplatesEnum.GAME_HOME_SHORTCUTS_GO, destination.rowIcon(), destination.name());
             assertTrue(destination.actions().length > 0, destination.name());
+        }
+    }
+
+    @Test
+    void fishingOverviewTabDoesNotHitTheHeader() {
+        assertTrue(CommonGameAreas.FISHING_TOURNAMENT_TAB.topLeft().getY() >= 180);
+        assertTrue(CommonGameAreas.FISHING_TOURNAMENT_TAB.bottomRight().getY() <= 280);
+    }
+
+    @Test
+    void currentSidebarClickAreasFollowShiftedTabSamples() {
+        for (SidebarSection section : SidebarSection.values()) {
+            var tap = CommonGameAreas.sidebarTabCurrent(section);
+            var sample = CommonGameAreas.sidebarTabSampleCurrent(section);
+            assertTrue(tap.topLeft().getY() <= sample.topLeft().getY());
+            assertTrue(tap.bottomRight().getY() >= sample.bottomRight().getY());
+            assertTrue(tap.topLeft().getY() > CommonGameAreas.sidebarTab(section).topLeft().getY());
         }
     }
 

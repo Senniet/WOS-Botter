@@ -14,8 +14,12 @@ on:
 permissions:
   contents: write
 
+# Scope concurrency to one release tag. A GitHub backend run stuck in
+# in_progress must not starve every future signed SurvivalOps release.
+# The publish step below prevents an older finished build from replacing
+# an already newer stable feed.
 concurrency:
-  group: survivalops-stable-release
+  group: survivalops-stable-release-${{ github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -83,6 +87,7 @@ jobs:
             '-Dfrostguard.product.identifier=dev.survivalops.desktop',
             '-Dfrostguard.product.description=SurvivalOps Whiteout Survival Automation Suite',
             '-Dfrostguard.product.install-dir=SurvivalOps',
+            '-Dfrostguard.update.manifest.stable=https://github.com/Senniet/WOS-Botter/releases/download/survivalops-stable/survivalops-stable-manifest.json',
             '-Dfrostguard.watcher.name=SurvivalOpsWatcher',
             '-Dfrostguard.product.upgrade-uuid=6d5b2a7e-9b3a-4f2a-8c1d-0e7f6a5b4c31',
             '-Dfrostguard.pull-request-build=false', '-Pwindows-app-image', 'package'
@@ -107,6 +112,7 @@ jobs:
             '-Dfrostguard.product.identifier=dev.survivalops.desktop',
             '-Dfrostguard.product.description=SurvivalOps Whiteout Survival Automation Suite',
             '-Dfrostguard.product.install-dir=SurvivalOps',
+            '-Dfrostguard.update.manifest.stable=https://github.com/Senniet/WOS-Botter/releases/download/survivalops-stable/survivalops-stable-manifest.json',
             '-Dfrostguard.watcher.name=SurvivalOpsWatcher',
             '-Dfrostguard.product.upgrade-uuid=6d5b2a7e-9b3a-4f2a-8c1d-0e7f6a5b4c31',
             '-Dfrostguard.pull-request-build=false', '-Pwindows-installer', '-DskipTests', 'package'
@@ -189,6 +195,24 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             gh release create $feedTag --title 'SurvivalOps Stable Update Feed' --notes 'Machine-readable signed update feed for SurvivalOps Stable.' --latest=false
             if ($LASTEXITCODE -ne 0) { throw 'Could not create stable feed release' }
+          }
+          # Concurrency is scoped by release to survive stuck GitHub runs.
+          # Prevent the normal case of a slower/older build downgrading the feed.
+          $candidate = [System.Text.Json.JsonDocument]::Parse((Get-Content -Raw $env:MANIFEST))
+          $candidatePayload = $candidate.RootElement.GetProperty('payload').GetString()
+          $candidateJson = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($candidatePayload))
+          $candidateVersion = [version](([System.Text.Json.JsonDocument]::Parse($candidateJson)).RootElement.GetProperty('version').GetString())
+          $previousFile = Join-Path $env:RUNNER_TEMP 'survivalops-previous-stable-manifest.json'
+          gh release download $feedTag --pattern 'survivalops-stable-manifest.json' --output $previousFile --clobber 2>$null
+          if ($LASTEXITCODE -eq 0 -and (Test-Path $previousFile)) {
+            $previous = [System.Text.Json.JsonDocument]::Parse((Get-Content -Raw $previousFile))
+            $previousPayload = $previous.RootElement.GetProperty('payload').GetString()
+            $previousJson = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($previousPayload))
+            $previousVersion = [version](([System.Text.Json.JsonDocument]::Parse($previousJson)).RootElement.GetProperty('version').GetString())
+            if ($previousVersion -ge $candidateVersion) {
+              Write-Host "Stable feed already has $previousVersion; refusing downgrade to $candidateVersion"
+              exit 0
+            }
           }
           gh release upload $feedTag $env:MANIFEST --clobber
           if ($LASTEXITCODE -ne 0) { throw 'Could not publish signed stable update manifest' }

@@ -42,6 +42,18 @@ class StorehouseStaminaClaimFlowTest {
     }
 
     @Test
+    void stopsEarlyWhenAlreadyBackOnCityScreenInsteadOfRepeatedlySeekingClaim() {
+        ScriptedActions actions = new ScriptedActions().city(true, true);
+        StorehouseStaminaClaimFlow.Result result = StorehouseStaminaClaimFlow.awaitClaimButton(
+                actions, ONE_SECOND, actions.clock::get);
+        assertNull(result.claimButton());
+        assertFalse(result.rewardDialogSeen());
+        assertEquals(2, actions.cityChecks);
+        assertEquals(0, actions.backPresses);
+        assertEquals(1, actions.regularWaits);
+    }
+
+    @Test
     void doesNotPressBackWithoutConfirmedTooltipAndReturnsUnknownAfterTimeout() {
         ScriptedActions actions = new ScriptedActions()
                 .rewardDialog(true, true, true)
@@ -88,6 +100,8 @@ class StorehouseStaminaClaimFlowTest {
         private final Deque<Boolean> rewardDialogVisible = new ArrayDeque<>();
         private final Deque<ImageSearchResultData> claimButtons = new ArrayDeque<>();
         private final Deque<Boolean> tooltipVisible = new ArrayDeque<>();
+        private final Deque<Boolean> cityVisible = new ArrayDeque<>();
+        private int cityChecks;
         private int rewardDialogChecks;
         private int claimButtonChecks;
         private int tooltipChecks;
@@ -114,6 +128,17 @@ class StorehouseStaminaClaimFlowTest {
                 tooltipVisible.add(value);
             }
             return this;
+        }
+
+        ScriptedActions city(boolean... visible) {
+            for (boolean value : visible) cityVisible.add(value);
+            return this;
+        }
+
+        @Override
+        public boolean isBackAtCity() {
+            cityChecks++;
+            return !cityVisible.isEmpty() && cityVisible.removeFirst();
         }
 
         @Override

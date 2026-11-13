@@ -16,7 +16,7 @@ public class Main {
 
     public static void main(String[] args) {
         String productName = System.getProperty("frostguard.brand.name", "").trim();
-        if (productName.isEmpty()) productName = "Frostguard";
+        if (productName.isEmpty()) productName = "SurvivalOps";
         final String applicationName = productName;
         StartupOptions options;
         WorkspacePaths paths;

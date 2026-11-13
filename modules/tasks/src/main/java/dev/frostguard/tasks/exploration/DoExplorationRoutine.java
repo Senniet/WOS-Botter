@@ -6,15 +6,28 @@ import dev.frostguard.api.configs.TpDailyTaskEnum;
 import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.api.domain.ImageSearchResultData;
 import dev.frostguard.api.domain.PointData;
+import dev.frostguard.api.domain.OcrSettingsData;
+import dev.frostguard.api.domain.AreaData;
 import dev.frostguard.api.domain.SizeData;
 import dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig;
+import dev.frostguard.engine.helper.BlueLabelActionDetector;
+import dev.frostguard.engine.helper.RecognitionConsensus;
+import dev.frostguard.vision.convert.ImageConverter;
+import dev.frostguard.tasks.diagnostics.TaskDiagnosticSnapshots;
 import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.schedule.LaunchPoint;
 import dev.frostguard.engine.service.StatisticsService;
 
 import java.time.LocalDateTime;
+import java.awt.image.BufferedImage;
+import java.io.IOException;
+import dev.frostguard.vision.ocr.OcrException;
+import java.util.Locale;
 
 public class DoExplorationRoutine extends DelayedTask {
+
+    private static final BlueLabelActionDetector.Region EXPLORE_BLUE_BUTTON =
+            new BlueLabelActionDetector.Region(214, 1139, 507, 1219, 292, 1156, 435, 1196);
 
     private static final PointData EXPLORATION_ENTRY_TOP_LEFT = new PointData(40, 1190);
     private static final PointData EXPLORATION_ENTRY_BOTTOM_RIGHT = new PointData(100, 1250);
@@ -25,8 +38,10 @@ public class DoExplorationRoutine extends DelayedTask {
     private static final PointData VICTORY_CONTINUE_TOP_LEFT = new PointData(400, 990);
     private static final PointData VICTORY_CONTINUE_BOTTOM_RIGHT = new PointData(658, 1038);
 
+    private boolean battleOutcomeUnknown;
+
     private static final long MAX_FIGHTING_WINDOW_MS = 120_000L;
-    private static final long RESULT_SEARCH_START_DELAY_MS = 15_000L;
+    private static final long RESULT_SEARCH_START_DELAY_MS = 1_500L;
     private static final long RESULT_DETECTION_WINDOW_MS = 25_000L;
     private static final long RESULT_DETECTION_DELAY_MS = 1_000L;
     private static final long EXPLORATION_SCREEN_LOAD_DELAY_MS = 500L;
@@ -40,12 +55,34 @@ public class DoExplorationRoutine extends DelayedTask {
 
     @Override
     protected LaunchPoint getRequiredStartLocation() {
-        return LaunchPoint.WORLD;
+        return LaunchPoint.ANY;
     }
 
     protected void execute() {
+        battleOutcomeUnknown = false;
+        // Resume a confirmation left by a previous run instead of navigating
+        // blindly through a pending modal or starting another battle.
+        QuickDialogOutcome pending = inspectQuickExplorationConfirmation();
+        if (pending != QuickDialogOutcome.NOT_PRESENT) {
+            if (pending == QuickDialogOutcome.CONFIRMED) {
+                logInfo("Resumed Quick Exploration confirmed; skipping all regular battle taps");
+                rescheduleInOneHour();
+            } else {
+                logWarning("Pending Quick Exploration modal is unresolved; "
+                        + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+                                "exploration", "quick-confirm-unresolved"));
+                reschedule(LocalDateTime.now().plusMinutes(10));
+            }
+            return;
+        }
         logInfo("Opening exploration screen...");
-        openExplorationScreen();
+        if (!explorationTitleVisible()) navigationHelper.ensureCorrectScreenLocation(LaunchPoint.WORLD);
+        if (!openExplorationScreen()) {
+            logWarning("Exploration page could not be verified; " + TaskDiagnosticSnapshots.capture(
+                    emuManager, EMULATOR_NUMBER, "exploration", "entry-unverified"));
+            reschedule(LocalDateTime.now().plusMinutes(5));
+            return;
+        }
 
         logInfo("Searching exploration button...");
         ImageSearchResultData exploreButton = detectExploreButton();
@@ -57,25 +94,85 @@ public class DoExplorationRoutine extends DelayedTask {
 
         logInfo("Exploring...");
         tapExploreButton(exploreButton);
+        // Live serve-emu: the strength confirmation appears immediately after
+        // Explore, before the formation screen. Do not tap Quick Deploy or Fight
+        // through it; the confirmed shortcut executes the battle automatically.
+        QuickDialogOutcome afterExplore = awaitQuickConfirmationAfterExplore();
+        if (afterExplore == QuickDialogOutcome.CONFIRMED) {
+            logInfo("Quick Exploration started directly after Explore; no formation or Fight taps needed");
+            rescheduleInOneHour();
+            return;
+        }
+        if (afterExplore == QuickDialogOutcome.UNRESOLVED) {
+            logWarning("Explore opened an unverified confirmation; no battle input sent; "
+                    + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+                            "exploration", "quick-confirm-unresolved"));
+            reschedule(LocalDateTime.now().plusMinutes(10));
+            return;
+        }
 
         boolean fightingWindowReached = fightUntilStoppedOrExpired();
         if (fightingWindowReached) {
             logWarning("Exploration fighting window reached 2 minutes. Rescheduling...");
         }
 
-        rescheduleInOneHour();
+        if (battleOutcomeUnknown) {
+            logWarning("Exploration outcome remains unknown. Retrying in 10 minutes, not recording completion.");
+            reschedule(LocalDateTime.now().plusMinutes(10));
+        } else {
+            rescheduleInOneHour();
+        }
     }
 
-    private void openExplorationScreen() {
+    private boolean openExplorationScreen() {
+        if (explorationTitleVisible()) return true;
         logInfo("Tapping exploration entry area...");
         tapInside(EXPLORATION_ENTRY_TOP_LEFT, EXPLORATION_ENTRY_BOTTOM_RIGHT);
         sleepTask(EXPLORATION_SCREEN_LOAD_DELAY_MS);
+        return explorationTitleVisible();
+    }
+
+    private boolean explorationTitleVisible() {
+        if (templateSearchHelper.locatePattern(TemplatesEnum.EXPLORATION_SCREEN_TITLE,
+                SearchConfig.builder().withMaxAttempts(2).withDelay(150).withThreshold(90)
+                        .withArea(AreaData.of(70, 5, 365, 150)).build()).isFound()) return true;
+        return templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_EXPLORATION_TITLE,
+                SearchConfig.builder().withMaxAttempts(2).withDelay(150).withThreshold(90)
+                        .withArea(AreaData.of(50, 65, 330, 160)).build()).isFound();
     }
 
     private ImageSearchResultData detectExploreButton() {
-        return templateSearchHelper.locatePattern(
+        ImageSearchResultData existing = templateSearchHelper.locatePattern(
                 TemplatesEnum.EXPLORATION_BUTTON,
-                SearchConfig.builder().withMaxAttempts(3).withDelay(1000L).build());
+                SearchConfig.builder().withMaxAttempts(1).withThreshold(86)
+                        .withArea(AreaData.of(160, 1100, 540, 1230)).build());
+        if (existing.isFound()) {
+            sleepTask(150);
+            var second = templateSearchHelper.locatePattern(TemplatesEnum.EXPLORATION_BUTTON,
+                    SearchConfig.builder().withMaxAttempts(1).withThreshold(86)
+                            .withArea(AreaData.of(160, 1100, 540, 1230)).build());
+            if (RecognitionConsensus.agrees(existing, second, 10)) return second;
+        }
+        // Current 2026 UI uses a different rendering from explore.png.
+        // The screenshot-grounded fallback requires the right blue button and
+        // its light label on two independent normalized frames.
+        var first = BlueLabelActionDetector.detect(
+                ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER)), EXPLORE_BLUE_BUTTON);
+        if (!first.isFound()) {
+            logWarning("Exploration button not matched; " + TaskDiagnosticSnapshots.capture(
+                    emuManager, EMULATOR_NUMBER, "exploration", "explore-button-missing"));
+            return ImageSearchResultData.miss();
+        }
+        sleepTask(250);
+        var second = BlueLabelActionDetector.detect(
+                ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER)), EXPLORE_BLUE_BUTTON);
+        if (RecognitionConsensus.agrees(first, second, 8)) {
+            logInfo("Explore action verified by two-frame blue-button geometry");
+            return second;
+        }
+        logWarning("Exploration blue action not confirmed in two frames; "
+                + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER, "exploration", "explore-unconfirmed"));
+        return ImageSearchResultData.miss();
     }
 
     private void tapExploreButton(ImageSearchResultData exploreButton) {
@@ -91,10 +188,19 @@ public class DoExplorationRoutine extends DelayedTask {
 
         while (!isFightingWindowExpired(fightingStartedAt)) {
             logInfo("Starting exploration battle #" + battleNumber + "...");
-            startBattle();
+            QuickDialogOutcome alreadyPending = inspectQuickExplorationConfirmation();
+            if (alreadyPending == QuickDialogOutcome.UNRESOLVED) {
+                battleOutcomeUnknown = true;
+                logWarning("Exploration confirmation was already present but unverified; "
+                        + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+                                "exploration", "quick-confirm-unresolved"));
+                return false;
+            }
+            if (alreadyPending == QuickDialogOutcome.NOT_PRESENT) startBattle();
+            else logInfo("Previous Quick Exploration confirmation handled; not tapping Fight again");
 
-            logInfo("Waiting " + RESULT_SEARCH_START_DELAY_MS / 1_000L
-                    + " seconds before battle result detection...");
+            logInfo("Waiting " + RESULT_SEARCH_START_DELAY_MS
+                    + "ms before checking the result and any late confirmation...");
             if (!sleepWithinFightingWindow(RESULT_SEARCH_START_DELAY_MS, fightingStartedAt)) {
                 break;
             }
@@ -107,8 +213,14 @@ public class DoExplorationRoutine extends DelayedTask {
             } else if (battleResult == BattleResult.DEFEAT) {
                 handleDefeat();
                 return false;
+            } else if (battleResult == BattleResult.QUICK_CONFIRMED) {
+                logInfo("Late Quick Exploration confirmation completed; stopping manual battle taps");
+                return false;
             } else {
-                logWarning("Battle locked: Neither victory nor defeat appeared after battle animation.");
+                battleOutcomeUnknown = true;
+                logWarning(battleResult == BattleResult.CONFIRMATION_UNRESOLVED
+                        ? "Quick Exploration confirmation remained unverified; no further battle taps."
+                        : "Battle locked: Neither victory nor defeat appeared after battle animation.");
                 return false;
             }
         }
@@ -130,6 +242,116 @@ public class DoExplorationRoutine extends DelayedTask {
         tapInside(FIGHT_BUTTON_TOP_LEFT, FIGHT_BUTTON_BOTTOM_RIGHT);
     }
 
+    /** A short bounded scan handles a modal that animates in after the Explore tap. */
+    QuickDialogOutcome awaitQuickConfirmationAfterExplore() {
+        for (int attempt = 0; attempt < 4; attempt++) {
+            QuickDialogOutcome outcome = inspectQuickExplorationConfirmation();
+            if (outcome != QuickDialogOutcome.NOT_PRESENT) return outcome;
+            if (attempt < 3) sleepTask(350);
+        }
+        return QuickDialogOutcome.NOT_PRESENT;
+    }
+
+    /**
+     * The confirmation usually follows Explore but can animate in late. Inspect
+     * after Explore and during result polling rather than sending blind Fight taps.
+     * Never confirm any other orange/blue modal without matching its text.
+     */
+    QuickDialogOutcome inspectQuickExplorationConfirmation() {
+        BufferedImage first = ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER));
+        PointData target = quickConfirmationButton(first);
+        if (target == null) return QuickDialogOutcome.NOT_PRESENT;
+        sleepTask(180);
+        BufferedImage second = ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER));
+        PointData confirmed = quickConfirmationButton(second);
+        if (confirmed == null || Math.abs(target.getY() - confirmed.getY()) > 24) {
+            logWarning("Quick confirmation colors appeared, but modal geometry was unstable");
+            return QuickDialogOutcome.UNRESOLVED;
+        }
+        String wording;
+        try {
+            AreaData textArea = quickConfirmationTextArea(second, confirmed);
+            wording = emuManager.readText(EMULATOR_NUMBER,
+                    textArea.topLeft(), textArea.bottomRight(), OcrSettingsData.forTextBlock());
+        } catch (IOException | OcrException error) {
+            logWarning("Quick confirmation OCR could not be verified: " + error.getClass().getSimpleName());
+            return QuickDialogOutcome.UNRESOLVED;
+        }
+        if (!isQuickExplorationDialog(wording)) {
+            logWarning("Refusing to confirm visually similar modal; Quick Exploration text not verified (OCR length="
+                    + (wording == null ? 0 : wording.length()) + ")");
+            return QuickDialogOutcome.UNRESOLVED;
+        }
+        logInfo("Quick Exploration text and Cancel/Confirm buttons verified; tapping Confirm once");
+        tapInside(new PointData(confirmed.getX() - 10, confirmed.getY() - 10),
+                new PointData(confirmed.getX() + 10, confirmed.getY() + 10));
+        sleepTask(700);
+        BufferedImage after = ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER));
+        if (quickConfirmationButton(after) != null) {
+            logWarning("Quick Exploration confirmation remained after one Confirm tap");
+            return QuickDialogOutcome.UNRESOLVED;
+        }
+        logInfo("Quick Exploration confirmation dismissed; no additional manual Fight taps required");
+        return QuickDialogOutcome.CONFIRMED;
+    }
+
+    static AreaData quickConfirmationTextArea(BufferedImage frame, PointData button) {
+        int width = frame.getWidth();
+        int top = Math.max(0, button.getY() - frame.getHeight() * 25 / 100);
+        int bottom = Math.max(top + 1, button.getY() - frame.getHeight() * 7 / 100);
+        return AreaData.of(width * 10 / 100, top, width * 90 / 100, bottom);
+    }
+
+    enum QuickDialogOutcome { NOT_PRESENT, CONFIRMED, UNRESOLVED }
+
+    static boolean isQuickExplorationDialog(String text) {
+        if (text == null) return false;
+        String normalized = text.toLowerCase(Locale.ROOT).replaceAll("[^a-z]", "");
+        return normalized.contains("quickexploration")
+                && (normalized.contains("squadpower") || normalized.contains("exceedstheenemy"));
+    }
+
+    static PointData quickConfirmationButton(BufferedImage frame) {
+        if (frame == null) return null;
+        int w = frame.getWidth(), h = frame.getHeight();
+        if (w < 300 || h < 300) return null;
+        int bestScore = 0, bestY = -1;
+        java.util.List<Integer> pairedRows = new java.util.ArrayList<>();
+        // A dialog has orange Cancel on the left and blue Confirm on the right,
+        // on the same horizontal band. This avoids tapping unrelated blue controls.
+        for (int y = h * 25 / 100; y < h * 83 / 100; y += 3) {
+            int orange = 0, blue = 0;
+            for (int x = w * 8 / 100; x < w * 44 / 100; x += 3) {
+                int rgb = frame.getRGB(x, y);
+                int r = (rgb >> 16) & 255, g = (rgb >> 8) & 255, b = rgb & 255;
+                if (r > 205 && g > 65 && g < 190 && b < 80) orange++;
+            }
+            for (int x = w * 57 / 100; x < w * 92 / 100; x += 3) {
+                int rgb = frame.getRGB(x, y);
+                int r = (rgb >> 16) & 255, g = (rgb >> 8) & 255, b = rgb & 255;
+                if (r < 125 && g > 105 && g < 220 && b > 180 && b > r + 70) blue++;
+            }
+            if (orange >= w / 55 && blue >= w / 55) {
+                pairedRows.add(y);
+                if (orange + blue > bestScore) {
+                    bestScore = orange + blue;
+                    bestY = y;
+                }
+            }
+        }
+        if (bestY < 0) return null;
+        // Prefer the visual centre, not the highest-scoring line near a rounded
+        // border. The verified live button is centred around (512, 822) on 720x1280.
+        int minY = bestY, maxY = bestY;
+        for (int row : pairedRows) {
+            if (Math.abs(row - bestY) <= h * 8 / 100) {
+                minY = Math.min(minY, row);
+                maxY = Math.max(maxY, row);
+            }
+        }
+        return new PointData(w * 71 / 100, (minY + maxY) / 2);
+    }
+
     private void handleVictory() {
         logInfo("Victory! Continue...");
         StatisticsService.obtain().addToCounter(profile, "Exploration Fights Won", 1);
@@ -149,7 +371,18 @@ public class DoExplorationRoutine extends DelayedTask {
 
         while (!isElapsed(detectionStartedAt, RESULT_DETECTION_WINDOW_MS)
                 && !isFightingWindowExpired(fightingStartedAt)) {
-            logInfo("Battle result detection attempt #" + attempt + "...");
+            QuickDialogOutcome modal = inspectQuickExplorationConfirmation();
+            if (modal == QuickDialogOutcome.UNRESOLVED) {
+                logWarning("Unexpected confirmation could not be safely handled; "
+                        + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+                                "exploration", "quick-confirm-unresolved"));
+                return BattleResult.CONFIRMATION_UNRESOLVED;
+            }
+            if (modal == QuickDialogOutcome.CONFIRMED) {
+                logInfo("Quick Exploration modal resolved during battle result polling");
+                return BattleResult.QUICK_CONFIRMED;
+            }
+            if (attempt <= 2 || attempt % 5 == 0) logInfo("Battle result detection attempt #" + attempt + "...");
             if (isTemplateFound(TemplatesEnum.EXPLORATION_VICTORY)) {
                 logInfo("Victory template detected.");
                 return BattleResult.VICTORY;
@@ -160,8 +393,7 @@ public class DoExplorationRoutine extends DelayedTask {
                 return BattleResult.DEFEAT;
             }
 
-            logInfo("Battle result not detected. Retrying in "
-                    + RESULT_DETECTION_DELAY_MS / 1_000L + " second...");
+            if (attempt <= 2 || attempt % 5 == 0) logDebug("Battle result absent; waiting for screen transition");
             sleepWithinDetectionWindow(detectionStartedAt, fightingStartedAt);
             attempt++;
         }
@@ -234,6 +466,8 @@ public class DoExplorationRoutine extends DelayedTask {
     private enum BattleResult {
         VICTORY,
         DEFEAT,
-        NOT_FOUND
+        NOT_FOUND,
+        CONFIRMATION_UNRESOLVED,
+        QUICK_CONFIRMED
     }
 }

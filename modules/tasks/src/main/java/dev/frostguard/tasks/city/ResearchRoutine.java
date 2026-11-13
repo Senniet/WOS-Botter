@@ -7,6 +7,7 @@ import dev.frostguard.api.configs.TpDailyTaskEnum;
 import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.api.domain.ImageSearchResultData;
 import dev.frostguard.api.domain.PointData;
+import dev.frostguard.api.domain.AreaData;
 import dev.frostguard.api.domain.PriorityItemData;
 import dev.frostguard.api.domain.RawImageData;
 import dev.frostguard.api.domain.ResearchBadgeData;
@@ -14,6 +15,7 @@ import dev.frostguard.api.domain.OcrSettingsData;
 import dev.frostguard.engine.config.PriorityConfigResolver;
 import dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig;
 import dev.frostguard.engine.nav.SidebarDestination;
+import dev.frostguard.engine.nav.SidebarFrameClassifier;
 import dev.frostguard.engine.nav.SearchConfigConstants;
 import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.schedule.LaunchPoint;
@@ -22,6 +24,7 @@ import dev.frostguard.tasks.city.ResearchDialogClassifier.ResearchDialogState;
 import dev.frostguard.tasks.city.ResearchNodeSelectionPolicy.ResearchNode;
 import dev.frostguard.tasks.city.ResearchNodeSelectionPolicy.ResearchRow;
 import dev.frostguard.vision.convert.GameTimeUtils;
+import dev.frostguard.vision.convert.ImageConverter;
 import dev.frostguard.vision.ocr.ResearchBadgeReader;
 import dev.frostguard.vision.ocr.OcrEngine;
 import java.io.IOException;
@@ -153,14 +156,16 @@ public ResearchRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
 
 
         marchHelper.openLeftMenuCitySection(true);
+        AreaData queueArea = researchQueueStatusArea(
+                SidebarFrameClassifier.isCurrentLayout(
+                        ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER))));
 
-
-        logDebug(routineLogResearchLine("Inspecting research queue status via OCR..."));
+        logDebug(routineLogResearchLine("Inspecting research queue status via OCR in " + queueArea + "..."));
         try {
             String queueStatus = emuManager.readText(
                     EMULATOR_NUMBER,
-                    new PointData(164, 811),
-                    new PointData(303, 841)).trim();
+                    queueArea.topLeft(),
+                    queueArea.bottomRight()).trim();
 
             logInfo(routineLogResearchLine("Research queue OCR status: '" + queueStatus + "'"));
 
@@ -169,8 +174,8 @@ public ResearchRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
 
                 logInfo(routineLogResearchLine("Research queue is busy. Attempting to read remaining time..."));
                 var busyTimeRead = durationHelper.attemptRecognitionDetailed(
-                        new PointData(164, 811),
-                        new PointData(303, 841),
+                        queueArea.topLeft(),
+                        queueArea.bottomRight(),
                         5,
                         300,
                         null,
@@ -380,6 +385,11 @@ private static String formatDuration(Duration duration) {
                 duration.toHours(), duration.toMinutesPart(), duration.toSecondsPart());
     }
 
+static AreaData researchQueueStatusArea(boolean currentLayout) {
+        return currentLayout ? AreaData.of(165, 842, 305, 892)
+                : AreaData.of(164, 811, 303, 841);
+    }
+
 private boolean openResearchTree() {
         for (int attempt = 1; attempt <= RESEARCH_ENTRY_ATTEMPTS; attempt++) {
             if (attempt > 1) {
@@ -426,6 +436,10 @@ private boolean openResearchTree() {
     }
 
 private boolean isResearchTreeVisible() {
+        if (templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_RESEARCH_TITLE,
+                SearchConfig.builder().withMaxAttempts(2).withDelay(130)
+                        .withThreshold(90).withArea(AreaData.of(75, 65, 380, 155)).build()).isFound())
+            return true;
         for (int attempt = 1; attempt <= 3; attempt++) {
             try {
                 String title = emuManager.readText(

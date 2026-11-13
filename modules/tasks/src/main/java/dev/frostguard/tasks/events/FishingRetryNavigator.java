@@ -4,6 +4,11 @@ import dev.frostguard.api.configs.TemplatesEnum;
 import dev.frostguard.api.domain.AreaData;
 import dev.frostguard.engine.emulator.AndroidFrameStream;
 import dev.frostguard.vision.match.OpenCvPatternLocator;
+import dev.frostguard.engine.helper.RecognitionConsensus;
+import dev.frostguard.engine.helper.BlueLabelActionDetector;
+import dev.frostguard.vision.convert.ImageConverter;
+import dev.frostguard.api.domain.RawImageData;
+import dev.frostguard.api.domain.ImageSearchResultData;
 import java.io.IOException;
 
 /** Shared live/test navigation: suspension never selects a replacement Normal Cast. */
@@ -20,6 +25,11 @@ final class FishingRetryNavigator {
     private static final AreaData EXIT = AreaData.of(185, 570, 330, 710);
     private static final AreaData GO_FISH = AreaData.of(270, 1040, 465, 1130);
     private static final AreaData TITLE = AreaData.of(85, 0, 500, 80);
+    // The 2026 stage-resume overlay has a bright, centred Go Fish button.
+    // Its artwork is animated; require a title anchor and the white-labelled
+    // blue button before accepting the fallback on two different frames.
+    private static final BlueLabelActionDetector.Region GO_FISH_BLUE =
+            new BlueLabelActionDetector.Region(225, 1042, 495, 1135, 299, 1065, 425, 1110);
 
     private FishingRetryNavigator() { }
 
@@ -40,19 +50,47 @@ final class FishingRetryNavigator {
         port.fresh();
         if (!hit(port, TemplatesEnum.FISHING_TITLE, TITLE))
             throw new IllegalStateException("Suspended Fishing title unverified");
+        ImageSearchResultData first = scan(port, TemplatesEnum.FISHING_GO_FISH, GO_FISH);
+        if (!first.isFound())
+            throw new IllegalStateException("Go Fish resume action unverified; no bait selected");
+        port.fresh();
+        if (!hit(port, TemplatesEnum.FISHING_TITLE, TITLE))
+            throw new IllegalStateException("Fishing title lost before resume tap");
+        ImageSearchResultData second = scan(port, TemplatesEnum.FISHING_GO_FISH, GO_FISH);
+        if (!RecognitionConsensus.agrees(first, second, 12))
+            throw new IllegalStateException("Go Fish not stable across fresh frames; no bait selected");
         tapVerified(port, TemplatesEnum.FISHING_GO_FISH, GO_FISH);
-        // Go Fish can reload the paid stage before its HUD appears; never re-tap during that transition.
+        // This resumes the existing paid stage. Never select a new Normal Cast.
         await(port, TemplatesEnum.FISHING_PAUSE, PAUSE, 15000);
     }
 
-    private static boolean hit(Port port, TemplatesEnum template, AreaData area) {
+    // Only Go Fish is allowed a slightly lower threshold (real 2026 screen
+    // scored 85.48%). The title and two matching frames must also be present.
+    static int thresholdFor(TemplatesEnum template) {
+        return template == TemplatesEnum.FISHING_GO_FISH ? 85 : 90;
+    }
+
+    static ImageSearchResultData goFishControl(RawImageData frame) {
+        var template = OpenCvPatternLocator.locatePattern(frame, TemplatesEnum.FISHING_GO_FISH.getTemplate(),
+                GO_FISH.topLeft(), GO_FISH.bottomRight(), thresholdFor(TemplatesEnum.FISHING_GO_FISH));
+        if (template.isFound()) return template;
+        if (!OpenCvPatternLocator.locatePattern(frame, TemplatesEnum.FISHING_TITLE.getTemplate(),
+                TITLE.topLeft(), TITLE.bottomRight(), 90).isFound()) return ImageSearchResultData.miss();
+        return BlueLabelActionDetector.detect(ImageConverter.toBufferedImage(frame), GO_FISH_BLUE);
+    }
+
+    private static ImageSearchResultData scan(Port port, TemplatesEnum template, AreaData area) {
+        if (template == TemplatesEnum.FISHING_GO_FISH) return goFishControl(port.frame().image());
         return OpenCvPatternLocator.locatePattern(port.frame().image(), template.getTemplate(),
-                area.topLeft(), area.bottomRight(), 90).isFound();
+                area.topLeft(), area.bottomRight(), thresholdFor(template));
+    }
+
+    private static boolean hit(Port port, TemplatesEnum template, AreaData area) {
+        return scan(port, template, area).isFound();
     }
 
     private static void tapVerified(Port port, TemplatesEnum template, AreaData area) {
-        var match = OpenCvPatternLocator.locatePattern(port.frame().image(), template.getTemplate(),
-                area.topLeft(), area.bottomRight(), 90);
+        var match = scan(port, template, area);
         if (!match.isFound() || !match.hasMatchedArea())
             throw new IllegalStateException("Fishing retry control unverified: " + template);
         port.checkCancellation();

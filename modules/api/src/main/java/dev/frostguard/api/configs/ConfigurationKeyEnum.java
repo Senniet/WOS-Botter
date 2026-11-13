@@ -26,7 +26,10 @@ public enum ConfigurationKeyEnum {
 
     /* ─────────── analytics ─────────── */
 
-    ANALYTICS_ENABLED_BOOL              ("true",             Boolean.class,       ConfigCategory.ANALYTICS),
+    ANALYTICS_ENABLED_BOOL              ("false",             Boolean.class,       ConfigCategory.ANALYTICS),
+    LAN_DIAGNOSTICS_ENABLED_BOOL         ("false", Boolean.class, ConfigCategory.ANALYTICS),
+    LAN_DIAGNOSTICS_SCREENSHOTS_BOOL     ("false", Boolean.class, ConfigCategory.ANALYTICS),
+    LAN_DIAGNOSTICS_TOKEN_STRING         ("", String.class, ConfigCategory.ANALYTICS),
     ANALYTICS_ID_STRING                 ("",                 String.class,        ConfigCategory.ANALYTICS),
     HIDE_ANALYTICS_LOGS_BOOL            ("true",             Boolean.class,       ConfigCategory.ANALYTICS),
     STATISTICS_JSON_STRING              ("{}",               String.class,        ConfigCategory.ANALYTICS),
@@ -294,6 +297,8 @@ public enum ConfigurationKeyEnum {
     STOP_BEHAVIOR_STRING                ("DO_NOTHING",  String.class,   ConfigCategory.SYSTEM),
     // Changed by pernerch | Date: 2026-07-04 | Why: separate Telegram stop behavior from local GUI stop behavior.
     STOP_BEHAVIOR_TELEGRAM_STRING       ("DO_NOTHING",  String.class,   ConfigCategory.SYSTEM),
+    SERVE_EMU_ADB_ENDPOINTS_STRING       ("", String.class, ConfigCategory.SYSTEM),
+    BLUESTACKS_PATH_STRING              ("C:\\Program Files\\BlueStacks_nxt", String.class, ConfigCategory.SYSTEM),
     LDPLAYER_PATH_STRING                ("",            String.class,   ConfigCategory.SYSTEM),
     MAX_IDLE_TIME_INT                   ("15",          Integer.class,  ConfigCategory.SYSTEM),
     MAX_RUNNING_EMULATORS_INT           ("1",           Integer.class,  ConfigCategory.SYSTEM),

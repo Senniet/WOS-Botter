@@ -26,6 +26,7 @@ import dev.frostguard.engine.schedule.LaunchPoint;
 import dev.frostguard.tasks.diagnostics.TaskDiagnosticSnapshots;
 import dev.frostguard.engine.nav.SidebarDestination;
 import dev.frostguard.engine.nav.SearchConfigConstants;
+import dev.frostguard.engine.nav.CommonOCRSettings;
 import dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig;
 import dev.frostguard.tasks.diagnostics.TaskControlSignals;
 
@@ -56,8 +57,11 @@ public class StorehouseChestRoutine extends DelayedTask {
     private static final AreaData STOREHOUSE_TITLE_AREA = new AreaData(
             new PointData(245, 515), new PointData(505, 575));
     static final AreaData CHEST_REWARD_OVERLAY_CLOSE_AREA = AreaData.of(565, 530, 715, 705);
-    private static final int STOREHOUSE_SELECTION_SETTLE_MILLIS = 2_200;
-    private static final int STOREHOUSE_DESELECTION_SETTLE_MILLIS = 800;
+    private static final int STOREHOUSE_SELECTION_TIMEOUT_MILLIS = 2_000;
+    private static final int STOREHOUSE_SELECTION_POLL_MILLIS = 140;
+    private static final int STOREHOUSE_DESELECTION_SETTLE_MILLIS = 350;
+    private static final AreaData MODERN_STOREHOUSE_NAME_AREA = AreaData.of(280, 510, 500, 580);
+    private static final AreaData MODERN_STOREHOUSE_DETAILS_AREA = AreaData.of(290, 835, 480, 965);
 
     // ========== Stamina Reward Coordinates ==========
     private static final PointData STAMINA_AMOUNT_TOP_LEFT = new PointData(436, 632);
@@ -157,21 +161,18 @@ public class StorehouseChestRoutine extends DelayedTask {
             return false;
         }
 
-        // The Research Center centers the city with a visible part of the Storehouse at the left.
-        // Selecting that stable visible area avoids a momentum-sensitive map pan.
-        tapInside(STOREHOUSE_VISIBLE_BUILDING_AREA.topLeft(), STOREHOUSE_VISIBLE_BUILDING_AREA.bottomRight());
-        sleepTask(STOREHOUSE_SELECTION_SETTLE_MILLIS);
+        // A previous selection can survive navigation. First inspect the
+        // current screen; never tap a different building when Storehouse is
+        // already visibly selected.
+        boolean alreadySelected = isStorehouseSelectedModern();
+        if (!alreadySelected) {
+            // Legacy city coordinate is only a candidate: verify that this
+            // selected object is really Storehouse AND displays Details.
+            tapInside(STOREHOUSE_VISIBLE_BUILDING_AREA.topLeft(), STOREHOUSE_VISIBLE_BUILDING_AREA.bottomRight());
+        }
 
-        ImageSearchResultData selected = templateSearchHelper.locatePattern(
-                TemplatesEnum.STOREHOUSE_SELECTED_CURRENT,
-                SearchConfig.builder()
-                        .withArea(STOREHOUSE_TITLE_AREA)
-                        .withThreshold(85)
-                        .withMaxAttempts(3)
-                        .withDelay(300L)
-                        .build());
-        if (selected.isFound()) {
-            logInfo("Storehouse selected and verified by its title anchor.");
+        if (alreadySelected || waitUntilStorehouseSelected()) {
+            logInfo("Storehouse selected and verified by its title (template or confirmed OCR).");
             // The reward bubbles are only actionable after Android Back closes the
             // building's Details/Upgrade selection controls.
             pressBack();
@@ -182,6 +183,79 @@ public class StorehouseChestRoutine extends DelayedTask {
 
         logWarning("Storehouse title anchor was not detected after the direct selection.");
         return false;
+    }
+
+    /**
+     * Current account captures show a visible Storehouse title even when the
+     * older selectedCurrent template misses because of lighting/season.
+     * Require the full building name on two fresh frames; single OCR noise
+     * must never authorize reward collection or pressing Back.
+     */
+    private boolean isStorehouseSelectedModern() {
+        // Separate UI labels at separate locations reduce the likelihood of
+        // approving an unrelated selected building or a partial city overlay.
+        SearchConfig name = SearchConfig.builder().withMaxAttempts(1).withThreshold(90)
+                .withArea(MODERN_STOREHOUSE_NAME_AREA).build();
+        SearchConfig details = SearchConfig.builder().withMaxAttempts(1).withThreshold(90)
+                .withArea(MODERN_STOREHOUSE_DETAILS_AREA).build();
+        return templateSearchHelper.locateAction(
+                TemplatesEnum.STOREHOUSE_SELECTED_NAME_MODERN, name).isFound()
+            && templateSearchHelper.locateAction(
+                TemplatesEnum.STOREHOUSE_SELECTED_DETAILS_MODERN, details).isFound();
+    }
+
+    private boolean waitUntilStorehouseSelected() {
+        long started = System.nanoTime();
+        long deadline = started + STOREHOUSE_SELECTION_TIMEOUT_MILLIS * 1_000_000L;
+        do {
+            if (isStorehouseSelectedModern()) {
+                logInfo("Storehouse visual selection ready in "
+                        + ((System.nanoTime() - started) / 1_000_000L) + " ms");
+                return true;
+            }
+            if (System.nanoTime() >= deadline) break;
+            sleepTask(STOREHOUSE_SELECTION_POLL_MILLIS);
+        } while (true);
+        // Keep OCR support for a future Storehouse artwork revision.
+        return isStorehouseSelected();
+    }
+
+    private boolean isStorehouseSelected() {
+        ImageSearchResultData template = templateSearchHelper.locatePattern(
+                TemplatesEnum.STOREHOUSE_SELECTED_CURRENT,
+                SearchConfig.builder()
+                        .withArea(STOREHOUSE_TITLE_AREA)
+                        .withThreshold(85)
+                        .withMaxAttempts(2)
+                        .withDelay(250L)
+                        .build());
+        if (template.isFound()) return true;
+        try {
+            String first = emuManager.readText(EMULATOR_NUMBER,
+                    STOREHOUSE_TITLE_AREA.topLeft(), STOREHOUSE_TITLE_AREA.bottomRight(),
+                    CommonOCRSettings.SHOP_TAB_TEXT_SETTINGS, false);
+            if (!isStorehouseTitle(first)) return false;
+            sleepTask(200);
+            String second = emuManager.readText(EMULATOR_NUMBER,
+                    STOREHOUSE_TITLE_AREA.topLeft(), STOREHOUSE_TITLE_AREA.bottomRight(),
+                    CommonOCRSettings.SHOP_TAB_TEXT_SETTINGS, false);
+            if (isStorehouseTitle(second)) {
+                logInfo("Storehouse title confirmed via independent OCR frames.");
+                return true;
+            }
+        } catch (Exception error) {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new java.util.concurrent.CancellationException("Storehouse OCR interrupted");
+            }
+            logDebug("Storehouse title OCR unavailable: " + error.getClass().getSimpleName());
+        }
+        return false;
+    }
+
+    static boolean isStorehouseTitle(String text) {
+        if (text == null) return false;
+        String normalized = text.toLowerCase(Locale.ROOT).replaceAll("[^a-z]", "");
+        return normalized.contains("storehouse");
     }
 
     private final class StorehouseActions implements StorehouseVisitFlow.Actions<StorehouseBubbleDetector.Candidate> {
@@ -222,7 +296,7 @@ public class StorehouseChestRoutine extends DelayedTask {
                     + (pendingAgnesStamina == null ? "unreadable" : pendingAgnesStamina));
             logInfo("Stamina Claim button confirmed. Claiming the reward.");
             tapInside(claimButton);
-            sleepTask(4_000);
+            sleepTask(450);
             StorehouseVisitFlow.CollectionState confirmation = confirmBubbleDisappeared(
                     candidate, StorehouseBubbleDetector.Kind.STAMINA);
             if (confirmation == StorehouseVisitFlow.CollectionState.CONFIRMED) {
@@ -333,6 +407,16 @@ public class StorehouseChestRoutine extends DelayedTask {
                     @Override
                     public boolean isTooltipVisible() {
                         return isStaminaTooltipVisible();
+                    }
+
+                    @Override
+                    public boolean isBackAtCity() {
+                        ImageSearchResultData city = templateSearchHelper.locatePattern(
+                                TemplatesEnum.GAME_HOME_FURNACE,
+                                SearchConfig.builder().withMaxAttempts(1).withDelay(0)
+                                        .withThreshold(90)
+                                        .withArea(AreaData.of(580, 1120, 720, 1280)).build());
+                        return city != null && city.isFound();
                     }
 
                     @Override
