@@ -1,6 +1,7 @@
 package dev.frostguard.tasks.heroes;
 
 import dev.frostguard.vision.convert.GameTimeUtils;
+import dev.frostguard.vision.convert.ImageConverter;
 import dev.frostguard.vision.ocr.ResilientOcrExecutor;
 import dev.frostguard.api.configs.TemplatesEnum;
 import dev.frostguard.api.configs.TpDailyTaskEnum;
@@ -170,6 +171,14 @@ public class HeroRecruitmentRoutine extends DelayedTask {
             reschedule(LocalDateTime.now().plusMinutes(5));
             return;
         }
+        // Points Chest is a separate, free action: do not confuse its red
+        // availability marker with yellow, key-spending recruitment buttons.
+        claimReadyPointsChest();
+        if (!currentHeroRecruitmentVisible()) {
+            logWarning("Hero Recruitment page changed after Points Chest; retrying without blind taps");
+            reschedule(LocalDateTime.now().plusMinutes(5));
+            return;
+        }
         int claimed = 0;
         for (AreaData area : new AreaData[] {
                 AreaData.of(40, 801, 350, 904),
@@ -212,6 +221,56 @@ public class HeroRecruitmentRoutine extends DelayedTask {
         }
         logInfo("Hero Recruitment modern free claims: " + claimed + "; no keys or gems spent");
         reschedule(LocalDateTime.now().plusMinutes(5));
+    }
+
+    /** One bounded free Points Chest claim; never press the paid recruit buttons. */
+    private void claimReadyPointsChest() {
+        if (!currentHeroRecruitmentVisible() || !pointsChestBadgeVisible()) return;
+        sleepTask(170);
+        if (!currentHeroRecruitmentVisible() || !pointsChestBadgeVisible()) {
+            logWarning("Recruitment Points Chest badge was not stable across frames");
+            return;
+        }
+        // Confirmed live on WOS_Sennie121: chest icon is in the right header.
+        tapInside(new PointData(645, 437), new PointData(670, 465));
+        boolean rewardsVisible = false;
+        for (int attempt = 0; attempt < 14; attempt++) {
+            sleepTask(250);
+            rewardsVisible = templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_REWARDS_BANNER,
+                    TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
+                            .withThreshold(88).withArea(AreaData.of(220, 280, 505, 440)).build()).isFound();
+            if (rewardsVisible) break;
+        }
+        if (!rewardsVisible) {
+            logWarning("Recruitment Points Chest was tapped, but Rewards overlay was not verified");
+            return;
+        }
+        for (int attempt = 0; attempt < 14; attempt++) {
+            sleepTask(250);
+            var exit = templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_HERO_POINTS_REWARD_EXIT,
+                    TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
+                            .withThreshold(89).withArea(AreaData.of(190, 1140, 530, 1240)).build());
+            if (!exit.isFound()) continue;
+            sleepTask(150);
+            var confirmed = templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_HERO_POINTS_REWARD_EXIT,
+                    TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
+                            .withThreshold(89).withArea(AreaData.of(190, 1140, 530, 1240)).build());
+            if (!RecognitionConsensus.agrees(exit, confirmed, 12)) continue;
+            tapInside(confirmed);
+            sleepTask(450);
+            if (currentHeroRecruitmentVisible() && !pointsChestBadgeVisible()) {
+                logInfo("Recruitment Points Chest claimed and red badge disappeared (no keys or gems spent)");
+            } else {
+                logWarning("Recruitment Points Chest result unverified; not retrying the tap");
+            }
+            return;
+        }
+        logWarning("Recruitment Points Chest Rewards shown but exit label not verified");
+    }
+
+    private boolean pointsChestBadgeVisible() {
+        return HeroPointsChestDetector.isReady(
+                ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER)));
     }
 
     // ===============================
