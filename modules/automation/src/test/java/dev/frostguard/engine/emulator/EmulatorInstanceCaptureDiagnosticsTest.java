@@ -19,7 +19,7 @@ class EmulatorInstanceCaptureDiagnosticsTest {
         assertTrue(message.contains("emulator=1"));
         assertTrue(message.contains("serial=127.0.0.1:16416"));
         assertTrue(message.contains("command=screencap"));
-        assertTrue(message.contains("commandTimeoutMs=2000"));
+        assertTrue(message.contains("commandTimeoutMs=5000"));
         assertTrue(message.contains("receivedBytes=4096"));
         assertTrue(message.contains("exitDetail=ddmlib shell capture exposes no process exit code"));
         assertTrue(message.contains("cause=IllegalStateException: pixel payload was incomplete"));

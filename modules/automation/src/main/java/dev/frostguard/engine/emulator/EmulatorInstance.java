@@ -269,6 +269,8 @@ public abstract class EmulatorInstance {
 
     // --- screen capture ---
 
+    private static final int SCREENSHOT_COMMAND_TIMEOUT_MS = 5_000;
+
     public RawImageData captureScreenshot(String idx) {
         String serial = getDeviceSerial(idx);
         if (serial == null) throw new ADBConnectionException("No serial for dev " + idx);
@@ -280,7 +282,7 @@ public abstract class EmulatorInstance {
             }
             d.executeShellCommand("screencap", new CollectingOutputReceiver() {
                 @Override public void addOutput(byte[] data, int off, int len) { buf.write(data, off, len); }
-            }, 2000, TimeUnit.MILLISECONDS);
+            }, SCREENSHOT_COMMAND_TIMEOUT_MS, TimeUnit.MILLISECONDS);
             RawImageData frame = prepareCapturedFrame(idx, decodeScreenshotPayload(buf.toByteArray()));
             lastFrame.put(idx, frame);
             return frame;
@@ -294,8 +296,8 @@ public abstract class EmulatorInstance {
 
     static String captureFailureMessage(String idx, String serial, int receivedBytes, Exception failure) {
         String timeout = failure instanceof com.android.ddmlib.TimeoutException
-                ? "commandTimeoutMs=2000"
-                : "commandTimeoutMs=2000 (not reached or not identified as timeout)";
+                ? "commandTimeoutMs=" + SCREENSHOT_COMMAND_TIMEOUT_MS
+                : "commandTimeoutMs=" + SCREENSHOT_COMMAND_TIMEOUT_MS + " (not reached or not identified as timeout)";
         return "ADB screencap failed; emulator=" + idx
                 + "; serial=" + serial
                 + "; command=screencap"
