@@ -25,6 +25,8 @@ private static final int FINAL_CHECK_BEFORE_RESET_MINUTES_VALUE = 2;
 
 private static final int SAFETY_RESCHEDULE_MINUTES_VALUE = 30;
 
+private static final int UNVERIFIED_RETRY_MINUTES = 5;
+
 private static final int POPUP_DISMISS_TAP_COUNT_VALUE = 3;
 
 private static final int MAX_INDIVIDUAL_CLAIMS = 20;
@@ -84,6 +86,14 @@ public DailyMissionRoutine(AccountDescriptor profile, TpDailyTaskEnum dailyMissi
         }
 
 		configureRecurringBehaviorFlow();
+        if (!dailyScreenReached || !claimFlowCompleted) {
+            LocalDateTime retryAt = nextUnverifiedRetry(LocalDateTime.now());
+            reschedule(retryAt);
+            logWarning(routineLogDailyMissionLine("Daily mission result unverified; "
+                    + "no completion recorded. Retrying at "
+                    + retryAt.format(DATETIME_FORMATTER)));
+            return;
+        }
 		queueNextExecution();
 	}
 
@@ -285,6 +295,10 @@ private void reachDailyMissions() {
         sleepTask(450);
 
 	}
+
+static LocalDateTime nextUnverifiedRetry(LocalDateTime now) {
+        return now.plusMinutes(UNVERIFIED_RETRY_MINUTES);
+    }
 
 private void queueNextExecution() {
 		if (isRecurring()) {
