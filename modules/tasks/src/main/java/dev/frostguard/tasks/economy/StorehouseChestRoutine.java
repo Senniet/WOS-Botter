@@ -66,8 +66,10 @@ public class StorehouseChestRoutine extends DelayedTask {
     // ========== Stamina Reward Coordinates ==========
     private static final PointData STAMINA_AMOUNT_TOP_LEFT = new PointData(436, 632);
     private static final PointData STAMINA_AMOUNT_BOTTOM_RIGHT = new PointData(487, 657);
+    // Current 2026 screen places the title lower than older captures. Keep
+    // both placements inside the verified ROI rather than missing the dialog.
     private static final AreaData STAMINA_REWARD_TITLE_AREA = new AreaData(
-            new PointData(170, 750), new PointData(550, 825));
+            new PointData(150, 740), new PointData(560, 885));
     private static final AreaData STAMINA_CLAIM_BUTTON_AREA = new AreaData(
             new PointData(200, 900), new PointData(520, 1020));
     private static final AreaData STAMINA_TOOLTIP_TITLE_AREA = new AreaData(
