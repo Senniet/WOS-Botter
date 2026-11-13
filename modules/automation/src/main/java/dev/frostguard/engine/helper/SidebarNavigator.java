@@ -229,13 +229,19 @@ public final class SidebarNavigator {
             current = observation.section();
             if (current.orElse(null) != target && !observation.interrupted()
                     && current.isPresent()) {
-                // A mixed-version frame can be classified while its tab geometry is
-                // ambiguous. Try the alternate tab position once, but only while
-                // the same sidebar is still visibly open.
-                boolean alternateCurrentLayout = !currentLayout;
-                log.info("Sidebar section did not change; checking alternate tab layout once: "
-                        + target + " initialLayout=" + (currentLayout ? "current" : "classic"));
-                taps.tapInside(alternateCurrentLayout ? CommonGameAreas.sidebarTabCurrent(target)
+                // On the proven 2026 layout a missed first tap must be retried
+                // at the SAME tab position, rather than at the older, offset
+                // position (which can tap between tabs). Only use the alternate
+                // geometry when the fresh frame cannot confirm the modern layout.
+                RawImageData retryFrame = emu.captureScreen(device);
+                boolean freshCurrentLayout = SidebarFrameClassifier.isCurrentLayout(
+                        ImageConverter.toBufferedImage(retryFrame));
+                boolean retryCurrentLayout = tabRetryUsesCurrentLayout(currentLayout, freshCurrentLayout);
+                log.info("Sidebar section did not change; one verified-layout retry: "
+                        + target + " initialLayout=" + (currentLayout ? "current" : "classic")
+                        + " freshCurrentLayout=" + freshCurrentLayout
+                        + " retryLayout=" + (retryCurrentLayout ? "current" : "classic"));
+                taps.tapInside(retryCurrentLayout ? CommonGameAreas.sidebarTabCurrent(target)
                         : CommonGameAreas.sidebarTab(target), 1, SECTION_SETTLE_MS);
                 observation = awaitSection(section -> section.orElse(null) == target);
                 current = observation.section();
@@ -254,6 +260,12 @@ public final class SidebarNavigator {
 
         log.debug("Sidebar section ready without assuming a scroll origin: " + target);
         return true;
+    }
+
+    static boolean tabRetryUsesCurrentLayout(boolean firstCurrentLayout, boolean freshCurrentLayout) {
+        // Repeating the current geometry is safer than falling through to an
+        // older tab position while the current layout is still visibly present.
+        return firstCurrentLayout && freshCurrentLayout || !firstCurrentLayout;
     }
 
     static AreaData rowActionAreaFor(ImageSearchResultData rowIcon) {
