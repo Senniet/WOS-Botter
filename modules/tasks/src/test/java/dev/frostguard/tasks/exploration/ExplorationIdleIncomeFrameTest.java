@@ -25,6 +25,16 @@ class ExplorationIdleIncomeFrameTest {
                 new GreenLabelActionDetector.Region(213,875,507,972)).isFound());
     }
 
+    @Test void recognizesTodaysActualIdleIncomeTitleViaOcr() throws Exception {
+        java.net.URL url = Objects.requireNonNull(getClass().getResource(
+                "/exploration/idle-income-20261113-masked.png"));
+        String text = dev.frostguard.vision.ocr.OcrEngine.readFromFile(
+                new java.io.File(url.toURI()), 192, 301, 330, 65, "eng");
+        assertTrue(ExplorationRoutine.isIdleIncomeTitle(text), "Actual title OCR: " + text);
+        assertFalse(ExplorationRoutine.isIdleIncomeTitle("Rewards"));
+        assertFalse(ExplorationRoutine.isIdleIncomeTitle("Idle exploration"));
+    }
+
     @Test void rewardsFrameDoesNotMistakeItsBannerForIdleIncome() throws Exception {
         byte[] png = Objects.requireNonNull(getClass().getResourceAsStream(
                 "/arena/arena-rewards-panel-20261022.png")).readAllBytes();

@@ -39,6 +39,9 @@ public abstract class EmulatorInstance {
     private final ConcurrentHashMap<String, Long>         runExpiry = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, RawImageData> lastFrame = new ConcurrentHashMap<>();
     private final ReentrantLock bridgeMtx = new ReentrantLock();
+    // Both the GlobalMonitor ticker and task queue capture the same emulator.
+    // Serialize shell screencap by serial to avoid overlapping multi-MB ADB reads.
+    private static final ConcurrentHashMap<String, ReentrantLock> captureLocks = new ConcurrentHashMap<>();
 
     protected abstract String  getDeviceSerial(String idx);
     public    abstract void    launchEmulator(String idx);
@@ -271,9 +274,23 @@ public abstract class EmulatorInstance {
 
     private static final int SCREENSHOT_COMMAND_TIMEOUT_MS = 5_000;
 
+    static ReentrantLock captureLockForSerial(String serial) {
+        return captureLocks.computeIfAbsent(serial, unused -> new ReentrantLock(true));
+    }
+
     public RawImageData captureScreenshot(String idx) {
         String serial = getDeviceSerial(idx);
         if (serial == null) throw new ADBConnectionException("No serial for dev " + idx);
+        ReentrantLock captureLock = captureLockForSerial(serial);
+        captureLock.lock();
+        try {
+            return captureScreenshotLocked(idx, serial);
+        } finally {
+            captureLock.unlock();
+        }
+    }
+
+    private RawImageData captureScreenshotLocked(String idx, String serial) {
         ByteArrayOutputStream buf = new ByteArrayOutputStream(720 * 1280 * 4 + 64);
         try {
             IDevice d = getCachedDevice(idx);

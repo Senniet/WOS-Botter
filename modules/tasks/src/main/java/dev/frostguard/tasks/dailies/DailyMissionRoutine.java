@@ -74,7 +74,14 @@ public DailyMissionRoutine(AccountDescriptor profile, TpDailyTaskEnum dailyMissi
 		if (claimFlowCompleted) {
 			StatisticsService.obtain().addToCounter(profile, "Daily Missions Claimed", 1);
 		}
-		dismissInterface();
+        // Never press Android Back when the Daily Missions screen was never
+        // confirmed. On a City/World HUD that can open the game's Quit prompt.
+        if (dailyScreenReached) {
+            dismissInterface();
+        } else {
+            logWarning(routineLogDailyMissionLine(
+                    "Daily Missions was not confirmed; skipping blind Back cleanup"));
+        }
 
 		configureRecurringBehaviorFlow();
 		queueNextExecution();

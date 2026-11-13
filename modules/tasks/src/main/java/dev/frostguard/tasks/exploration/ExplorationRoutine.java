@@ -9,6 +9,8 @@ import dev.frostguard.api.domain.ImageSearchResultData;
 import dev.frostguard.api.domain.PointData;
 import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.api.domain.AreaData;
+import dev.frostguard.api.domain.OcrSettingsData;
+import java.util.Locale;
 import dev.frostguard.api.domain.SizeData;
 import dev.frostguard.engine.nav.SearchConfigConstants;
 import dev.frostguard.engine.helper.GreenLabelActionDetector;
@@ -190,10 +192,32 @@ public class ExplorationRoutine extends DelayedTask {
     private boolean idleIncomeVisible() {
         if (templateSearchHelper.locatePattern(TemplatesEnum.EXPLORATION_IDLE_INCOME_TITLE,
                 IDLE_INCOME_TITLE_SEARCH).isFound()) return true;
-        return templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_IDLE_INCOME_TITLE,
+        if (templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_IDLE_INCOME_TITLE,
                 dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig.builder()
-                        .withMaxAttempts(2).withDelay(100).withThreshold(90)
-                        .withArea(AreaData.of(235, 275, 555, 385)).build()).isFound();
+                        .withMaxAttempts(1).withDelay(0).withThreshold(90)
+                        .withArea(AreaData.of(235, 275, 555, 385)).build()).isFound()) return true;
+        // The 13-Nov serve-emu frame clearly displays Idle Income, but its
+        // newer title artwork fails both legacy templates. Confirm the text
+        // in the narrow title strip; never treat a generic green button as proof.
+        try {
+            String title = emuManager.readText(EMULATOR_NUMBER,
+                    new PointData(192, 301), new PointData(522, 366),
+                    OcrSettingsData.builder()
+                            .textLayout(OcrSettingsData.TextLayout.SINGLE_LINE).build());
+            return isIdleIncomeTitle(title);
+        } catch (Exception failure) {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new java.util.concurrent.CancellationException("Idle Income OCR interrupted");
+            }
+            logDebug("Idle Income title OCR unavailable: " + failure.getClass().getSimpleName());
+            return false;
+        }
+    }
+
+    static boolean isIdleIncomeTitle(String title) {
+        if (title == null) return false;
+        String normalized = title.toLowerCase(Locale.ROOT).replaceAll("[^a-z]", "");
+        return normalized.contains("idleincome");
     }
 
     private boolean finishConfirmedRewards() {

@@ -410,6 +410,16 @@ public class StorehouseChestRoutine extends DelayedTask {
                     }
 
                     @Override
+                    public boolean isBackAtCity() {
+                        ImageSearchResultData city = templateSearchHelper.locatePattern(
+                                TemplatesEnum.GAME_HOME_FURNACE,
+                                SearchConfig.builder().withMaxAttempts(1).withDelay(0)
+                                        .withThreshold(90)
+                                        .withArea(AreaData.of(580, 1120, 720, 1280)).build());
+                        return city != null && city.isFound();
+                    }
+
+                    @Override
                     public void pressBack() {
                         logInfo("Stamina tooltip confirmed after opening the Storehouse reward; dismissing it once with Back.");
                         StorehouseChestRoutine.this.pressBack();

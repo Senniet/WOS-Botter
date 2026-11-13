@@ -15,6 +15,9 @@ final class StorehouseStaminaClaimFlow {
 
         boolean isTooltipVisible();
 
+        /** Detect a return to the City HUD instead of waiting for a reward button. */
+        default boolean isBackAtCity() { return false; }
+
         void pressBack();
 
         void waitAfterBack();
@@ -36,6 +39,7 @@ final class StorehouseStaminaClaimFlow {
         long deadline = nanoTime.getAsLong() + timeout.toNanos();
         boolean tooltipDismissed = false;
         boolean rewardDialogSeen = false;
+        int cityObservations = 0;
         while (nanoTime.getAsLong() < deadline) {
             if (actions.isRewardDialogVisible()) {
                 rewardDialogSeen = true;
@@ -43,6 +47,14 @@ final class StorehouseStaminaClaimFlow {
                 if (claimButton != null && claimButton.isFound()) {
                     return new Result(claimButton, true);
                 }
+            }
+
+            if (!rewardDialogSeen && actions.isBackAtCity()) {
+                if (++cityObservations >= 2) {
+                    return new Result(null, false);
+                }
+            } else {
+                cityObservations = 0;
             }
 
             if (!tooltipDismissed && actions.isTooltipVisible()) {
