@@ -94,9 +94,7 @@ private void configureRecurringBehaviorFlow() {
 	}
 
 private boolean switchToDailyMissionsTabFlow() {
-		ImageSearchResultData dailyScreenTitle = templateSearchHelper.locatePattern(
-				TemplatesEnum.DAILY_MISSION_SCREEN_TITLE,
-				DAILY_SCREEN_TITLE_SEARCH);
+		ImageSearchResultData dailyScreenTitle = currentDailyTitle();
 
 		if (dailyScreenTitle.isFound()) {
 			logDebug(routineLogDailyMissionLine("Daily missions screen already selected"));
@@ -117,9 +115,7 @@ private boolean switchToDailyMissionsTabFlow() {
 		tapInside(dailyTabButton);
 		sleepTask(500);
 
-		dailyScreenTitle = templateSearchHelper.locatePattern(
-				TemplatesEnum.DAILY_MISSION_SCREEN_TITLE,
-				DAILY_SCREEN_TITLE_SEARCH);
+		dailyScreenTitle = currentDailyTitle();
 		if (!dailyScreenTitle.isFound()) {
 			logWarning(routineLogDailyMissionLine("Daily missions title not detected after tab switch. Skipping claims; "
                     + captureDailyDiagnostic("daily-title-unrecognized")));
@@ -129,6 +125,15 @@ private boolean switchToDailyMissionsTabFlow() {
 		logInfo(routineLogDailyMissionLine("Daily missions screen confirmed"));
 		return true;
 	}
+
+private ImageSearchResultData currentDailyTitle() {
+        ImageSearchResultData original = templateSearchHelper.locatePattern(
+                TemplatesEnum.DAILY_MISSION_SCREEN_TITLE, DAILY_SCREEN_TITLE_SEARCH);
+        if (original.isFound()) return original;
+        return templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_DAILY_TITLE,
+                SearchConfig.builder().withMaxAttempts(2).withDelay(150)
+                        .withThreshold(90).withArea(AreaData.of(170, 105, 545, 210)).build());
+    }
 
 private ImageSearchResultData seekForIndividualClaimButton() {
 		ImageSearchResultData claimButton = templateSearchHelper.locatePattern(

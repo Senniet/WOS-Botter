@@ -48,11 +48,12 @@ public class DoExplorationRoutine extends DelayedTask {
 
     @Override
     protected LaunchPoint getRequiredStartLocation() {
-        return LaunchPoint.WORLD;
+        return LaunchPoint.ANY;
     }
 
     protected void execute() {
         logInfo("Opening exploration screen...");
+        if (!explorationTitleVisible()) navigationHelper.ensureCorrectScreenLocation(LaunchPoint.WORLD);
         if (!openExplorationScreen()) {
             logWarning("Exploration page could not be verified; " + TaskDiagnosticSnapshots.capture(
                     emuManager, EMULATOR_NUMBER, "exploration", "entry-unverified"));
@@ -88,9 +89,12 @@ public class DoExplorationRoutine extends DelayedTask {
     }
 
     private boolean explorationTitleVisible() {
-        return templateSearchHelper.locatePattern(TemplatesEnum.EXPLORATION_SCREEN_TITLE,
+        if (templateSearchHelper.locatePattern(TemplatesEnum.EXPLORATION_SCREEN_TITLE,
                 SearchConfig.builder().withMaxAttempts(2).withDelay(150).withThreshold(90)
-                        .withArea(AreaData.of(70, 5, 365, 90)).build()).isFound();
+                        .withArea(AreaData.of(70, 5, 365, 150)).build()).isFound()) return true;
+        return templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_EXPLORATION_TITLE,
+                SearchConfig.builder().withMaxAttempts(2).withDelay(150).withThreshold(90)
+                        .withArea(AreaData.of(50, 65, 330, 160)).build()).isFound();
     }
 
     private ImageSearchResultData detectExploreButton() {

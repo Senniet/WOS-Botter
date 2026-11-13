@@ -51,7 +51,7 @@ public class ExplorationRoutine extends DelayedTask {
 
 	@Override
 	protected void execute() {
-        if (!isExplorationScreenVisible()) {
+        if (!isExplorationScreenVisible() && !isExplorationMainScreenVisible()) {
             navigationHelper.ensureCorrectScreenLocation(LaunchPoint.WORLD);
         }
 		logInfo(routineLogExplorationLine("Opening or resuming Exploration rewards."));
@@ -113,10 +113,14 @@ public class ExplorationRoutine extends DelayedTask {
 	}
 
     private boolean isExplorationMainScreenVisible() {
-        return templateSearchHelper.locatePattern(TemplatesEnum.EXPLORATION_SCREEN_TITLE,
+        if (templateSearchHelper.locatePattern(TemplatesEnum.EXPLORATION_SCREEN_TITLE,
                 dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig.builder()
                     .withMaxAttempts(1).withThreshold(90)
-                    .withArea(AreaData.of(70, 5, 365, 90)).build()).isFound();
+                    .withArea(AreaData.of(70, 5, 365, 150)).build()).isFound()) return true;
+        return templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_EXPLORATION_TITLE,
+                dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig.builder()
+                    .withMaxAttempts(2).withDelay(100).withThreshold(90)
+                    .withArea(AreaData.of(50, 65, 330, 160)).build()).isFound();
     }
 
     private boolean claimAvailableRewards() {
@@ -180,8 +184,12 @@ public class ExplorationRoutine extends DelayedTask {
     }
 
     private boolean idleIncomeVisible() {
-        return templateSearchHelper.locatePattern(TemplatesEnum.EXPLORATION_IDLE_INCOME_TITLE,
-                IDLE_INCOME_TITLE_SEARCH).isFound();
+        if (templateSearchHelper.locatePattern(TemplatesEnum.EXPLORATION_IDLE_INCOME_TITLE,
+                IDLE_INCOME_TITLE_SEARCH).isFound()) return true;
+        return templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_IDLE_INCOME_TITLE,
+                dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig.builder()
+                        .withMaxAttempts(2).withDelay(100).withThreshold(90)
+                        .withArea(AreaData.of(235, 275, 555, 385)).build()).isFound();
     }
 
     private boolean finishConfirmedRewards() {
