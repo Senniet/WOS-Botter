@@ -272,19 +272,29 @@ public class HeroRecruitmentRoutine extends DelayedTask {
             PointData claimMin,
             PointData claimMax) {
 
-        ImageSearchResultData claimResult = templateSearchHelper.locatePattern(
+        ImageSearchResultData claimResult = templateSearchHelper.locateAction(
                 TemplatesEnum.HERO_RECRUIT_CLAIM,
                 TemplateSearchHelper.SearchConfig.builder()
-                        .withMaxAttempts(1)
-                        .withThreshold(95)
-                        .withDelay(300L)
+                        .withMaxAttempts(2)
+                        .withThreshold(92)
+                        .withDelay(150L)
                         .withCoordinates(searchMin, searchMax)
                         .build());
 
         if (claimResult.isFound()) {
-            logInfo(type + " recruitment reward available. Claiming now.");
-            tapInside(claimMin, claimMax);
-            sleepTask(1000); // Wait for claim animation
+            // The visible free button is the only authorized control. Fixed
+            // coordinates can hit a paid recruitment action after a UI update.
+            logInfo(type + " free recruitment control confirmed in two frames. Tapping once at "
+                    + claimResult.getPoint());
+            tapInside(claimResult);
+            sleepTask(450);
+            // Never repeat a claim if the transition is uncertain.
+            if (templateSearchHelper.locatePattern(TemplatesEnum.HERO_RECRUIT_CLAIM,
+                    TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
+                            .withThreshold(92).withCoordinates(searchMin, searchMax).build()).isFound()) {
+                logWarning(type + " free recruitment control remains visible after one tap; "
+                        + "not sending another tap or spending recruitment items");
+            }
         } else {
             logInfo(type + " recruitment reward not available yet.");
         }
