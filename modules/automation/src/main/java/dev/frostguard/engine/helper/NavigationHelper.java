@@ -695,6 +695,14 @@ public class NavigationHelper {
                 broadcastDebug("Unrecognised location, but task accepts ANY; no navigation input sent");
                 return LaunchPoint.ANY;
             }
+            // Resource searches can hide the home/world anchor without offering
+            // a header back arrow. This is the only confirmed overlay for which
+            // Android Back is safe: first dismiss a verified resource modal,
+            // then close the still-visible search pane, at most once.
+            if (pass <= 2 && recoverVerifiedResourceSearch(checkpoint)) {
+                pass++;
+                continue;
+            }
             // Never send a blind Android Back: it brings up Quit game? when
             // world detection is briefly unavailable. Use the verified visible
             // header arrow instead, and check location again after it closes a page.
@@ -710,6 +718,47 @@ public class NavigationHelper {
             pass++;
         }
         throw new HomeNotFoundException("Home not found after " + budget + " verified recovery attempts");
+    }
+
+    private boolean recoverVerifiedResourceSearch(Runnable checkpoint) {
+        if (!isVerifiedResourceSearchVisible()) return false;
+        broadcastWarn("Verified World resource-search panel obscures anchors; "
+                + "closing it with a bounded, state-specific recovery");
+        var gatherConfig = TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
+                .withThreshold(86).withArea(AreaData.of(180, 545, 530, 700)).build();
+        // The resource result modal is dismissed by a map tap; do not tap
+        // Gather or Deploy here and do not assume that the modal disappeared.
+        if (searcher.locateAction(TemplatesEnum.GAME_HOME_SHORTCUTS_FARM_GATHER,
+                gatherConfig).isFound()) {
+            checkpoint.run();
+            taps.tapInside(AreaData.of(65, 405, 105, 445));
+            interruptibleWait(500);
+            if (searcher.locatePattern(TemplatesEnum.GAME_HOME_SHORTCUTS_FARM_GATHER,
+                    gatherConfig).isFound()) {
+                broadcastWarn("Resource result modal remained open; stopping safe recovery");
+                return false;
+            }
+        }
+        if (!isVerifiedResourceSearchVisible()) return false;
+        checkpoint.run();
+        emu.pressBack(device);
+        interruptibleWait(650);
+        return true;
+    }
+
+    private boolean isVerifiedResourceSearchVisible() {
+        var config = TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
+                .withThreshold(90).withArea(AreaData.of(0, 835, 720, 995)).build();
+        for (TemplatesEnum resource : new TemplatesEnum[] {
+                TemplatesEnum.GAME_HOME_SHORTCUTS_FARM_MEAT,
+                TemplatesEnum.GAME_HOME_SHORTCUTS_FARM_WOOD}) {
+            var first = searcher.locatePattern(resource, config);
+            if (!first.isFound()) continue;
+            interruptibleWait(170);
+            var second = searcher.locatePattern(resource, config);
+            if (RecognitionConsensus.agrees(first, second, 18)) return true;
+        }
+        return false;
     }
 
     private ImageSearchResultData findVerifiedBackArrow() {
