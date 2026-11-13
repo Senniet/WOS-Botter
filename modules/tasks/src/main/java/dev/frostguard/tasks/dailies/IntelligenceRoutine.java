@@ -116,6 +116,23 @@ private boolean awaitIntelActionAcknowledged(TemplatesEnum action, SearchConfig 
     } while (true);
 }
 
+private boolean awaitJourneyExploreAcknowledged() {
+    // The Explore button may match a current or legacy rendering. Never
+    // declare an acknowledged tap just because one particular image is absent.
+    long deadline = System.nanoTime() + 1_700_000_000L;
+    do {
+        boolean current = templateSearchHelper.locatePattern(
+                TemplatesEnum.SERVE_EMU_INTEL_JOURNEY_EXPLORE,
+                INTEL_JOURNEY_ACTION_SEARCH).isFound();
+        boolean legacy = templateSearchHelper.locatePattern(
+                TemplatesEnum.INTEL_EXPLORE_BUTTON_MODERN,
+                INTEL_JOURNEY_ACTION_SEARCH).isFound();
+        if (!current && !legacy) return true;
+        if (System.nanoTime() >= deadline) return false;
+        sleepTask(160);
+    } while (true);
+}
+
 private void deferIntelMissingAction(String mission, String action, String snapshotKind) {
     String snapshot = TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
             "intel-actions", snapshotKind);
@@ -1320,15 +1337,15 @@ private void handleJourneyExclusive(ImageSearchResultData result) {
                         "intel-actions", "journey-after-view")));
         ImageSearchResultData explore = awaitIntelAction(
                 TemplatesEnum.INTEL_EXPLORE_BUTTON_MODERN, INTEL_JOURNEY_ACTION_SEARCH,
-                2900, TemplatesEnum.INTEL_EXPLORE);
+                2900, TemplatesEnum.SERVE_EMU_INTEL_JOURNEY_EXPLORE,
+                TemplatesEnum.INTEL_EXPLORE);
         if (!explore.isFound()) {
             deferIntelMissingAction("Journey", "Explore", "journey-explore-missing");
             return;
         }
 
         tapInside(explore);
-        if (!awaitIntelActionAcknowledged(TemplatesEnum.INTEL_EXPLORE_BUTTON_MODERN,
-                INTEL_JOURNEY_ACTION_SEARCH, 1500)) {
+        if (!awaitJourneyExploreAcknowledged()) {
             deferIntelMissingAction("Journey", "Explore tap not acknowledged", "journey-explore-still-visible");
             return;
         }

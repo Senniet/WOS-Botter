@@ -90,6 +90,13 @@ class ServeEmuTitleRecognitionTest {
                 390, 1180, 720, 1279));
     }
 
+    @Test void currentJourneyExploreActionIsVisibleInHistoricalIntelDiagnostics() throws Exception {
+        assertTrue(match("intelJourneyExplore", TemplatesEnum.SERVE_EMU_INTEL_JOURNEY_EXPLORE,
+                220, 565, 510, 690));
+        assertFalse(match("daily", TemplatesEnum.SERVE_EMU_INTEL_JOURNEY_EXPLORE,
+                220, 565, 510, 690));
+    }
+
     private static boolean match(String scene, TemplatesEnum template, int left, int top, int right, int bottom)
             throws Exception {
         BufferedImage image = ImageIO.read(Objects.requireNonNull(

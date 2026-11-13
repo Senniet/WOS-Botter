@@ -2,6 +2,7 @@ package dev.frostguard.engine.helper;
 
 import dev.frostguard.api.configs.TemplatesEnum;
 import dev.frostguard.api.domain.AccountDescriptor;
+import dev.frostguard.api.domain.AreaData;
 import dev.frostguard.api.domain.ImageSearchResultData;
 import dev.frostguard.api.domain.RawImageData;
 import dev.frostguard.engine.emulator.EmulatorController;
@@ -198,17 +199,29 @@ public class DeploymentHelper {
      * screen anchor is required before callers record stamina or a march.
      */
     public LaunchCheck verifyLaunchTransition() {
-        ImageSearchResultData deploy = templates.locatePattern(
-                TemplatesEnum.DEPLOY_BUTTON,
-                search(CommonGameAreas.RALLY_BOTTOM_BUTTON_BAR, 3, 85));
-        ImageSearchResultData world = templates.locatePattern(
-                TemplatesEnum.GAME_HOME_WORLD,
-                TemplateSearchHelper.SearchConfig.builder()
-                        .withMaxAttempts(3)
-                        .withDelay(200)
-                        .withThreshold(85)
-                        .build());
-        return classifyLaunchCheck(deploy.isFound(), world.isFound());
+        return verifyLaunchTransition(TemplatesEnum.DEPLOY_BUTTON);
+    }
+
+    /** Check the specific routine's Deploy button and both verified world
+     * anchor variants. A disappearing button alone is NOT success. */
+    public LaunchCheck verifyLaunchTransition(TemplatesEnum deploymentButton) {
+        var deployArea = deploymentButton == TemplatesEnum.GATHER_DEPLOY_BUTTON
+                ? AreaData.of(75, 950, 720, 1279) : CommonGameAreas.RALLY_BOTTOM_BUTTON_BAR;
+        ImageSearchResultData deploy = templates.locatePattern(deploymentButton,
+                search(deployArea, 2, 85));
+        AreaData anchor = AreaData.of(590, 1145, 715, 1275);
+        var worldConfig = TemplateSearchHelper.SearchConfig.builder()
+                .withMaxAttempts(2).withDelay(160).withThreshold(90)
+                .withArea(anchor).build();
+        boolean atWorld = templates.locatePattern(TemplatesEnum.SERVE_EMU_WORLD_ANCHOR,
+                worldConfig).isFound();
+        if (!atWorld) {
+            atWorld = templates.locatePattern(TemplatesEnum.GAME_HOME_WORLD,
+                    TemplateSearchHelper.SearchConfig.builder()
+                            .withMaxAttempts(2).withDelay(160).withThreshold(85)
+                            .build()).isFound();
+        }
+        return classifyLaunchCheck(deploy.isFound(), atWorld);
     }
 
     static LaunchCheck classifyLaunchCheck(boolean deployStillVisible, boolean worldAnchorVisible) {

@@ -838,32 +838,25 @@ public class GatherRoutine extends DelayedTask {
             pressBack();
             return GatherDeployResult.SAME_TARGET;
         }
+        // The tap is not proof of dispatch. The formation must disappear AND
+        // the verified World anchor must return. Otherwise defer, keeping
+        // the march slot free to avoid a duplicate send on the next pass.
+        var launch = deploymentHelper.verifyLaunchTransition(TemplatesEnum.GATHER_DEPLOY_BUTTON);
+        if (launch != dev.frostguard.engine.helper.DeploymentHelper.LaunchCheck.WORLD_VERIFIED) {
+            logWarning("Gather Deploy was tapped but World transition not confirmed: " + launch
+                    + ". Not recording a completed gathering march.");
+            saveGatherFormationScreenshot("launch-unverified", type, level);
+            return GatherDeployResult.BLOCKED;
+        }
         return GatherDeployResult.DEPLOYED;
     }
 
     private ImageSearchResultData locateConfirmedGatherDeployButton() {
-        TemplatesEnum button = TemplatesEnum.GATHER_DEPLOY_BUTTON;
-        ImageSearchResultData exact = templateSearchHelper.locatePattern(button,
-                SearchConfig.builder().withMaxAttempts(2).build());
-        if (exact.isFound()) return exact;
-        ImageSearchResultData scaled = templateSearchHelper.locatePatternMultiScale(button,
-                SearchConfig.builder().withThreshold(90).withMaxAttempts(2).build());
-        if (scaled.isFound()) return scaled;
-        ImageSearchResultData first = templateSearchHelper.locatePatternMultiScale(button,
-                SearchConfig.builder().withThreshold(86).build());
-        if (first.isFound() && first.getPoint() != null) {
-            sleepTask(350);
-            ImageSearchResultData second = templateSearchHelper.locatePatternMultiScale(button,
-                    SearchConfig.builder().withThreshold(86).build());
-            if (second.isFound() && second.getPoint() != null
-                    && first.getPoint().manhattanDistanceTo(second.getPoint()) <= 20) {
-                logInfo(String.format(java.util.Locale.ROOT,
-                        "Gather Deploy button confirmed in two frames (%.1f / %.1f)",
-                        first.getMatchScore(), second.getMatchScore()));
-                return second;
-            }
-        }
-        return scaled;
+        // A single exact template hit is insufficient to dispatch a march:
+        // use shared two-frame consensus with multiscale fallback.
+        return templateSearchHelper.locateAction(TemplatesEnum.GATHER_DEPLOY_BUTTON,
+                SearchConfig.builder().withMaxAttempts(2).withDelay(150)
+                        .withThreshold(89).withArea(AreaData.of(75, 950, 720, 1280)).build());
     }
 
     private void saveGatherFormationScreenshot(String reason, GatherType type, int level) {
@@ -891,35 +884,12 @@ public class GatherRoutine extends DelayedTask {
      * a node missing. A lower-confidence match must repeat at the same location.
      */
     private ImageSearchResultData locateGatherButton() {
-        TemplatesEnum template = TemplatesEnum.GAME_HOME_SHORTCUTS_FARM_GATHER;
-        ImageSearchResultData exact = templateSearchHelper.locatePattern(template,
-                SearchConfig.builder().withMaxAttempts(2).build());
-        if (exact.isFound()) return exact;
-
-        ImageSearchResultData scaled = templateSearchHelper.locatePatternMultiScale(template,
-                SearchConfig.builder().withThreshold(90).withMaxAttempts(2).build());
-        if (scaled.isFound()) {
-            logInfo(String.format(java.util.Locale.ROOT,
-                    "Gather button recognized by multi-scale matching (score %.1f).",
-                    scaled.getMatchScore()));
-            return scaled;
-        }
-
-        ImageSearchResultData first = templateSearchHelper.locatePatternMultiScale(template,
-                SearchConfig.builder().withThreshold(86).build());
-        if (first.isFound() && first.getPoint() != null) {
-            sleepTask(350);
-            ImageSearchResultData second = templateSearchHelper.locatePatternMultiScale(template,
-                    SearchConfig.builder().withThreshold(86).build());
-            if (second.isFound() && second.getPoint() != null
-                    && first.getPoint().manhattanDistanceTo(second.getPoint()) <= 20) {
-                logInfo(String.format(java.util.Locale.ROOT,
-                        "Gather button confirmed across two frames (scores %.1f / %.1f).",
-                        first.getMatchScore(), second.getMatchScore()));
-                return second;
-            }
-        }
-        return scaled;
+        // Confirm in two distinct frames so an incidental Gather label cannot
+        // cause a blind tap. The result remains screen-scoped to the searched
+        // resource's card and is followed by a verified formation state.
+        return templateSearchHelper.locateAction(TemplatesEnum.GAME_HOME_SHORTCUTS_FARM_GATHER,
+                SearchConfig.builder().withMaxAttempts(2).withDelay(150)
+                        .withThreshold(89).build());
     }
 
     private void saveMissingGatherButtonScreenshot(GatherType type, int level) {
