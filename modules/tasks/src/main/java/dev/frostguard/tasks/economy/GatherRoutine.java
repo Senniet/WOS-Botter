@@ -838,10 +838,32 @@ public class GatherRoutine extends DelayedTask {
             pressBack();
             return GatherDeployResult.SAME_TARGET;
         }
-        return GatherDeployResult.DEPLOYED;
+        // A sent input is not evidence of a dispatched march. Never schedule
+        // another deployment when the old Deploy button stays on screen.
+        for (int attempt = 0; attempt < 4; attempt++) {
+            var stillPresent = templateSearchHelper.locatePattern(
+                    TemplatesEnum.SERVE_EMU_GATHER_DEPLOY,
+                    SearchConfig.builder().withMaxAttempts(1).withThreshold(90)
+                            .withArea(AreaData.of(400, 1140, 705, 1270)).build());
+            if (!stillPresent.isFound()) {
+                logInfo("Gather Deploy action acknowledged by formation screen transition");
+                return GatherDeployResult.DEPLOYED;
+            }
+            sleepTask(250);
+        }
+        logWarning("Gather Deploy remains visible after a single tap; refusing a second tap");
+        saveGatherFormationScreenshot("deploy-transition-unverified", type, level);
+        return GatherDeployResult.BLOCKED;
     }
 
     private ImageSearchResultData locateConfirmedGatherDeployButton() {
+        // Modern 720x1280 UI has different anti-aliasing; two-frame consensus
+        // is required and the search is restricted to the bottom Deploy area.
+        ImageSearchResultData current = templateSearchHelper.locateAction(
+                TemplatesEnum.SERVE_EMU_GATHER_DEPLOY,
+                SearchConfig.builder().withMaxAttempts(2).withDelay(140)
+                        .withThreshold(90).withArea(AreaData.of(400, 1140, 705, 1270)).build());
+        if (current.isFound()) return current;
         TemplatesEnum button = TemplatesEnum.GATHER_DEPLOY_BUTTON;
         ImageSearchResultData exact = templateSearchHelper.locatePattern(button,
                 SearchConfig.builder().withMaxAttempts(2).build());

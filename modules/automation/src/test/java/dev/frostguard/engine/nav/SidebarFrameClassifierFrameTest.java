@@ -37,6 +37,15 @@ class SidebarFrameClassifierFrameTest {
     }
 
     @Test
+    void identifiesCurrentCityQueueLayoutWithoutPersonalContent() throws IOException {
+        try (InputStream input = getClass().getResourceAsStream("/serveemu/city-queues-masked.jpg")) {
+            BufferedImage frame = ImageIO.read(input);
+            assertEquals(SidebarSection.CITY, SidebarFrameClassifier.selectedSection(frame).orElseThrow());
+            assertTrue(SidebarFrameClassifier.isCurrentLayout(frame));
+        }
+    }
+
+    @Test
     void rejectsFramesThatCannotContainTheSidebarTabs() {
         assertTrue(SidebarFrameClassifier.selectedSection(new BufferedImage(100, 100,
                 BufferedImage.TYPE_INT_RGB)).isEmpty());

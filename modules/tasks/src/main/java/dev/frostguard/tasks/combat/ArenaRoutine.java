@@ -356,7 +356,28 @@ public class ArenaRoutine extends DelayedTask {
     }
 
     private boolean navigateToArena() {
-        return navigationHelper.navigateToSidebarDestination(SidebarDestination.ARENA);
+        if (arenaHomeVisible()) return true;
+        if (!navigationHelper.navigateToSidebarDestination(SidebarDestination.ARENA)) return false;
+        return arenaHomeVisible();
+    }
+
+    private boolean arenaHomeVisible() {
+        if (templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_ARENA_TITLE,
+                SearchConfig.builder().withMaxAttempts(2).withDelay(150)
+                        .withThreshold(90).withArea(AreaData.of(70, 70, 470, 150)).build()).isFound())
+            return true;
+        // Classic BlueStacks art has no 2026 title template; keep its
+        // proven Challenge control as the home-screen fallback.
+        return templateSearchHelper.locatePattern(TemplatesEnum.ARENA_CHALLENGE_BUTTON_CURRENT,
+                    TRANSIENT_BUTTON_SEARCH).isFound()
+                || templateSearchHelper.locatePattern(TemplatesEnum.ARENA_CHALLENGE_BUTTON,
+                    TRANSIENT_BUTTON_SEARCH).isFound();
+    }
+
+    private boolean challengeListVisible() {
+        return templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_ARENA_LIST_TITLE,
+                SearchConfig.builder().withMaxAttempts(2).withDelay(150)
+                        .withThreshold(90).withArea(AreaData.of(230, 170, 510, 280)).build()).isFound();
     }
 
     private boolean detectFirstRun() {
@@ -389,26 +410,29 @@ public class ArenaRoutine extends DelayedTask {
     }
 
     private boolean openChallengeList() {
-        logDebug("Opening challenge list");
-
-        ImageSearchResultData challengeResult = templateSearchHelper.locatePattern(
-                TemplatesEnum.ARENA_CHALLENGE_BUTTON_CURRENT,
-                TRANSIENT_BUTTON_SEARCH);
-        if (!challengeResult.isFound()) {
-            challengeResult = templateSearchHelper.locatePattern(
-                    TemplatesEnum.ARENA_CHALLENGE_BUTTON,
-                    TRANSIENT_BUTTON_SEARCH);
-        }
-
-        if (!challengeResult.isFound()) {
-            logError("Challenge button not found; " + captureArenaDiagnostic("challenge-button-missing"));
+        if (challengeListVisible()) return true;
+        if (!arenaHomeVisible()) {
+            logWarning("Arena home header unverified; refusing Challenge tap");
             return false;
         }
-
-        tapInside(challengeResult);
-        sleepTask(1000);
-
-        return true;
+        ImageSearchResultData challenge = templateSearchHelper.locateAction(
+                TemplatesEnum.SERVE_EMU_ARENA_CHALLENGE,
+                SearchConfig.builder().withMaxAttempts(2).withDelay(150)
+                        .withThreshold(90).withArea(AreaData.of(190, 1150, 535, 1270)).build(),
+                TemplatesEnum.ARENA_CHALLENGE_BUTTON_CURRENT,
+                TemplatesEnum.ARENA_CHALLENGE_BUTTON);
+        if (!challenge.isFound()) {
+            logWarning("Challenge not active: first-run defensive lineup may require setup; "
+                    + captureArenaDiagnostic("challenge-unavailable-or-onboarding"));
+            return false;
+        }
+        tapInside(challenge);
+        for (int i = 0; i < 5; i++) {
+            sleepTask(180);
+            if (challengeListVisible()) return true;
+        }
+        logWarning("Challenge tap did not open list; " + captureArenaDiagnostic("challenge-transition-unverified"));
+        return false;
     }
 
     private boolean readInitialAttempts() {

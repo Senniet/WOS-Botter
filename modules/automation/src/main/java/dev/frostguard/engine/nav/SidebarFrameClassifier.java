@@ -29,6 +29,17 @@ public final class SidebarFrameClassifier {
         return classic.isPresent() ? classic : pickSelected(frame, true);
     }
 
+    /** Current 2026 sidebar is drawn ~30px lower than the classic UI.
+     * Only classify the offset when the panel anchor is present and the
+     * modern samples identify a selected tab while classic samples do not.
+     */
+    public static boolean isCurrentLayout(BufferedImage frame) {
+        return frame != null && frame.getWidth() >= 440 && frame.getHeight() >= 330
+                && hasPanelAnchor(frame)
+                && pickSelected(frame, true).isPresent()
+                && pickSelected(frame, false).isEmpty();
+    }
+
     private static Optional<SidebarSection> pickSelected(BufferedImage frame, boolean currentLayout) {
         Map<SidebarSection, Double> scores = new EnumMap<>(SidebarSection.class);
         for (SidebarSection section : SidebarSection.values()) {

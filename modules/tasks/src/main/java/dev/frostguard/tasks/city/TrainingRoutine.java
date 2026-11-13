@@ -4,11 +4,13 @@ import dev.frostguard.api.configs.TemplatesEnum;
 import dev.frostguard.api.configs.TpDailyTaskEnum;
 import dev.frostguard.api.domain.*;
 import dev.frostguard.engine.nav.SearchConfigConstants;
+import dev.frostguard.engine.nav.SidebarFrameClassifier;
 import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.schedule.LaunchPoint;
 import dev.frostguard.engine.service.ConfigService;
 import dev.frostguard.engine.service.TaskManagementService;
 import dev.frostguard.vision.convert.GameTimeUtils;
+import dev.frostguard.vision.convert.ImageConverter;
 import dev.frostguard.vision.convert.RegexNumberParser;
 import dev.frostguard.vision.ocr.ResilientOcrExecutor;
 import java.awt.*;
@@ -224,7 +226,7 @@ protected void loadConfiguration() {
         return LaunchPoint.HOME;
     }
 
-private enum TroopTypeShape {
+enum TroopTypeShape {
         INFANTRY,
         LANCER,
         MARKSMAN
@@ -1318,6 +1320,14 @@ private Optional<LocalDateTime> earliestReservationCheck() {
                 .min(LocalDateTime::compareTo);
     }
 
+static AreaData currentSidebarQueueArea(TroopTypeShape type) {
+        return switch (type) {
+            case INFANTRY -> AreaData.of(161, 590, 289, 628);
+            case LANCER -> AreaData.of(161, 661, 289, 702);
+            case MARKSMAN -> AreaData.of(161, 735, 289, 780);
+        };
+    }
+
 private AreaData resolvePipelineArea(TroopTypeShape type) {
         return switch (type) {
             case INFANTRY -> INFANTRY_AREA_VALUE;
@@ -1447,6 +1457,14 @@ private boolean performPromotion(TemplatesEnum template, ImageSearchResultData p
 private List<QueueSlot> inspectAllQueues() {
         marchHelper.openLeftMenuSection(true);
         try {
+            boolean currentLayout = SidebarFrameClassifier.isCurrentLayout(
+                    ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER)));
+            for (int i = 0; i < queuesToCheck.size(); i++) {
+                queuesToCheck.set(i, currentLayout ? currentSidebarQueueArea(enabledTroopTypes.get(i))
+                        : resolvePipelineArea(enabledTroopTypes.get(i)));
+            }
+            logDebug(routineLogTrainingLine("Training sidebar layout: "
+                    + (currentLayout ? "2026 serve-emu" : "classic") + "; OCR regions refreshed"));
             List<QueueSlot> result = new ArrayList<>();
 
             emuManager.captureScreen(EMULATOR_NUMBER);

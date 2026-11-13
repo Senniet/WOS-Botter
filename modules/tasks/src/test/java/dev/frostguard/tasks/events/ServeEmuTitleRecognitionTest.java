@@ -90,6 +90,51 @@ class ServeEmuTitleRecognitionTest {
                 390, 1180, 720, 1279));
     }
 
+    @Test void arenaStageButtonsAreScreenScoped() throws Exception {
+        assertTrue(match("arenaTitle", TemplatesEnum.SERVE_EMU_ARENA_TITLE, 70, 70, 470, 150));
+        assertTrue(match("arenaChallenge", TemplatesEnum.SERVE_EMU_ARENA_CHALLENGE, 190, 1150, 535, 1270));
+        assertTrue(match("arenaListTitle", TemplatesEnum.SERVE_EMU_ARENA_LIST_TITLE, 230, 170, 510, 280));
+        assertTrue(match("arenaDefenseTitle", TemplatesEnum.SERVE_EMU_ARENA_DEFENSE_TITLE, 65, 70, 550, 150));
+        assertTrue(match("arenaQuickDeploy", TemplatesEnum.SERVE_EMU_ARENA_QUICK_DEPLOY, 50, 1140, 370, 1260));
+        assertTrue(match("arenaSave", TemplatesEnum.SERVE_EMU_ARENA_SAVE, 375, 1140, 695, 1260));
+        assertFalse(match("daily", TemplatesEnum.SERVE_EMU_ARENA_CHALLENGE, 190, 1150, 535, 1270));
+    }
+
+    @Test void researchTitleMatchesLiveTechTreeWithoutConfusingArena() throws Exception {
+        assertTrue(match("researchTitle", TemplatesEnum.SERVE_EMU_RESEARCH_TITLE, 75, 65, 380, 155));
+        assertFalse(match("arenaTitle", TemplatesEnum.SERVE_EMU_RESEARCH_TITLE, 75, 65, 380, 155));
+    }
+
+    @Test void currentGatherDeployLabelIsRecognizedOnlyInFormation() throws Exception {
+        assertTrue(match("gatherDeploy", TemplatesEnum.SERVE_EMU_GATHER_DEPLOY,
+                400, 1140, 705, 1270));
+        assertFalse(match("arenaTitle", TemplatesEnum.SERVE_EMU_GATHER_DEPLOY,
+                400, 1140, 705, 1270));
+    }
+
+    @Test void currentVipFreeClaimRequiresTheRightScreenAndChecksLockedStatus() throws Exception {
+        assertTrue(match("vipHud", TemplatesEnum.SERVE_EMU_VIP_HUD, 426, 105, 544, 170));
+        assertTrue(match("vipTitle", TemplatesEnum.SERVE_EMU_VIP_TITLE, 78, 70, 195, 150));
+        assertTrue(match("vipLocked", TemplatesEnum.SERVE_EMU_VIP_LOCKED, 515, 760, 675, 886));
+        assertTrue(match("vipCalendar", TemplatesEnum.SERVE_EMU_VIP_CALENDAR, 568, 285, 690, 403));
+        assertTrue(match("vipSignIn", TemplatesEnum.SERVE_EMU_VIP_SIGNIN, 40, 265, 510, 385));
+        assertFalse(match("arenaTitle", TemplatesEnum.SERVE_EMU_VIP_HUD, 426, 105, 544, 170));
+        assertFalse(match("daily", TemplatesEnum.SERVE_EMU_VIP_LOCKED, 515, 760, 675, 886));
+    }
+
+    @Test void modernHeroRecruitmentRecognizesOnlyFreeActionsAndRewardExit() throws Exception {
+        assertTrue(match("heroRecruitTitle", TemplatesEnum.SERVE_EMU_HERO_RECRUIT_TITLE,
+                390, 130, 710, 315));
+        assertTrue(match("heroEpicFree", TemplatesEnum.SERVE_EMU_HERO_FREE_BUTTON,
+                40, 1150, 350, 1262));
+        assertTrue(match("heroRewardExit", TemplatesEnum.SERVE_EMU_HERO_REWARD_EXIT,
+                190, 1140, 530, 1240));
+        assertFalse(match("heroRecruitTitle", TemplatesEnum.SERVE_EMU_HERO_FREE_BUTTON,
+                40, 1150, 350, 1262));
+        assertFalse(match("arenaTitle", TemplatesEnum.SERVE_EMU_HERO_REWARD_EXIT,
+                190, 1140, 530, 1240));
+    }
+
     private static boolean match(String scene, TemplatesEnum template, int left, int top, int right, int bottom)
             throws Exception {
         BufferedImage image = ImageIO.read(Objects.requireNonNull(
