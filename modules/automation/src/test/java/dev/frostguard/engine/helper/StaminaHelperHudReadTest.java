@@ -2,6 +2,8 @@ package dev.frostguard.engine.helper;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -14,6 +16,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import dev.frostguard.api.domain.RawImageData;
 import dev.frostguard.engine.diagnostics.DiagnosticSnapshotStore;
+import dev.frostguard.engine.error.ADBConnectionException;
 import dev.frostguard.engine.service.StaminaService;
 
 class StaminaHelperHudReadTest {
@@ -106,9 +109,23 @@ class StaminaHelperHudReadTest {
         assertTrue(service.findCurrentStamina(9310L).isEmpty());
     }
 
+    @Test
+    void wrappedAdbFailurePropagatesToSchedulerAfterConfirmedDialog() {
+        RecordingHudUi ui = new RecordingHudUi(null);
+        var adbFailure = new ADBConnectionException("test connection lost");
+        ui.readFailure = new IllegalStateException("OCR transport failed", adbFailure);
+        StaminaHelper helper = new StaminaHelper(StaminaService.getServices(), 9311L, ui);
+
+        assertSame(adbFailure, assertThrows(ADBConnectionException.class,
+                helper::updateStaminaFromHud));
+        assertEquals(List.of("open-hud", "verify-dialog", "read", "cleanup"), ui.events);
+        assertEquals(1, ui.cleanupCount);
+    }
+
     private static final class RecordingHudUi implements StaminaHelper.HudStaminaUi {
         private final Integer reading;
         private boolean failRead;
+        private RuntimeException readFailure;
         private boolean dialogVisible = true;
         private final List<String> events = new ArrayList<>();
         private int dialogOpenCount;
@@ -139,6 +156,7 @@ class StaminaHelperHudReadTest {
             ocrCount++;
             ocrAttempts = attempts;
             ocrRetryMs = retryMs;
+            if (readFailure != null) throw readFailure;
             if (failRead) {
                 throw new IllegalStateException("simulated OCR failure");
             }
