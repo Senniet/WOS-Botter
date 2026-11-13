@@ -275,8 +275,8 @@ public class ScheduleService {
 		}
 		DailyTask record = findDailyRecord(acct.getId(), taskType, customLabel);
 		if (record == null) {
+			// The schema requires a non-null initial timestamp; subsequent failed runs preserve it.
 			record = newDailyRecord(acct, taskType, nextRun, customLabel);
-			record.setPreviousRun(null);
 			applyStaminaDeferral(record, staminaDeferral);
 			dailyTasks.addDailyTask(record);
 			return;

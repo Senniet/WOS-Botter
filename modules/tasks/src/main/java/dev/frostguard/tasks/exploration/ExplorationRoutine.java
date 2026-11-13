@@ -13,6 +13,7 @@ import dev.frostguard.api.domain.OcrSettingsData;
 import java.util.Locale;
 import dev.frostguard.api.domain.SizeData;
 import dev.frostguard.engine.nav.SearchConfigConstants;
+import dev.frostguard.engine.error.TaskOutcomeUnknownException;
 import dev.frostguard.engine.helper.GreenLabelActionDetector;
 import dev.frostguard.engine.helper.RecognitionConsensus;
 import dev.frostguard.vision.convert.ImageConverter;
@@ -40,6 +41,7 @@ public class ExplorationRoutine extends DelayedTask {
                     .withArea(AreaData.of(140, 220, 550, 370)).build();
 
 	private static final int MAX_OPEN_ATTEMPTS = 2;
+    private static final int UNKNOWN_RETRY_MINUTES = 10;
 
 	public ExplorationRoutine(AccountDescriptor profile, TpDailyTaskEnum tpDailyTask) {
 		super(profile, tpDailyTask);
@@ -68,18 +70,20 @@ public class ExplorationRoutine extends DelayedTask {
 			logInfo(routineLogExplorationLine("No confirmed exploration reward claim."));
 		}
 
-		if (opened && (claimedAnyReward || locateDisabledClaimButton().isFound())) {
-			rescheduleFromConfiguredOffset();
-		} else {
-			// A missing button is not proof that a reward was collected or exhausted.
-			// Retry later instead of silently waiting for the normal reward interval.
-			reschedule(LocalDateTime.now().plusMinutes(10));
-		}
+        boolean noRewardAvailable = opened && !claimedAnyReward && locateDisabledClaimButton().isFound();
+        ExplorationClaimOutcome outcome = claimedAnyReward ? ExplorationClaimOutcome.CLAIMED
+                : noRewardAvailable ? ExplorationClaimOutcome.NONE_AVAILABLE
+                : ExplorationClaimOutcome.UNKNOWN;
+        rescheduleFromConfiguredOffset(outcome);
         if (isExplorationMainScreenVisible()) {
             // Verified Exploration page has its own header arrow; don't send
             // Android Back when an unexpected screen is shown instead.
             tapInside(AreaData.of(12, 78, 73, 135));
             sleepTask(300);
+        }
+        if (outcome == ExplorationClaimOutcome.UNKNOWN) {
+            throw new TaskOutcomeUnknownException(
+                    "Exploration reward outcome unverified; scheduled retry instead of reporting task success.");
         }
     }
 
@@ -327,12 +331,16 @@ public class ExplorationRoutine extends DelayedTask {
         sleepTask(750);
 	}
 
-	private void rescheduleFromConfiguredOffset() {
-		Integer minutes = profile.getConfig(ConfigurationKeyEnum.INT_EXPLORATION_CHEST_OFFSET, Integer.class);
-		LocalDateTime nextSchedule = LocalDateTime.now().plusMinutes(minutes);
-		reschedule(nextSchedule);
-		logInfo(routineLogExplorationLine("Next execution scheduled at: "
-				+ nextSchedule.format(DATETIME_FORMATTER) + " (" + minutes + " minutes)."));
-	}
+    private void rescheduleFromConfiguredOffset(ExplorationClaimOutcome outcome) {
+        Integer minutes = profile.getConfig(ConfigurationKeyEnum.INT_EXPLORATION_CHEST_OFFSET, Integer.class);
+        LocalDateTime nextSchedule = ExplorationSchedulePolicy.nextRun(LocalDateTime.now(),
+                minutes == null ? 240 : minutes, UNKNOWN_RETRY_MINUTES, outcome);
+        reschedule(nextSchedule);
+        logInfo(routineLogExplorationLine("Next execution scheduled at: "
+                + nextSchedule.format(DATETIME_FORMATTER) + "; outcome=" + outcome));
+    }
 
+    enum ExplorationClaimOutcome {
+        CLAIMED, NONE_AVAILABLE, UNKNOWN
+    }
 }

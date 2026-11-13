@@ -681,7 +681,7 @@ public class TaskQueue {
         LocalDateTime priorSchedule = task.getScheduled();
         TaskStateData st = recordPreExecution(task);
         long t0 = System.currentTimeMillis();
-        boolean ok;
+        boolean ok = false;
         ExecutionContext ctx = new ExecutionContext(task);
         synchronized (this) {
             runningContext = ctx;
@@ -742,7 +742,7 @@ public class TaskQueue {
             synchronized (this) { if (runningContext != null) runningContext.clear(); runningContext = null; }
             if (!shuttingDown) {
                 handleReschedule(task, priorSchedule);
-                recordPostExecution(task, st);
+                recordPostExecution(task, st, ok);
             }
         }
         return ok;
@@ -821,7 +821,7 @@ public class TaskQueue {
         return s;
     }
 
-    private void recordPostExecution(DelayedTask task, TaskStateData s) {
+    private void recordPostExecution(DelayedTask task, TaskStateData s, boolean executionSucceeded) {
         if (shuttingDown) {
             emitInfo("Skipping state save during shutdown");
             return;
@@ -831,8 +831,14 @@ public class TaskQueue {
         Object k = task.getDistinctKey(); if (k != null) s.setCustomTaskName(k.toString());
         TaskManagementService.shared().recordTaskState(profile.getId(), s);
         if (task.getScheduled() != null) {
-            ScheduleService.obtain().persistDailyCompletion(
-                    profile, task.getTpTask(), task.getScheduled(), s.getCustomTaskName(), task.getStaminaDeferral());
+            // A retry schedule may change after failure, but it must not advance the last successful completion.
+            if (executionSucceeded) {
+                ScheduleService.obtain().persistDailyCompletion(
+                        profile, task.getTpTask(), task.getScheduled(), s.getCustomTaskName(), task.getStaminaDeferral());
+            } else {
+                ScheduleService.obtain().persistScheduleAdjustment(
+                        profile, task.getTpTask(), task.getScheduled(), s.getCustomTaskName(), task.getStaminaDeferral());
+            }
         }
     }
 
