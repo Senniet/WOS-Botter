@@ -55,6 +55,44 @@ class EmulatorInstanceCaptureDiagnosticsTest {
         assertTrue(message.contains("cause=IllegalStateException: pixel payload was incomplete"));
     }
     @Test
+    void transientScreenshotFailureRecapturesExactlyOnceWithoutRepeatingActions() {
+        java.util.concurrent.atomic.AtomicInteger captures = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.atomic.AtomicInteger retryPreparations = new java.util.concurrent.atomic.AtomicInteger();
+        RawImageData fresh = RawImageData.capture(new byte[4], 1, 1, 32);
+        RawImageData observed = EmulatorInstance.retryTransientCapture(() -> {
+            if (captures.incrementAndGet() == 1) {
+                throw new RuntimeException("ADB shell stalled", new java.io.IOException("pipe reset"));
+            }
+            return fresh;
+        }, retryPreparations::incrementAndGet);
+        assertSame(fresh, observed);
+        assertEquals(2, captures.get());
+        assertEquals(1, retryPreparations.get());
+    }
+
+    @Test
+    void repeatedTimeoutStopsAfterOneFreshRetry() {
+        java.util.concurrent.atomic.AtomicInteger captures = new java.util.concurrent.atomic.AtomicInteger();
+        assertThrows(RuntimeException.class, () -> EmulatorInstance.retryTransientCapture(() -> {
+            captures.incrementAndGet();
+            throw new RuntimeException(new java.io.IOException("connection lost"));
+        }, () -> {}));
+        assertEquals(2, captures.get());
+    }
+
+    @Test
+    void malformedScreenshotDoesNotRetryOrReuseStaleFrame() {
+        java.util.concurrent.atomic.AtomicInteger captures = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.atomic.AtomicInteger prepares = new java.util.concurrent.atomic.AtomicInteger();
+        assertThrows(IllegalArgumentException.class, () -> EmulatorInstance.retryTransientCapture(() -> {
+            captures.incrementAndGet();
+            throw new IllegalArgumentException("Malformed screenshot payload");
+        }, prepares::incrementAndGet));
+        assertEquals(1, captures.get());
+        assertEquals(0, prepares.get());
+    }
+
+    @Test
     void decodesRgbaScreenshotWithExactPayload() {
         byte[] payload = new byte[12 + 2 * 2 * 4];
         putInt(payload, 0, 2);
