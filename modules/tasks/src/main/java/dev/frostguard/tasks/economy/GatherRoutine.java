@@ -675,7 +675,10 @@ public class GatherRoutine extends DelayedTask {
                 }
                 setOnlyFullResourcesSearch(onlyFullResources);
                 if (!executeSearch()) {
-                    return retryLater(GatherDeployResult.BLOCKED);
+                    // A search with no confirmed Gather target is a missing node,
+                    // not proof that a march was launched or the UI was navigated.
+                    result = GatherDeployResult.NO_NODE_FOUND;
+                    break;
                 }
 
                 result = deployMarchAction(type, level);
@@ -785,8 +788,18 @@ public class GatherRoutine extends DelayedTask {
 
     private boolean executeSearch() {
         tapInside(SEARCH_EXEC_TL, SEARCH_EXEC_BR);
-        sleepTask(3000);
-        return true;
+        sleepTask(1500);
+        // Do not treat the Search tap alone as a located resource. The actual
+        // Lv.1 Meat panel keeps the resource-search sidebar open, but adds a
+        // visible Gather action in the node modal. Absence is a bounded
+        // no-node result and can use the existing lower-level fallback.
+        for (int attempt = 0; attempt < 2; attempt++) {
+            if (locateGatherButton().isFound()) return true;
+            if (attempt == 0) sleepTask(650);
+        }
+        logWarning("Gather search did not produce a verified Gather action; "
+                + "not proceeding to formation or deployment");
+        return false;
     }
 
     private GatherDeployResult deployMarchAction(GatherType type, int level) {
