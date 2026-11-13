@@ -85,7 +85,8 @@ private ImageSearchResultData awaitIntelAction(TemplatesEnum primary, SearchConf
     long started = System.nanoTime();
     long deadline = started + timeoutMillis * 1_000_000L;
     do {
-        ImageSearchResultData ready = templateSearchHelper.locateAction(primary, config);
+        ImageSearchResultData ready = templateSearchHelper.locateAction(
+                primary, config, legacyVariants);
         if (ready.isFound()) {
             logDebug(routineLogIntelligenceLine(primary + " ready after "
                     + ((System.nanoTime() - started) / 1_000_000L) + " ms"));
