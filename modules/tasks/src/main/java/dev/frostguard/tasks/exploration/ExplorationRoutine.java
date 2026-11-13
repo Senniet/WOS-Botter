@@ -87,8 +87,12 @@ public class ExplorationRoutine extends DelayedTask {
 		return "ExplorationRoutine | " + note;
 	}
 
-	private boolean openExplorationScreen() {
-		for (int attempt = 1; attempt <= MAX_OPEN_ATTEMPTS; attempt++) {
+    private boolean openExplorationScreen() {
+        // A previously opened Exploration/Idle Income page is already the
+        // destination. Re-tapping the bottom-left HUD position on that page
+        // can hit another action and corrupt the pending claim.
+        if (isExplorationMainScreenVisible() || idleIncomeVisible()) return true;
+        for (int attempt = 1; attempt <= MAX_OPEN_ATTEMPTS; attempt++) {
 			tapInside(EXPLORATION_ENTRY_TOP_LEFT, EXPLORATION_ENTRY_BOTTOM_RIGHT);
 			sleepTask(1000);
 
