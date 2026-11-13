@@ -115,13 +115,13 @@ private ImageSearchResultData awaitIntelAction(TemplatesEnum primary, SearchConf
     return ImageSearchResultData.miss();
 }
 
-// After tapping a command, proceed as soon as its modal button disappears.
-// Wait at most briefly for the click animation; do not tap the button twice.
-// Check all known renderings of the same button before confirming an
-// acknowledged tap. One missing template alone is not a state transition.
+// Treat disappearance as acknowledgement only after two consecutive complete
+// observations, separated by a settled frame. A one-frame animation or a
+// legacy label must not be mistaken for a successful Rescue/Explore tap.
 private boolean awaitIntelActionAcknowledged(TemplatesEnum action, SearchConfig config,
         long timeoutMillis, TemplatesEnum... alternatives) {
     long deadline = System.nanoTime() + timeoutMillis * 1_000_000L;
+    IntelActionAcknowledgementPolicy observations = new IntelActionAcknowledgementPolicy();
     do {
         boolean stillPresent = templateSearchHelper.locatePattern(action, config).isFound();
         if (!stillPresent && alternatives != null) {
@@ -132,7 +132,7 @@ private boolean awaitIntelActionAcknowledged(TemplatesEnum action, SearchConfig 
                 }
             }
         }
-        if (!stillPresent) return true;
+        if (observations.record(!stillPresent)) return true;
         if (System.nanoTime() >= deadline) return false;
         sleepTask(160);
     } while (true);
@@ -1314,7 +1314,8 @@ private void handleSurvivorExclusive(ImageSearchResultData result) {
         // Never count a Rescue unless the action has visibly left its modal.
         if (!awaitIntelActionAcknowledged(TemplatesEnum.INTEL_RESCUE_BUTTON_MODERN,
                 INTEL_SURVIVOR_ACTION_SEARCH, 1700,
-                TemplatesEnum.SERVE_EMU_INTEL_SURVIVOR_RESCUE)) {
+                TemplatesEnum.SERVE_EMU_INTEL_SURVIVOR_RESCUE,
+                TemplatesEnum.INTEL_RESCUE)) {
             deferIntelMissingAction("Survivor", "Rescue tap not acknowledged", "survivor-rescue-still-visible");
             return;
         }
@@ -1354,7 +1355,8 @@ private void handleJourneyExclusive(ImageSearchResultData result) {
         tapInside(explore);
         if (!awaitIntelActionAcknowledged(TemplatesEnum.INTEL_EXPLORE_BUTTON_MODERN,
                 INTEL_JOURNEY_ACTION_SEARCH, 1700,
-                TemplatesEnum.SERVE_EMU_INTEL_JOURNEY_EXPLORE)) {
+                TemplatesEnum.SERVE_EMU_INTEL_JOURNEY_EXPLORE,
+                TemplatesEnum.INTEL_EXPLORE)) {
             deferIntelMissingAction("Journey", "Explore tap not acknowledged", "journey-explore-still-visible");
             return;
         }
