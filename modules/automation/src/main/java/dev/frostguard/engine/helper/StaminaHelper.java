@@ -46,6 +46,7 @@ public class StaminaHelper {
 
     interface HudStaminaUi {
         void openStaminaDialog(int settleMs) throws Exception;
+        boolean isStaminaDialogVisible() throws Exception;
         Integer readStamina(int attempts, long retryMs) throws Exception;
         void cleanup() throws Exception;
     }
@@ -72,6 +73,22 @@ public class StaminaHelper {
             @Override
             public void openStaminaDialog(int settleMs) {
                 taps.tapInside(CommonGameAreas.HUD_STAMINA_ENTRY, 1, settleMs);
+            }
+
+            @Override
+            public boolean isStaminaDialogVisible() {
+                var first = device.locatePattern(deviceSlot,
+                        device.captureScreen(deviceSlot), TemplatesEnum.SERVE_EMU_STAMINA_TITLE,
+                        new dev.frostguard.api.domain.PointData(100, 105),
+                        new dev.frostguard.api.domain.PointData(650, 310), 90);
+                if (!first.isFound()) return false;
+                try { Thread.sleep(150); }
+                catch (InterruptedException e) { Thread.currentThread().interrupt(); return false; }
+                var second = device.locatePattern(deviceSlot,
+                        device.captureScreen(deviceSlot), TemplatesEnum.SERVE_EMU_STAMINA_TITLE,
+                        new dev.frostguard.api.domain.PointData(100, 105),
+                        new dev.frostguard.api.domain.PointData(650, 310), 90);
+                return RecognitionConsensus.agrees(first, second, 18);
             }
 
             @Override
@@ -123,9 +140,16 @@ public class StaminaHelper {
         }
         emitDebug("Opening HUD stamina dialog");
         long startMs = System.currentTimeMillis();
+        boolean dialogVerified = false;
 
         try {
             hudStaminaUi.openStaminaDialog(STAMINA_DIALOG_SETTLE_MS);
+            dialogVerified = hudStaminaUi.isStaminaDialogVisible();
+            if (!dialogVerified) {
+                emitWarn("Stamina dialog was not confirmed after HUD tap; "
+                        + "skipping OCR and blind Back; " + retainStaminaOcrFailureSnapshot());
+                return;
+            }
 
             Integer reading = hudStaminaUi.readStamina(STAMINA_OCR_ATTEMPTS, STAMINA_OCR_RETRY_MS);
 
@@ -140,11 +164,14 @@ public class StaminaHelper {
         } catch (Exception ex) {
             emitWarn("Stamina update error: " + ex.getMessage());
         } finally {
-            // Safety navigation back
-            try {
-                hudStaminaUi.cleanup();
-            } catch (Exception ex) {
-                emitDebug("Press-back cleanup error: " + ex.getMessage());
+            // An unexpected screen might be Chief Profile or a mission page.
+            // Only close a positively identified Obtain-more dialog here.
+            if (dialogVerified) {
+                try {
+                    hudStaminaUi.cleanup();
+                } catch (Exception ex) {
+                    emitDebug("Stamina dialog cleanup error: " + ex.getMessage());
+                }
             }
         }
     }
