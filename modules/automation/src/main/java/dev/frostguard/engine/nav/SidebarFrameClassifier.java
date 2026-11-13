@@ -25,29 +25,34 @@ public final class SidebarFrameClassifier {
             return Optional.empty();
         }
 
+        Optional<SidebarSection> classic = pickSelected(frame, false);
+        return classic.isPresent() ? classic : pickSelected(frame, true);
+    }
+
+    private static Optional<SidebarSection> pickSelected(BufferedImage frame, boolean currentLayout) {
         Map<SidebarSection, Double> scores = new EnumMap<>(SidebarSection.class);
         for (SidebarSection section : SidebarSection.values()) {
-            scores.put(section, meanBrightness(frame, CommonGameAreas.sidebarTabSample(section)));
+            AreaData area = currentLayout
+                    ? CommonGameAreas.sidebarTabSampleCurrent(section)
+                    : CommonGameAreas.sidebarTabSample(section);
+            scores.put(section, meanBrightness(frame, area));
         }
 
         SidebarSection selected = null;
         double best = Double.NEGATIVE_INFINITY;
         double second = Double.NEGATIVE_INFINITY;
         for (Map.Entry<SidebarSection, Double> entry : scores.entrySet()) {
-            double score = entry.getValue();
-            if (score > best) {
+            if (entry.getValue() > best) {
                 second = best;
-                best = score;
+                best = entry.getValue();
                 selected = entry.getKey();
-            } else if (score > second) {
-                second = score;
+            } else if (entry.getValue() > second) {
+                second = entry.getValue();
             }
         }
-
-        if (selected == null || best < MIN_SELECTED_BRIGHTNESS || best - second < MIN_SELECTED_MARGIN) {
-            return Optional.empty();
-        }
-        return Optional.of(selected);
+        return selected != null && best >= MIN_SELECTED_BRIGHTNESS
+                && best - second >= MIN_SELECTED_MARGIN
+                ? Optional.of(selected) : Optional.empty();
     }
 
     private static boolean hasPanelAnchor(BufferedImage frame) {

@@ -622,10 +622,10 @@ public class NavigationHelper {
                 throw new ProfileInReconnectStateException(accountName + " in reconnect state");
             }
 
-            boolean atHome = searcher.locatePattern(TemplatesEnum.GAME_HOME_FURNACE,
-                    SearchConfigConstants.DEFAULT_SINGLE).isFound();
-            boolean atWorld = !atHome && searcher.locatePattern(TemplatesEnum.GAME_HOME_WORLD,
-                    SearchConfigConstants.DEFAULT_SINGLE).isFound();
+            ImageSearchResultData cityButton = findHomeAnchor();
+            boolean atHome = cityButton.isFound();
+            ImageSearchResultData worldButton = atHome ? ImageSearchResultData.miss() : findWorldAnchor();
+            boolean atWorld = worldButton.isFound();
 
             checkpoint.run();
             // check if already at desired location
@@ -635,24 +635,18 @@ public class NavigationHelper {
 
             // try to navigate to desired location
             if (target == LaunchPoint.HOME && atWorld) {
-                ImageSearchResultData w = searcher.locatePattern(TemplatesEnum.GAME_HOME_WORLD,
-                        SearchConfigConstants.DEFAULT_SINGLE);
-                if (w.isFound() && isStableScreenAnchorFlow(TemplatesEnum.GAME_HOME_WORLD)) {
+                if (stableHomeWorldAnchor(worldButton, false)) {
                     checkpoint.run();
-                    taps.tapInside(w);
-                    interruptibleWait(2000);
-                    if (searcher.locatePattern(TemplatesEnum.GAME_HOME_FURNACE,
-                            SearchConfigConstants.DEFAULT_SINGLE).isFound()) return target;
+                    taps.tapInside(worldButton);
+                    interruptibleWait(700);
+                    if (findHomeAnchor().isFound()) return target;
                 }
             } else if (target == LaunchPoint.WORLD && atHome) {
-                ImageSearchResultData h = searcher.locatePattern(TemplatesEnum.GAME_HOME_FURNACE,
-                        SearchConfigConstants.DEFAULT_SINGLE);
-                if (h.isFound() && isStableScreenAnchorFlow(TemplatesEnum.GAME_HOME_FURNACE)) {
+                if (stableHomeWorldAnchor(cityButton, true)) {
                     checkpoint.run();
-                    taps.tapInside(h);
-                    interruptibleWait(2000);
-                    if (searcher.locatePattern(TemplatesEnum.GAME_HOME_WORLD,
-                            SearchConfigConstants.DEFAULT_SINGLE).isFound()) return target;
+                    taps.tapInside(cityButton);
+                    interruptibleWait(700);
+                    if (findWorldAnchor().isFound()) return target;
                 }
             }
 
@@ -666,7 +660,11 @@ public class NavigationHelper {
                         || searcher.locateAction(TemplatesEnum.SHARED_REWARDS_BANNER,
                             TemplateSearchHelper.SearchConfig.builder()
                                     .withMaxAttempts(1).withThreshold(85)
-                                    .withArea(AreaData.of(30, 245, 690, 400)).build()).isFound())) {
+                                    .withArea(AreaData.of(30, 245, 690, 400)).build()).isFound()
+                        || searcher.locateAction(TemplatesEnum.SERVE_EMU_REWARDS_BANNER,
+                            TemplateSearchHelper.SearchConfig.builder()
+                                    .withMaxAttempts(1).withThreshold(90)
+                                    .withArea(AreaData.of(235, 285, 495, 425)).build()).isFound())) {
                 broadcastDebug("Recognised Rewards overlay; dismissing with one verified tap");
                 checkpoint.run();
                 taps.tapInside(AreaData.of(340, 1125, 385, 1185));
@@ -700,10 +698,8 @@ public class NavigationHelper {
             // Never send a blind Android Back: it brings up Quit game? when
             // world detection is briefly unavailable. Use the verified visible
             // header arrow instead, and check location again after it closes a page.
-            var back = searcher.locatePattern(TemplatesEnum.GAME_HEADER_BACK_ARROW_CURRENT,
-                    TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
-                            .withThreshold(91).withArea(AreaData.of(0, 0, 110, 105)).build());
-            if (!back.isFound() || !isStableScreenAnchorFlow(TemplatesEnum.GAME_HEADER_BACK_ARROW_CURRENT)) {
+            var back = findVerifiedBackArrow();
+            if (!back.isFound()) {
                 throw new HomeNotFoundException("Unknown location; no verified screen back arrow; "
                         + "refusing blind Android Back to protect against Quit game dialog");
             }
@@ -716,10 +712,49 @@ public class NavigationHelper {
         throw new HomeNotFoundException("Home not found after " + budget + " verified recovery attempts");
     }
 
-    // Require one immediate re-check before tapping a home/world anchor to reduce transient mis-taps.
-    private boolean isStableScreenAnchorFlow(TemplatesEnum anchorTemplate) {
-        interruptibleWait(120);
-        return searcher.locatePattern(anchorTemplate, SearchConfigConstants.DEFAULT_SINGLE).isFound();
+    private ImageSearchResultData findVerifiedBackArrow() {
+        var oldConfig = TemplateSearchHelper.SearchConfig.builder()
+                .withMaxAttempts(1).withThreshold(91)
+                .withArea(AreaData.of(0, 0, 110, 105)).build();
+        var currentConfig = TemplateSearchHelper.SearchConfig.builder()
+                .withMaxAttempts(1).withThreshold(90)
+                .withArea(AreaData.of(0, 65, 110, 155)).build();
+        var first = searcher.locatePattern(TemplatesEnum.GAME_HEADER_BACK_ARROW_CURRENT, oldConfig);
+        if (first.isFound()) {
+            interruptibleWait(120);
+            var next = searcher.locatePattern(TemplatesEnum.GAME_HEADER_BACK_ARROW_CURRENT, oldConfig);
+            if (RecognitionConsensus.agrees(first, next, 12)) return next;
+        }
+        first = searcher.locatePattern(TemplatesEnum.SERVE_EMU_HEADER_BACK, currentConfig);
+        if (first.isFound()) {
+            interruptibleWait(120);
+            var next = searcher.locatePattern(TemplatesEnum.SERVE_EMU_HEADER_BACK, currentConfig);
+            if (RecognitionConsensus.agrees(first, next, 12)) return next;
+        }
+        return ImageSearchResultData.miss();
+    }
+
+    private ImageSearchResultData findHomeAnchor() {
+        var config = TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
+                .withThreshold(90).withArea(AreaData.of(590, 1145, 715, 1275)).build();
+        var current = searcher.locatePattern(TemplatesEnum.SERVE_EMU_CITY_ANCHOR, config);
+        if (current.isFound()) return current;
+        return searcher.locatePattern(TemplatesEnum.GAME_HOME_FURNACE, config);
+    }
+
+    private ImageSearchResultData findWorldAnchor() {
+        var config = TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
+                .withThreshold(90).withArea(AreaData.of(590, 1145, 715, 1275)).build();
+        var current = searcher.locatePattern(TemplatesEnum.SERVE_EMU_WORLD_ANCHOR, config);
+        if (current.isFound()) return current;
+        return searcher.locatePattern(TemplatesEnum.GAME_HOME_WORLD, config);
+    }
+
+    private boolean stableHomeWorldAnchor(ImageSearchResultData before, boolean atHome) {
+        if (before == null || !before.isFound()) return false;
+        interruptibleWait(130);
+        var after = atHome ? findHomeAnchor() : findWorldAnchor();
+        return RecognitionConsensus.agrees(before, after, 14);
     }
 
     // ── logging shortcuts ────────────────────────────────────────────

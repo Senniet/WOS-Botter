@@ -30,6 +30,59 @@ class ServeEmuTitleRecognitionTest {
         assertFalse(match("daily", TemplatesEnum.SERVE_EMU_IDLE_INCOME_TITLE, 235, 275, 555, 385));
     }
 
+    @Test void homeAndWorldAnchorsHaveIndependentMatches() throws Exception {
+        assertTrue(match("city-anchor", TemplatesEnum.SERVE_EMU_CITY_ANCHOR,
+                590, 1145, 715, 1275));
+        assertFalse(match("city-anchor", TemplatesEnum.SERVE_EMU_WORLD_ANCHOR,
+                590, 1145, 715, 1275));
+        assertTrue(match("world-anchor", TemplatesEnum.SERVE_EMU_WORLD_ANCHOR,
+                590, 1145, 715, 1275));
+        assertFalse(match("world-anchor", TemplatesEnum.SERVE_EMU_CITY_ANCHOR,
+                590, 1145, 715, 1275));
+    }
+
+    @Test void rewardsOverlayIsNotConfusedWithExplorationPage() throws Exception {
+        assertTrue(match("rewards", TemplatesEnum.SERVE_EMU_REWARDS_BANNER,
+                235, 285, 495, 425));
+        assertFalse(match("exploration", TemplatesEnum.SERVE_EMU_REWARDS_BANNER,
+                235, 285, 495, 425));
+    }
+
+    @Test void currentMailHeaderAndClaimFooterAreScreenScoped() throws Exception {
+        assertTrue(match("mailTitle", TemplatesEnum.SERVE_EMU_MAIL_TITLE, 75, 75, 210, 150));
+        assertFalse(match("daily", TemplatesEnum.SERVE_EMU_MAIL_TITLE, 75, 75, 210, 150));
+        assertTrue(match("mailReadClaim", TemplatesEnum.SERVE_EMU_MAIL_READ_CLAIM,
+                390, 1180, 720, 1279));
+        assertFalse(match("exploration", TemplatesEnum.SERVE_EMU_MAIL_READ_CLAIM,
+                390, 1180, 720, 1279));
+    }
+
+    @Test void currentDailyTabOnChapterPageIsRecognizedOnlyAtFooter() throws Exception {
+        assertTrue(match("dailyTabButton", TemplatesEnum.SERVE_EMU_DAILY_TAB_BUTTON,
+                300, 1050, 720, 1240));
+        assertFalse(match("exploration", TemplatesEnum.SERVE_EMU_DAILY_TAB_BUTTON,
+                300, 1050, 720, 1240));
+    }
+
+    @Test void obtainMoreHeaderAndPremiumBuyControlAreRecognizedSafely() throws Exception {
+        assertTrue(match("stamina-premium", TemplatesEnum.SERVE_EMU_STAMINA_TITLE,
+                250, 130, 490, 220));
+        assertTrue(match("stamina-premium", TemplatesEnum.SERVE_EMU_PREMIUM_BUY,
+                470, 490, 700, 640));
+        assertFalse(match("mailTitle", TemplatesEnum.SERVE_EMU_PREMIUM_BUY,
+                470, 490, 700, 640));
+    }
+
+    @Test void currentHeaderBackIsRecognizedWithoutFalseRootMatch() throws Exception {
+        assertTrue(match("headerBack", TemplatesEnum.SERVE_EMU_HEADER_BACK, 0, 65, 110, 155));
+        assertFalse(match("daily", TemplatesEnum.SERVE_EMU_HEADER_BACK, 0, 65, 110, 155));
+    }
+
+    @Test void currentMailUnreadMarkersCanBeFoundInRightColumn() throws Exception {
+        assertTrue(match("mail-markers", TemplatesEnum.MAIL_UNCLAIMED_REWARDS,
+                625, 175, 715, 1160));
+    }
+
     private static boolean match(String scene, TemplatesEnum template, int left, int top, int right, int bottom)
             throws Exception {
         BufferedImage image = ImageIO.read(Objects.requireNonNull(

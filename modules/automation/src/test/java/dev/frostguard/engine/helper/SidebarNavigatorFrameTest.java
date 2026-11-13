@@ -63,8 +63,8 @@ class SidebarNavigatorFrameTest {
     }
 
     @Test
-    void waitsTwoSecondsAfterEverySidebarScanSwipe() {
-        assertEquals(2_000, SidebarNavigator.SCROLL_SETTLE_MS);
+    void usesShortSettleAndVisualChecksAfterSidebarScanSwipe() {
+        assertEquals(450, SidebarNavigator.SCROLL_SETTLE_MS);
     }
 
     @Test

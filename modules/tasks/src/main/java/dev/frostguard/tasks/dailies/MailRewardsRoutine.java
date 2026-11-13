@@ -41,9 +41,9 @@ private static final PointData MAIL_MENU_SEARCH_TOP_LEFT_VALUE = new PointData(6
 
 private static final PointData MAIL_MENU_SEARCH_BOTTOM_RIGHT_VALUE = new PointData(715, 1100);
 
-private static final PointData MAIL_MENU_OPEN_TOP_LEFT_VALUE = new PointData(75, 10);
+private static final PointData MAIL_MENU_OPEN_TOP_LEFT_VALUE = new PointData(70, 70);
 
-private static final PointData MAIL_MENU_OPEN_BOTTOM_RIGHT_VALUE = new PointData(175, 60);
+private static final PointData MAIL_MENU_OPEN_BOTTOM_RIGHT_VALUE = new PointData(195, 145);
 
 private static final PointData MAIL_LIST_INDICATORS_TOP_LEFT_VALUE = new PointData(625, 175);
 
@@ -63,11 +63,11 @@ private static final int CLAIM_BUTTON_TAP_DELAY_MS = 500;
 
 private static final int UNREAD_REPORT_OPEN_DELAY_MS = 500;
 
-private static final PointData TAB_ALLIANCE_VALUE = new PointData(230, 120);
+private static final PointData TAB_ALLIANCE_VALUE = new PointData(230, 185);
 
-private static final PointData TAB_SYSTEM_VALUE = new PointData(360, 120);
+private static final PointData TAB_SYSTEM_VALUE = new PointData(360, 185);
 
-private static final PointData TAB_REPORTS_VALUE = new PointData(500, 120);
+private static final PointData TAB_REPORTS_VALUE = new PointData(500, 185);
 
 private static final PointData[] MAIL_TAB_BUTTONS = { TAB_ALLIANCE_VALUE, TAB_SYSTEM_VALUE, TAB_REPORTS_VALUE };
 
@@ -122,14 +122,30 @@ private LocalDateTime computeNextExecutionTime() {
         return proposedTime.isAfter(gameResetTime) ? gameResetTime : proposedTime;
     }
 
-private void redeemAllVisibleRewards() {
-        logInfo(routineLogMailRewardsLine("Collecting rewards in current tab."));
-        tapInside(
-                CLAIM_BUTTON_TOP_LEFT_VALUE,
-                CLAIM_BUTTON_BOTTOM_RIGHT_VALUE,
-                CLAIM_BUTTON_TAP_COUNT_VALUE,
-                CLAIM_BUTTON_TAP_DELAY_MS);
-        sleepTask(500);
+private boolean redeemAllVisibleRewards() {
+        if (!confirmMailMenuOpened()) {
+            logWarning(routineLogMailRewardsLine("Mail title absent; refusing unverified footer action"));
+            return false;
+        }
+        var claimRegion = SearchConfig.builder().withMaxAttempts(1).withThreshold(92)
+                .withArea(new AreaData(new PointData(390, 1180), new PointData(720, 1279))).build();
+        ImageSearchResultData before = templateSearchHelper.locatePattern(
+                TemplatesEnum.SERVE_EMU_MAIL_READ_CLAIM, claimRegion);
+        if (!before.isFound()) {
+            logWarning(routineLogMailRewardsLine("Read & Claim All control unverified; no blind footer taps"));
+            return false;
+        }
+        sleepTask(150);
+        ImageSearchResultData after = templateSearchHelper.locatePattern(
+                TemplatesEnum.SERVE_EMU_MAIL_READ_CLAIM, claimRegion);
+        if (!dev.frostguard.engine.helper.RecognitionConsensus.agrees(before, after, 12)) {
+            logWarning(routineLogMailRewardsLine("Mail claim action unstable between frames"));
+            return false;
+        }
+        logInfo(routineLogMailRewardsLine("Read & Claim All confirmed; tapping once"));
+        tapInside(after);
+        sleepTask(300);
+        return true;
     }
 
 private Evidence findUnreadMailEvidence() {
@@ -149,8 +165,14 @@ private Evidence findUnreadMailEvidence() {
 
 private MailClaimResult claimMailRewards(String tabName) {
         Evidence before = findUnreadMailEvidence();
+        if (before.isEmpty()) {
+            logDebug(routineLogMailRewardsLine(tabName + ": no unclaimed mail markers; no footer tap needed"));
+            return new MailClaimResult(before, Decision.COMPLETE);
+        }
         for (int completedPasses = 1; completedPasses <= MAX_MAIL_CLAIM_PASSES; completedPasses++) {
-            redeemAllVisibleRewards();
+            if (!redeemAllVisibleRewards()) {
+                return new MailClaimResult(before, Decision.STOP_NO_PROGRESS);
+            }
             Evidence after = findUnreadMailEvidence();
             Decision decision = MailClaimPassPolicy.decide(
                     before, after, completedPasses, MAX_MAIL_CLAIM_PASSES);
@@ -251,8 +273,14 @@ private boolean confirmMailMenuOpened() {
                         .build());
 
         if (!inMailMenu.isFound()) {
-            logError(routineLogMailRewardsLine("Mail menu did not open successfully."));
-            return false;
+            inMailMenu = templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_MAIL_TITLE,
+                    SearchConfig.builder().withMaxAttempts(2).withDelay(120).withThreshold(90)
+                            .withArea(new AreaData(new PointData(75, 75),
+                                    new PointData(210, 150))).build());
+            if (!inMailMenu.isFound()) {
+                logError(routineLogMailRewardsLine("Mail menu title unrecognized; refusing actions"));
+                return false;
+            }
         }
 
         logDebug(routineLogMailRewardsLine("Mail menu opened finished cleanly."));
@@ -287,13 +315,31 @@ private void switchToTabFlow(PointData tabButton) {
 
 private void dismissMailMenu() {
         logDebug(routineLogMailRewardsLine("Closing mail menu."));
-        pressBack();
-        sleepTask(500);
+        if (isCurrentMailMenuVisible()) {
+            // The 2026 UI exposes an explicit X. Android Back is unsafe on
+            // a World map (it can open the Quit game confirmation).
+            tapInside(new PointData(661, 83), new PointData(708, 136));
+            sleepTask(250);
+            return;
+        }
+        // Preserve legacy close behaviour only when its old mail header is present.
+        if (templateSearchHelper.locatePattern(TemplatesEnum.MAIL_MENU_OPEN,
+                SearchConfig.builder().withMaxAttempts(1)
+                        .withArea(new AreaData(MAIL_MENU_OPEN_TOP_LEFT_VALUE,
+                                MAIL_MENU_OPEN_BOTTOM_RIGHT_VALUE)).build()).isFound()) {
+            pressBack();
+        }
+    }
 
+private boolean isCurrentMailMenuVisible() {
+        return templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_MAIL_TITLE,
+                SearchConfig.builder().withMaxAttempts(1).withThreshold(90)
+                        .withArea(AreaData.of(75, 75, 210, 150)).build()).isFound();
     }
 
 private boolean openUpMailMenu() {
         logInfo(routineLogMailRewardsLine("Entering mail menu."));
+        if (isCurrentMailMenuVisible()) return true;
 
         ImageSearchResultData mailMenu = templateSearchHelper.locatePattern(
                 TemplatesEnum.MAIL_MENU,

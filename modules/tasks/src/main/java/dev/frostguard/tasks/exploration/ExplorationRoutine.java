@@ -73,9 +73,13 @@ public class ExplorationRoutine extends DelayedTask {
 			// Retry later instead of silently waiting for the normal reward interval.
 			reschedule(LocalDateTime.now().plusMinutes(10));
 		}
-		pressBack();
-		sleepTask(500);
-	}
+        if (isExplorationMainScreenVisible()) {
+            // Verified Exploration page has its own header arrow; don't send
+            // Android Back when an unexpected screen is shown instead.
+            tapInside(AreaData.of(12, 78, 73, 135));
+            sleepTask(300);
+        }
+    }
 
 	private String routineLogExplorationLine(String note) {
 		return "ExplorationRoutine | " + note;
@@ -270,10 +274,14 @@ public class ExplorationRoutine extends DelayedTask {
                 dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig.builder()
                         .withMaxAttempts(1).withThreshold(92)
                         .withArea(AreaData.of(50, 245, 670, 400)).build()).isFound()) return true;
-        return templateSearchHelper.locatePattern(TemplatesEnum.SHARED_REWARDS_BANNER,
+        if (templateSearchHelper.locatePattern(TemplatesEnum.SHARED_REWARDS_BANNER,
                 dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig.builder()
                         .withMaxAttempts(1).withThreshold(85)
-                        .withArea(AreaData.of(30, 245, 690, 400)).build()).isFound();
+                        .withArea(AreaData.of(30, 245, 690, 400)).build()).isFound()) return true;
+        return templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_REWARDS_BANNER,
+                dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig.builder()
+                        .withMaxAttempts(2).withDelay(120).withThreshold(90)
+                        .withArea(AreaData.of(235, 285, 495, 425)).build()).isFound();
     }
 
     private boolean rewardOverlayAppeared() {

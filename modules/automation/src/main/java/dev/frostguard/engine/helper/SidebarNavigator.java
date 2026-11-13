@@ -33,12 +33,12 @@ public final class SidebarNavigator {
     static final int TRANSITION_POLL_MS = 200;
     static final int TRANSITION_POLL_CHECKS = 9;
     static final int MAX_TRIGGER_TAPS = 2;
-    static final int SIDEBAR_OPEN_SETTLE_MS = 2_000;
-    static final int SCROLL_SETTLE_MS = 2_000;
+    static final int SIDEBAR_OPEN_SETTLE_MS = 500;
+    static final int SCROLL_SETTLE_MS = 450;
     static final int SCROLL_DISTANCE_PX = 120;
     private static final int SCROLL_DURATION_MS = 500;
     private static final int MAX_BOUNDARY_STEPS = 10;
-    private static final int DESTINATION_SETTLE_MS = 2_000;
+    private static final int DESTINATION_SETTLE_MS = 700;
     private static final int ROW_ICON_THRESHOLD = 88;
     private static final int ROW_ACTION_THRESHOLD = 88;
     private static final int GO_LEFT_OFFSET = 315;
@@ -317,7 +317,12 @@ public final class SidebarNavigator {
 
     private boolean isRootScreen(RawImageData frame) {
         double threshold = SearchConfigConstants.DEFAULT_SINGLE.getThreshold();
-        return emu.locatePattern(device, frame, TemplatesEnum.GAME_HOME_FURNACE, threshold).isFound()
+        AreaData lowerRight = AreaData.of(590, 1145, 715, 1275);
+        return emu.locatePattern(device, frame, TemplatesEnum.SERVE_EMU_CITY_ANCHOR,
+                    lowerRight.topLeft(), lowerRight.bottomRight(), 90).isFound()
+                || emu.locatePattern(device, frame, TemplatesEnum.SERVE_EMU_WORLD_ANCHOR,
+                    lowerRight.topLeft(), lowerRight.bottomRight(), 90).isFound()
+                || emu.locatePattern(device, frame, TemplatesEnum.GAME_HOME_FURNACE, threshold).isFound()
                 || emu.locatePattern(device, frame, TemplatesEnum.GAME_HOME_WORLD, threshold).isFound();
     }
 

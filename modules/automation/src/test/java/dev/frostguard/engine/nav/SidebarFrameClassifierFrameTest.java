@@ -29,6 +29,14 @@ class SidebarFrameClassifierFrameTest {
     }
 
     @Test
+    void detectsDailyTabFromActualServeEmuSidebarWithoutPersonalScreenContent() throws IOException {
+        try (InputStream stream = getClass().getResourceAsStream("/serveemu/sidebar-daily-masked.png")) {
+            assertEquals(SidebarSection.DAILY,
+                    SidebarFrameClassifier.selectedSection(ImageIO.read(stream)).orElseThrow());
+        }
+    }
+
+    @Test
     void rejectsFramesThatCannotContainTheSidebarTabs() {
         assertTrue(SidebarFrameClassifier.selectedSection(new BufferedImage(100, 100,
                 BufferedImage.TYPE_INT_RGB)).isEmpty());

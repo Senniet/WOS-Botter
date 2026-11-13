@@ -101,9 +101,10 @@ private boolean switchToDailyMissionsTabFlow() {
 			return true;
 		}
 
-		ImageSearchResultData dailyTabButton = templateSearchHelper.locatePattern(
-				TemplatesEnum.DAILY_MISSION_DAILY_TAB_BUTTON,
-				DAILY_TAB_BUTTON_SEARCH);
+        ImageSearchResultData dailyTabButton = templateSearchHelper.locateAction(
+                TemplatesEnum.DAILY_MISSION_DAILY_TAB_BUTTON,
+                DAILY_TAB_BUTTON_SEARCH,
+                TemplatesEnum.SERVE_EMU_DAILY_TAB_BUTTON);
 
 		if (!dailyTabButton.isFound()) {
 			logWarning(routineLogDailyMissionLine("Daily tab button not detected. Skipping claims; "
@@ -271,8 +272,10 @@ private ImageSearchResultData seekForClaimAllButton() {
 private void reachDailyMissions() {
 		logInfo(routineLogDailyMissionLine("Moving to daily missions interface"));
 
-		tapNear(DAILY_MISSIONS_BUTTON_VALUE);
-		sleepTask(3000);
+        if (currentDailyTitle().isFound()) return;
+        tapNear(DAILY_MISSIONS_BUTTON_VALUE);
+        // The next step verifies the title/tab, so a long fixed pause is unnecessary.
+        sleepTask(450);
 
 	}
 
