@@ -86,6 +86,9 @@ public class FXApp extends Application {
     private void configureStage(Stage stage, Scene scene) {
         stage.initStyle(StageStyle.UNDECORATED);
         stage.setScene(scene);
+        // The custom chrome keeps native Windows resizing and the JavaFX edge
+        // fallback; never let an undecorated stage be treated as fixed-size.
+        stage.setResizable(true);
         stage.setMinWidth(680);
         stage.setMinHeight(460);
         stage.setTitle(ApplicationTitle.current());

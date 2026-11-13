@@ -14,7 +14,9 @@ import javafx.stage.Stage;
  */
 public class WindowResizer {
 
-    private static final int RESIZE_MARGIN = 6;
+    // A 6px border is too narrow on HiDPI Windows and touchpads. Keep the
+    // JavaFX fallback usable even if the optional native hook cannot install.
+    private static final int RESIZE_MARGIN = 12;
 
     public static void makeResizable(Stage stage) {
         final ResizeListener listener = new ResizeListener(stage);
@@ -22,23 +24,23 @@ public class WindowResizer {
         stage.sceneProperty().addListener((obs, oldScene, newScene) -> {
             if (oldScene != null) {
                 oldScene.removeEventFilter(MouseEvent.MOUSE_MOVED, listener);
-                oldScene.removeEventHandler(MouseEvent.MOUSE_PRESSED, listener);
-                oldScene.removeEventHandler(MouseEvent.MOUSE_DRAGGED, listener);
-                oldScene.removeEventHandler(MouseEvent.MOUSE_RELEASED, listener);
+                oldScene.removeEventFilter(MouseEvent.MOUSE_PRESSED, listener);
+                oldScene.removeEventFilter(MouseEvent.MOUSE_DRAGGED, listener);
+                oldScene.removeEventFilter(MouseEvent.MOUSE_RELEASED, listener);
             }
             if (newScene != null) {
                 newScene.addEventFilter(MouseEvent.MOUSE_MOVED, listener);
-                newScene.addEventHandler(MouseEvent.MOUSE_PRESSED, listener);
-                newScene.addEventHandler(MouseEvent.MOUSE_DRAGGED, listener);
-                newScene.addEventHandler(MouseEvent.MOUSE_RELEASED, listener);
+                newScene.addEventFilter(MouseEvent.MOUSE_PRESSED, listener);
+                newScene.addEventFilter(MouseEvent.MOUSE_DRAGGED, listener);
+                newScene.addEventFilter(MouseEvent.MOUSE_RELEASED, listener);
             }
         });
 
         if (stage.getScene() != null) {
             stage.getScene().addEventFilter(MouseEvent.MOUSE_MOVED, listener);
-            stage.getScene().addEventHandler(MouseEvent.MOUSE_PRESSED, listener);
-            stage.getScene().addEventHandler(MouseEvent.MOUSE_DRAGGED, listener);
-            stage.getScene().addEventHandler(MouseEvent.MOUSE_RELEASED, listener);
+            stage.getScene().addEventFilter(MouseEvent.MOUSE_PRESSED, listener);
+            stage.getScene().addEventFilter(MouseEvent.MOUSE_DRAGGED, listener);
+            stage.getScene().addEventFilter(MouseEvent.MOUSE_RELEASED, listener);
         }
     }
 
@@ -72,10 +74,18 @@ public class WindowResizer {
             double sh = scene.getHeight();
 
             if (MouseEvent.MOUSE_MOVED.equals(type)) {
-                cursorEvent = getCursorForPosition(mx, my, sw, sh);
-                scene.setCursor(cursorEvent);
+                if (!resizing) {
+                    cursorEvent = stage.isMaximized() ? Cursor.DEFAULT
+                            : cursorForPosition(mx, my, sw, sh);
+                    scene.setCursor(cursorEvent);
+                }
 
             } else if (MouseEvent.MOUSE_PRESSED.equals(type)) {
+                if (!e.isPrimaryButtonDown()) return;
+                // MouseMoved may have been consumed by a child button, ScrollPane
+                // or CSS cursor. Determine the edge directly from THIS press.
+                cursorEvent = stage.isMaximized() ? Cursor.DEFAULT
+                        : cursorForPosition(mx, my, sw, sh);
                 if (cursorEvent != Cursor.DEFAULT) {
                     resizing = true;
                     dragStartScreenX = e.getScreenX();
@@ -127,25 +137,34 @@ public class WindowResizer {
                 e.consume();
 
             } else if (MouseEvent.MOUSE_RELEASED.equals(type)) {
-                resizing = false;
+                if (resizing) {
+                    resizing = false;
+                    e.consume();
+                }
             }
         }
+    }
 
-        private Cursor getCursorForPosition(double x, double y, double w, double h) {
-            boolean left = x < RESIZE_MARGIN;
-            boolean right = x > w - RESIZE_MARGIN;
-            boolean top = y < RESIZE_MARGIN;
-            boolean bottom = y > h - RESIZE_MARGIN;
-
-            if (left && top)     return Cursor.NW_RESIZE;
-            if (left && bottom)  return Cursor.SW_RESIZE;
-            if (right && top)    return Cursor.NE_RESIZE;
-            if (right && bottom) return Cursor.SE_RESIZE;
-            if (left)            return Cursor.W_RESIZE;
-            if (right)           return Cursor.E_RESIZE;
-            if (top)             return Cursor.N_RESIZE;
-            if (bottom)          return Cursor.S_RESIZE;
+    /** Pure geometry policy usable without starting a JavaFX Stage. */
+    static Cursor cursorForPosition(double x, double y, double w, double h) {
+        if (!Double.isFinite(x) || !Double.isFinite(y)
+                || !Double.isFinite(w) || !Double.isFinite(h)
+                || x < 0 || y < 0 || x >= w || y >= h || w <= 0 || h <= 0) {
             return Cursor.DEFAULT;
         }
+        boolean left = x < RESIZE_MARGIN;
+        boolean right = x >= w - RESIZE_MARGIN;
+        boolean top = y < RESIZE_MARGIN;
+        boolean bottom = y >= h - RESIZE_MARGIN;
+
+        if (left && top)     return Cursor.NW_RESIZE;
+        if (left && bottom)  return Cursor.SW_RESIZE;
+        if (right && top)    return Cursor.NE_RESIZE;
+        if (right && bottom) return Cursor.SE_RESIZE;
+        if (left)            return Cursor.W_RESIZE;
+        if (right)           return Cursor.E_RESIZE;
+        if (top)             return Cursor.N_RESIZE;
+        if (bottom)          return Cursor.S_RESIZE;
+        return Cursor.DEFAULT;
     }
 }
