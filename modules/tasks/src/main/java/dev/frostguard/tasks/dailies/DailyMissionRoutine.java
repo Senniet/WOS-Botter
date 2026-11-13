@@ -59,6 +59,8 @@ private static final GreenLabelActionDetector.Region DAILY_CLAIM_ALL_REGION =
 private static final GreenLabelActionDetector.Region DAILY_CLAIM_REGION =
         new GreenLabelActionDetector.Region(515, 528, 692, 634);
 
+private boolean claimActionObserved;
+
 private boolean autoScheduleEnabled;
 
 private int checkOffsetMinutes;
@@ -70,13 +72,14 @@ public DailyMissionRoutine(AccountDescriptor profile, TpDailyTaskEnum dailyMissi
 @Override
 	protected void execute() {
 
+        claimActionObserved = false;
 		hydrateTaskConfiguration();
 		reachDailyMissions();
 		boolean dailyScreenReached = switchToDailyMissionsTabFlow();
 		boolean claimFlowCompleted = dailyScreenReached && redeemAllRewards();
-		if (claimFlowCompleted) {
-			StatisticsService.obtain().addToCounter(profile, "Daily Missions Claimed", 1);
-		}
+        if (shouldCountClaim(claimFlowCompleted, claimActionObserved)) {
+            StatisticsService.obtain().addToCounter(profile, "Daily Missions Claimed", 1);
+        }
         // Never press Android Back when the Daily Missions screen was never
         // confirmed. On a City/World HUD that can open the game's Quit prompt.
         if (dailyScreenReached) {
@@ -199,8 +202,9 @@ private boolean redeemRewardsIndividually() {
 		while (claimedCount < MAX_INDIVIDUAL_CLAIMS) {
 			ImageSearchResultData claimResult = seekForIndividualClaimButton();
 			if (!claimResult.isFound()) {
-				logInfo(routineLogDailyMissionLine("Individual collecting complete. Claimed " + claimedCount + " rewards"));
-				return true;
+                logInfo(routineLogDailyMissionLine("Individual collecting complete. Claimed " + claimedCount + " rewards"));
+                claimActionObserved = claimedCount > 0;
+                return true;
 			}
 
 			claimedCount++;
@@ -333,7 +337,14 @@ private boolean redeemAllRewards() {
                     + captureDailyDiagnostic("daily-postclaim-screen-unverified")));
             return false;
         }
+        if (claimed && claimAllResult.isFound()) {
+            claimActionObserved = true;
+        }
         return claimed;
+    }
+
+    static boolean shouldCountClaim(boolean completed, boolean actionObserved) {
+        return completed && actionObserved;
     }
 
 private void dismissInterface() {

@@ -1,6 +1,8 @@
 package dev.frostguard.tasks.dailies;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.LocalDateTime;
 import org.junit.jupiter.api.Test;
@@ -20,5 +22,12 @@ class DailyMissionRetryPolicyTest {
 
         assertEquals(LocalDateTime.of(2026, 11, 14, 0, 4),
                 DailyMissionRoutine.nextUnverifiedRetry(now));
+    }
+    @Test
+    void noClaimAvailableDoesNotIncrementClaimStatistics() {
+        assertFalse(DailyMissionRoutine.shouldCountClaim(true, false));
+        assertFalse(DailyMissionRoutine.shouldCountClaim(false, true));
+        assertFalse(DailyMissionRoutine.shouldCountClaim(false, false));
+        assertTrue(DailyMissionRoutine.shouldCountClaim(true, true));
     }
 }
