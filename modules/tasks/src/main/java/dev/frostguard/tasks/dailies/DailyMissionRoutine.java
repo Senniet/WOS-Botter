@@ -27,7 +27,8 @@ private static final int SAFETY_RESCHEDULE_MINUTES_VALUE = 30;
 
 private static final int UNVERIFIED_RETRY_MINUTES = 5;
 
-private static final int POPUP_DISMISS_TAP_COUNT_VALUE = 3;
+// One tap closes the reward overlay; extra taps also close the underlying Daily screen.
+private static final int POPUP_DISMISS_TAP_COUNT_VALUE = 1;
 
 private static final int MAX_INDIVIDUAL_CLAIMS = 20;
 
