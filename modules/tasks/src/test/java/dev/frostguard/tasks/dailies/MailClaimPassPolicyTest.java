@@ -1,6 +1,7 @@
 package dev.frostguard.tasks.dailies;
 
 import dev.frostguard.api.domain.PointData;
+import dev.frostguard.api.domain.ImageSearchResultData;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -9,6 +10,13 @@ import static dev.frostguard.tasks.dailies.MailClaimPassPolicy.Evidence;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class MailClaimPassPolicyTest {
+
+    @Test
+    void clustersOverlappingUnreadTemplateHitsWithoutMergingSeparateRows() {
+        List<ImageSearchResultData> matches = List.of(
+                match(680, 240), match(684, 244), match(675, 246), match(680, 370));
+        assertEquals(2, Evidence.fromMatches(matches).count());
+    }
 
     @Test
     void stopsAfterPersistentUnreadReportMakesNoProgress() {
@@ -51,6 +59,10 @@ class MailClaimPassPolicyTest {
         assertEquals(
                 Decision.STOP_NO_PROGRESS,
                 MailClaimPassPolicy.decide(evidence(), evidence(point(685, 250)), 1, 3));
+    }
+
+    private static ImageSearchResultData match(int x, int y) {
+        return new ImageSearchResultData(true, point(x, y), 95);
     }
 
     private static Evidence evidence(PointData... points) {

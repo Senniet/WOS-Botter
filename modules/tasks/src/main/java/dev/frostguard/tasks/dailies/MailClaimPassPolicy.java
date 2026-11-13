@@ -8,6 +8,7 @@ import java.util.List;
 final class MailClaimPassPolicy {
 
     private static final int MARKER_POSITION_TOLERANCE_PIXELS = 4;
+    private static final int OVERLAPPING_MARKER_RADIUS_PIXELS = 24;
 
     private MailClaimPassPolicy() {
     }
@@ -46,10 +47,19 @@ final class MailClaimPassPolicy {
             if (matches == null) {
                 return new Evidence(List.of());
             }
-            return new Evidence(matches.stream()
+            List<PointData> distinct = new java.util.ArrayList<>();
+            for (PointData candidate : matches.stream()
                     .filter(ImageSearchResultData::isFound)
                     .map(ImageSearchResultData::getPoint)
-                    .toList());
+                    .filter(java.util.Objects::nonNull)
+                    .sorted(Comparator.comparingInt(PointData::getY)
+                            .thenComparingInt(PointData::getX)).toList()) {
+                boolean duplicate = distinct.stream().anyMatch(existing ->
+                        Math.abs(existing.getX() - candidate.getX()) <= OVERLAPPING_MARKER_RADIUS_PIXELS
+                        && Math.abs(existing.getY() - candidate.getY()) <= OVERLAPPING_MARKER_RADIUS_PIXELS);
+                if (!duplicate) distinct.add(candidate);
+            }
+            return new Evidence(distinct);
         }
 
         boolean isEmpty() {
