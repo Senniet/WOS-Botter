@@ -72,6 +72,8 @@ public class InitializeRoutine extends DelayedTask {
 
 	// ========== Home Screen Detection Constants ==========
 	private static final int MAX_HOME_SCREEN_ATTEMPTS = 10;
+    private static final int MAX_KNOWN_PAGE_RESUME_BACKS = 3;
+    private static final int KNOWN_PAGE_BACK_SETTLE_MS = 500;
     private static final int MAX_EMULATOR_READY_PROBES = 4;
 	private static final int RESOURCE_DOWNLOAD_TIMEOUT_MINUTES = 10;
 	private static final int RESOURCE_DOWNLOAD_POLL_DELAY_MS = 5000;
@@ -108,6 +110,7 @@ public class InitializeRoutine extends DelayedTask {
 	 * The flag remains valid for the rest of the current initialization flow.
 	 */
 	boolean isStarted = false;
+    private boolean gameAlreadyRunningAtStart = false;
 	private int unknownBlockerBackAttempts = 0;
 	private int welcomeBackDismissals = 0;
 	private int closeableOverlayDismissals = 0;
@@ -268,7 +271,9 @@ public class InitializeRoutine extends DelayedTask {
 	 * the game and waits for it to start.
 	 */
 	private void ensureGameRunning() {
-		if (!emuManager.isPackageRunning(EMULATOR_NUMBER, EmulatorController.GAME.getPackageName())) {
+        gameAlreadyRunningAtStart = emuManager.isPackageRunning(
+                EMULATOR_NUMBER, EmulatorController.GAME.getPackageName());
+		if (!gameAlreadyRunningAtStart) {
 			logInfo("Whiteout Survival is not running. Launching the game...");
 			emuManager.launchApp(EMULATOR_NUMBER, EmulatorController.GAME.getPackageName());
 			sleepTask(10000); // Wait for game to launch
@@ -396,6 +401,16 @@ public class InitializeRoutine extends DelayedTask {
 				continue;
 			}
 
+            // Repeated Start commonly finds an already-running WOS on a menu
+            // opened by the previous task. Recover known pages immediately,
+            // instead of wasting ten 5s passive probes before the first Back.
+            if (attempts == 0 && gameAlreadyRunningAtStart && resumeKnownPageToHome()) {
+                homeScreenFound = true;
+                lastVerifiedStartupState = "home/world after verified in-game page recovery";
+                logInfo("Initialize reused the running game after verified page recovery.");
+                break;
+            }
+
 			// Passive checks and later recoveries do not retain a screenshot.
 			logWarning("Home screen not found on an unsupported startup screen ("
 					+ lastHomePatternEvidence + "). Waiting 5 seconds for a passive state change before retrying...");
@@ -409,6 +424,58 @@ public class InitializeRoutine extends DelayedTask {
 		
 		return true;
 	}
+
+    /**
+     * A bounded, title-confirmed path to the game home screen for the second
+     * queue start. Does not run on a cold launch. Does not send input for an
+     * unrecognized overlay, external app, unconfirmed title or missing Back.
+     */
+    private boolean resumeKnownPageToHome() {
+        if (!isGameForeground()) return false;
+        RawImageData firstFrame = captureStartupFrame("quick resume known page, first frame");
+        KnownGameScreenResume.Page first = KnownGameScreenResume.findSafeBackPage(firstFrame);
+        if (first == null) return false;
+        sleepTask(175);
+        KnownGameScreenResume.Page confirmed = KnownGameScreenResume.findSafeBackPage(
+                captureStartupFrame("quick resume known page, confirmation frame"));
+        if (!KnownGameScreenResume.confirmsSamePage(first, confirmed)) {
+            logWarning("Initialize fast resume rejected unstable page title: " + first
+                    + " / " + confirmed);
+            return false;
+        }
+        logInfo("Initialize: running game is on verified " + first
+                + " page; returning to home without the passive startup delay.");
+
+        long fastResumeStarted = System.nanoTime();
+        KnownGameScreenResume.Page page = confirmed;
+        for (int back = 0; back < MAX_KNOWN_PAGE_RESUME_BACKS; back++) {
+            checkPreemption();
+            if (page == null || !isGameForeground()) return false;
+            pressBack();
+            sleepTask(KNOWN_PAGE_BACK_SETTLE_MS);
+            if (searchForHomeScreen()) {
+                logInfo("Initialize: home/world restored in " + (back + 1)
+                        + " verified in-game Back actions ("
+                        + java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(
+                                System.nanoTime() - fastResumeStarted) + " ms).");
+                return true;
+            }
+            checkForReconnectState();
+            RawImageData next = captureStartupFrame("quick resume post-Back page");
+            page = KnownGameScreenResume.findSafeBackPage(next);
+            if (page == null) {
+                logWarning("Initialize fast resume reached an unrecognized page; "
+                        + "stopping before further input and keeping startup safeguards.");
+                return false;
+            }
+            sleepTask(150);
+            KnownGameScreenResume.Page second = KnownGameScreenResume.findSafeBackPage(
+                    captureStartupFrame("quick resume next page confirmation"));
+            if (!KnownGameScreenResume.confirmsSamePage(page, second)) return false;
+            logInfo("Initialize fast resume: confirmed nested in-game page=" + page);
+        }
+        return false;
+    }
 
 	private MandatoryUpdateResult followMandatoryUpdateIfPresent() {
 		MandatoryUpdateInspection inspection;
@@ -736,11 +803,39 @@ public class InitializeRoutine extends DelayedTask {
 		ImageSearchResultData world = emuManager.locatePattern(
 				EMULATOR_NUMBER, frame, TemplatesEnum.GAME_HOME_WORLD, STARTUP_PATTERN_THRESHOLD);
 
+        // The updated 2026 City/World UI uses a different HUD anchor.
+        // Match it only inside the bottom-right root-navigation region:
+        // nested task pages never expose these anchors there.
+        ImageSearchResultData currentCity = ImageSearchResultData.miss();
+        ImageSearchResultData currentWorld = ImageSearchResultData.miss();
+        ImageSearchResultData world2026 = ImageSearchResultData.miss();
+        if (!home.isFound() && !world.isFound()
+                && frame.getWidth() == 720 && frame.getHeight() == 1280) {
+            PointData rootMin = new PointData(590, 1145);
+            PointData rootMax = new PointData(715, 1275);
+            currentCity = OpenCvPatternLocator.locatePattern(frame,
+                    TemplatesEnum.SERVE_EMU_CITY_ANCHOR.getTemplate(), rootMin, rootMax,
+                    STARTUP_PATTERN_THRESHOLD);
+            if (!currentCity.isFound()) {
+                currentWorld = OpenCvPatternLocator.locatePattern(frame,
+                        TemplatesEnum.SERVE_EMU_WORLD_ANCHOR.getTemplate(), rootMin, rootMax,
+                        STARTUP_PATTERN_THRESHOLD);
+                if (!currentWorld.isFound()) {
+                    world2026 = OpenCvPatternLocator.locatePattern(frame,
+                            TemplatesEnum.SERVE_EMU_WORLD_ANCHOR_CURRENT.getTemplate(), rootMin, rootMax,
+                            STARTUP_PATTERN_THRESHOLD);
+                }
+            }
+        }
 		lastHomePatternEvidence = "capture=" + frame.getWidth() + "x" + frame.getHeight()
 				+ ", furnaceScore=" + String.format(java.util.Locale.ROOT, "%.1f", home.getMatchScore())
 				+ ", worldScore=" + String.format(java.util.Locale.ROOT, "%.1f", world.getMatchScore())
+                + ", city2026Score=" + String.format(java.util.Locale.ROOT, "%.1f", currentCity.getMatchScore())
+                + ", world2026Score=" + String.format(java.util.Locale.ROOT, "%.1f", currentWorld.getMatchScore())
+                + ", worldCurrentScore=" + String.format(java.util.Locale.ROOT, "%.1f", world2026.getMatchScore())
 				+ ", threshold=" + STARTUP_PATTERN_THRESHOLD;
-		return home.isFound() || world.isFound();
+		return home.isFound() || world.isFound() || currentCity.isFound()
+                || currentWorld.isFound() || world2026.isFound();
 	}
 
 	/**
@@ -997,6 +1092,9 @@ public class InitializeRoutine extends DelayedTask {
 			logInfo("Character switch successful. Waiting for game to reload...");
 			sleepTask(CharacterSwitchHelper.CHARACTER_SWITCH_RELOAD_DELAY_MS);
 			
+            // A character switch launches a new session. Do not reuse the
+            // "already-running" fast-resume path while it is loading.
+            gameAlreadyRunningAtStart = false;
 			// Re-check home screen after character switch
 			if (!waitForHomeScreen()) {
 				// Home screen not found after character switch
