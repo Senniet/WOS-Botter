@@ -149,6 +149,12 @@ class ServeEmuTitleRecognitionTest {
                 220, 565, 510, 690));
     }
 
+    @Test void heroRecruitmentRewardsExitIsVerifiedNotPaidRecruitButton() throws Exception {
+        assertTrue(match("heroRewards", TemplatesEnum.SERVE_EMU_HERO_REWARDS_TITLE, 230, 215, 500, 355));
+        assertTrue(match("heroRewards", TemplatesEnum.SERVE_EMU_HERO_REWARDS_EXIT, 190, 1150, 525, 1240));
+        assertFalse(match("daily", TemplatesEnum.SERVE_EMU_HERO_REWARDS_EXIT, 190, 1150, 525, 1240));
+    }
+
     private static boolean match(String scene, TemplatesEnum template, int left, int top, int right, int bottom)
             throws Exception {
         BufferedImage image = ImageIO.read(Objects.requireNonNull(

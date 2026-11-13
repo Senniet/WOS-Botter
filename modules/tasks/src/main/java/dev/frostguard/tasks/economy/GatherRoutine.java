@@ -1031,35 +1031,12 @@ public class GatherRoutine extends DelayedTask {
      * a node missing. A lower-confidence match must repeat at the same location.
      */
     private ImageSearchResultData locateGatherButton() {
-        TemplatesEnum template = TemplatesEnum.GAME_HOME_SHORTCUTS_FARM_GATHER;
-        ImageSearchResultData exact = templateSearchHelper.locatePattern(template,
-                SearchConfig.builder().withMaxAttempts(2).build());
-        if (exact.isFound()) return exact;
-
-        ImageSearchResultData scaled = templateSearchHelper.locatePatternMultiScale(template,
-                SearchConfig.builder().withThreshold(90).withMaxAttempts(2).build());
-        if (scaled.isFound()) {
-            logInfo(String.format(java.util.Locale.ROOT,
-                    "Gather button recognized by multi-scale matching (score %.1f).",
-                    scaled.getMatchScore()));
-            return scaled;
-        }
-
-        ImageSearchResultData first = templateSearchHelper.locatePatternMultiScale(template,
-                SearchConfig.builder().withThreshold(86).build());
-        if (first.isFound() && first.getPoint() != null) {
-            sleepTask(350);
-            ImageSearchResultData second = templateSearchHelper.locatePatternMultiScale(template,
-                    SearchConfig.builder().withThreshold(86).build());
-            if (second.isFound() && second.getPoint() != null
-                    && first.getPoint().manhattanDistanceTo(second.getPoint()) <= 20) {
-                logInfo(String.format(java.util.Locale.ROOT,
-                        "Gather button confirmed across two frames (scores %.1f / %.1f).",
-                        first.getMatchScore(), second.getMatchScore()));
-                return second;
-            }
-        }
-        return scaled;
+        // Confirm in two distinct frames so an incidental Gather label cannot
+        // cause a blind tap. The result remains screen-scoped to the searched
+        // resource's card and is followed by a verified formation state.
+        return templateSearchHelper.locateAction(TemplatesEnum.GAME_HOME_SHORTCUTS_FARM_GATHER,
+                SearchConfig.builder().withMaxAttempts(2).withDelay(150)
+                        .withThreshold(89).build());
     }
 
     private void saveMissingGatherButtonScreenshot(GatherType type, int level) {

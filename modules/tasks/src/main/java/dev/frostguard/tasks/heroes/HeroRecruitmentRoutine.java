@@ -421,41 +421,70 @@ public class HeroRecruitmentRoutine extends DelayedTask {
      * @return confirmed, unavailable, or unknown claim outcome
      */
     private ClaimOutcome checkAndClaimRecruitment(
-            String type,
-            PointData searchMin,
-            PointData searchMax,
-            PointData claimMin,
-            PointData claimMax) {
-
-        ImageSearchResultData claimResult = locateRecruitmentClaimButton(searchMin, searchMax);
-        if (!claimResult.isFound()) {
+            String type, PointData searchMin, PointData searchMax,
+            PointData claimMin, PointData claimMax) {
+        ImageSearchResultData free = locateRecruitmentClaimButton(searchMin, searchMax);
+        if (!free.isFound()) {
             logInfo(type + " recruitment reward not available yet.");
             return ClaimOutcome.NOT_AVAILABLE;
         }
-
-        logInfo(type + " recruitment reward available. Claiming now.");
-        tapInside(claimMin, claimMax);
-        sleepTask(1000); // Wait for claim animation
-
-        ImageSearchResultData remainingClaim = locateRecruitmentClaimButton(searchMin, searchMax);
-        if (!remainingClaim.isFound()) {
-            logInfo(type + " recruitment claim confirmed: claim button is no longer visible.");
+        // Never tap a fixed coordinate that could become a paid Recruit x1.
+        logInfo(type + " verified free recruitment at " + free.getPoint());
+        tapInside(free);
+        sleepTask(450);
+        boolean rewardsDismissed = dismissVerifiedRecruitmentRewards();
+        if (!rewardsDismissed) {
+            logWarning(type + " Rewards transition unverified after one free tap; not repeating");
+            return ClaimOutcome.UNKNOWN;
+        }
+        ImageSearchResultData remaining = locateRecruitmentClaimButton(searchMin, searchMax);
+        if (!remaining.isFound()) {
+            logInfo(type + " free recruitment confirmed after verified Rewards exit");
             return ClaimOutcome.CONFIRMED;
         }
-
-        logWarning(type + " recruitment claim button remains visible after the tap.");
+        logWarning(type + " free recruitment remains available after Rewards exit");
         return ClaimOutcome.UNKNOWN;
     }
 
     private ImageSearchResultData locateRecruitmentClaimButton(PointData searchMin, PointData searchMax) {
-        return templateSearchHelper.locatePattern(
-                TemplatesEnum.HERO_RECRUIT_CLAIM,
+        return templateSearchHelper.locateAction(TemplatesEnum.HERO_RECRUIT_CLAIM,
                 TemplateSearchHelper.SearchConfig.builder()
-                        .withMaxAttempts(1)
-                        .withThreshold(95)
-                        .withDelay(300L)
-                        .withCoordinates(searchMin, searchMax)
-                        .build());
+                        .withMaxAttempts(2).withThreshold(92).withDelay(150L)
+                        .withCoordinates(searchMin, searchMax).build());
+    }
+
+    /** A successful free recruitment displays a Rewards page with a second
+     * orange "Recruit once" button that consumes a key. Only dismiss the
+     * verified Rewards overlay by tapping the empty area, never that button. */
+    private boolean dismissVerifiedRecruitmentRewards() {
+        var exitArea = TemplateSearchHelper.SearchConfig.builder()
+                .withMaxAttempts(2).withDelay(120).withThreshold(90)
+                .withCoordinates(new PointData(190, 1150), new PointData(525, 1240)).build();
+        ImageSearchResultData exitHint = ImageSearchResultData.miss();
+        for (int attempt = 0; attempt < 4; attempt++) {
+            exitHint = templateSearchHelper.locateAction(
+                    TemplatesEnum.SERVE_EMU_HERO_REWARDS_EXIT, exitArea);
+            if (exitHint.isFound()) break;
+            if (attempt < 3) sleepTask(250);
+        }
+        if (!exitHint.isFound()) return false;
+        var title = templateSearchHelper.locatePattern(
+                TemplatesEnum.SERVE_EMU_HERO_REWARDS_TITLE,
+                TemplateSearchHelper.SearchConfig.builder()
+                        .withMaxAttempts(2).withDelay(120).withThreshold(88)
+                        .withCoordinates(new PointData(230, 215), new PointData(500, 355)).build());
+        if (!title.isFound()) {
+            logWarning("Hero recruitment shows exit text without a verified Rewards header; no blind tap");
+            return false;
+        }
+        tapInside(new PointData(320, 912), new PointData(422, 1000));
+        sleepTask(300);
+        if (templateSearchHelper.locatePattern(
+                TemplatesEnum.SERVE_EMU_HERO_REWARDS_EXIT, exitArea).isFound()) {
+            logWarning("Hero recruitment Rewards overlay did not close after one safe tap; no second action");
+            return false;
+        }
+        return true;
     }
 
     /**
