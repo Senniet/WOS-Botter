@@ -127,6 +127,10 @@ public class ExplorationRoutine extends DelayedTask {
 	}
 
     private boolean isExplorationMainScreenVisible() {
+        if (templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_EXPLORATION_TITLE_NOV_2026,
+                dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig.builder()
+                    .withMaxAttempts(1).withThreshold(92)
+                    .withArea(AreaData.of(65, 0, 335, 115)).build()).isFound()) return true;
         if (templateSearchHelper.locatePattern(TemplatesEnum.EXPLORATION_SCREEN_TITLE,
                 dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig.builder()
                     .withMaxAttempts(1).withThreshold(90)
