@@ -58,6 +58,10 @@ final class KnownGameScreenResume {
         if (frame == null || !frame.isValid() || frame.getWidth() != 720 || frame.getHeight() != 1280) {
             return null;
         }
+        // Cooldown Hero Recruitment is a known page, but its arrow is higher
+        // than the original generic Back-header search window.
+        if (isModernHeroRecruitmentPage(frame)) return Page.HERO_RECRUITMENT;
+
         boolean headerBack = OpenCvPatternLocator.locatePattern(frame,
                 TemplatesEnum.SERVE_EMU_HEADER_BACK.getTemplate(), BACK_TOP_LEFT,
                 BACK_BOTTOM_RIGHT, BACK_THRESHOLD).isFound();
@@ -104,6 +108,18 @@ final class KnownGameScreenResume {
             }
         }
         return new ResumeOutcome(false, maxBackActions, "bounded Back limit reached");
+    }
+
+    private static boolean isModernHeroRecruitmentPage(RawImageData frame) {
+        if (!OpenCvPatternLocator.locatePattern(frame,
+                TemplatesEnum.SERVE_EMU_HEADER_BACK_HERO_2026.getTemplate(),
+                new PointData(0, 0), new PointData(110, 105), 91).isFound()) return false;
+        return OpenCvPatternLocator.locatePattern(frame,
+                TemplatesEnum.SERVE_EMU_HERO_MODERN_RECRUIT_TITLE.getTemplate(),
+                new PointData(390, 70), new PointData(715, 330), PAGE_THRESHOLD).isFound()
+                || OpenCvPatternLocator.locatePattern(frame,
+                        TemplatesEnum.SERVE_EMU_HERO_RECRUIT_TITLE.getTemplate(),
+                        new PointData(390, 70), new PointData(715, 330), PAGE_THRESHOLD).isFound();
     }
 
     record ResumeOutcome(boolean homeVerified, int backActions, String reason) { }

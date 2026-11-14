@@ -19,6 +19,11 @@ class KnownGameScreenResumeFrameTest {
                 KnownGameScreenResume.findSafeBackPage(frame("heroes-page-redacted.png")));
     }
 
+    @Test void identifiesActual20261115CooldownScreenAndSafeBackArrow() throws Exception {
+        assertEquals(KnownGameScreenResume.Page.HERO_RECRUITMENT,
+                KnownGameScreenResume.findSafeBackPage(frame("hero-recruitment-cooldown-20261115.png")));
+    }
+
     @Test void recognizesLiveSquadSettingsScreenFromSecondStartWithoutSendingInput() throws Exception {
         assertEquals(KnownGameScreenResume.Page.SQUAD_SETTINGS,
                 KnownGameScreenResume.findSafeBackPage(frame("squad-settings-page-redacted.png")));

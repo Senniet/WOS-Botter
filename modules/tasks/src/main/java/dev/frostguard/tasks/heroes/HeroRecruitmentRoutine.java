@@ -19,6 +19,8 @@ import dev.frostguard.engine.helper.RecognitionConsensus;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Task responsible for managing hero recruitment rewards.
@@ -63,6 +65,8 @@ public class HeroRecruitmentRoutine extends DelayedTask {
 
     /** Delay between OCR retry attempts (milliseconds) */
     private static final long OCR_RETRY_DELAY_MS = 200L;
+    private static final Pattern MODERN_COOLDOWN = Pattern.compile(
+            "(?<![0-9])([0-9]{1,2}):([0-9]{2}):([0-9]{2})(?![0-9])");
 
     // Navigation coordinates
     private static final PointData NAV_TAP_1_MIN = new PointData(160, 1190);
@@ -231,11 +235,82 @@ public class HeroRecruitmentRoutine extends DelayedTask {
                     claimReadyPointsChest();
                     return true;
                 });
-        reschedule(LocalDateTime.now().plusMinutes(OCR_FAILURE_RETRY_MINUTES));
         if (!complete) {
+            reschedule(LocalDateTime.now().plusMinutes(OCR_FAILURE_RETRY_MINUTES));
             throw new TaskOutcomeUnknownException("Hero Recruitment outcome uncertain; "
                     + "no second tap or later stage; retry scheduled");
         }
+        // A missing green Free button with a visible Next Free timer is a
+        // normal cooldown, not a recognition failure. Recheck at the actual
+        // countdown instead of revisiting this screen every five minutes.
+        Duration advancedWait = advancedFree ? readModernCooldown(
+                "Advanced", ADVANCED_OCR_TOP_LEFT, ADVANCED_OCR_BOTTOM_RIGHT) : null;
+        Duration epicWait = epicFree ? readModernCooldown(
+                "Epic", EPIC_OCR_TOP_LEFT, EPIC_OCR_BOTTOM_RIGHT) : null;
+        LocalDateTime next = nextModernCheck(LocalDateTime.now(), advancedWait,
+                epicWait, advancedFree, epicFree, advancedKeys || epicKeys);
+        reschedule(next);
+        logInfo("Hero Recruitment next check scheduled for " + next.format(DATETIME_FORMATTER));
+        // DelayedTask only restores Home automatically if it was requested.
+        // This routine starts at ANY (so it can resume an opened Hero page),
+        // and without this verified exit the next task can inherit Hero UI.
+        // NavigationHelper requires two agreeing Back-arrow frames and a
+        // verified Home/World anchor; it never blindly presses Android Back.
+        navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME);
+    }
+
+    static Duration parseModernCooldown(String raw) {
+        if (raw == null) return null;
+        Matcher matcher = MODERN_COOLDOWN.matcher(raw);
+        while (matcher.find()) {
+            String timer = matcher.group();
+            if (GameTimeUtils.isAcceptedFormat(timer)) {
+                Duration duration = GameTimeUtils.parseDuration(timer);
+                if (!duration.isZero() && !duration.isNegative()
+                        && duration.compareTo(Duration.ofDays(1)) <= 0) return duration;
+            }
+        }
+        return null;
+    }
+
+    static LocalDateTime nextModernCheck(LocalDateTime now, Duration advanced,
+            Duration epic, boolean advancedEnabled, boolean epicEnabled,
+            boolean savedKeysEnabled) {
+        LocalDateTime fallback = now.plusMinutes(OCR_FAILURE_RETRY_MINUTES);
+        // Preserve the existing key cadence when paid-with-owned-keys mode is
+        // explicitly enabled. The Free timers cannot predict available keys.
+        if (savedKeysEnabled || (advancedEnabled && advanced == null)
+                || (epicEnabled && epic == null)) return fallback;
+        LocalDateTime next = null;
+        if (advancedEnabled && advanced != null) next = now.plus(advanced).plusSeconds(12);
+        if (epicEnabled && epic != null) {
+            LocalDateTime candidate = now.plus(epic).plusSeconds(12);
+            if (next == null || candidate.isBefore(next)) next = candidate;
+        }
+        if (next == null) return fallback;
+        return next.isBefore(now.plusSeconds(30)) ? now.plusSeconds(30) : next;
+    }
+
+    private Duration readModernCooldown(String category, PointData topLeft, PointData bottomRight) {
+        try {
+            String ocr = emuManager.readText(EMULATOR_NUMBER, topLeft, bottomRight,
+                    OcrSettingsData.configurator()
+                            .textLayout(OcrSettingsData.TextLayout.SINGLE_LINE)
+                            .allowedGlyphs("0123456789:").build(), false);
+            Duration countdown = parseModernCooldown(ocr);
+            if (countdown != null) {
+                logInfo(category + " free recruitment cooldown: " + countdown);
+                return countdown;
+            }
+            logWarning(category + " recruitment countdown OCR unconfirmed: " + ocr);
+        } catch (Exception error) {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new java.util.concurrent.CancellationException("Recruitment cooldown OCR interrupted");
+            }
+            logWarning(category + " recruitment countdown OCR failed: "
+                    + error.getClass().getSimpleName());
+        }
+        return null;
     }
 
     /** Handles one category; spends at most one already-owned key per scheduled run. */
