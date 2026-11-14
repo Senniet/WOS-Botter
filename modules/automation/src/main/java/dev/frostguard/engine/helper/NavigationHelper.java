@@ -653,6 +653,13 @@ public class NavigationHelper {
                 }
             }
 
+            // Only dismiss a verified, named purchase offer. Never tap its price.
+            // An unrecognized promotion is left untouched rather than guessing X.
+            if (!atHome && !atWorld && dismissVerifiedResplendentOffer(checkpoint)) {
+                pass++;
+                continue;
+            }
+
             // The Resource Production "Overview" modal hides the entire
             // City/World navigation bar. It was confirmed in the 14:08-14:09
             // diagnostics; without a typed recovery this loop probes unrelated
@@ -744,6 +751,32 @@ public class NavigationHelper {
                     + "to protect against Quit game dialog");
         }
         throw new HomeNotFoundException("Home not found after " + budget + " verified recovery attempts");
+    }
+
+    /** Close the observed Resplendent Treasure Pack 1 promotion, not its purchase button. */
+    private boolean dismissVerifiedResplendentOffer(Runnable checkpoint) {
+        var titleConfig = TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
+                .withThreshold(91).withArea(AreaData.of(65, 125, 555, 235)).build();
+        var closeConfig = TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
+                .withThreshold(92).withArea(AreaData.of(560, 125, 675, 245)).build();
+        var title = searcher.locatePattern(TemplatesEnum.SERVE_EMU_OFFER_RESPLENDENT_TITLE_2026, titleConfig);
+        if (!title.isFound()) return false;
+        var close = searcher.locatePattern(TemplatesEnum.SERVE_EMU_OFFER_RESPLENDENT_CLOSE_2026, closeConfig);
+        if (!close.isFound()) return false;
+        interruptibleWait(160);
+        var titleAgain = searcher.locatePattern(TemplatesEnum.SERVE_EMU_OFFER_RESPLENDENT_TITLE_2026, titleConfig);
+        var closeAgain = searcher.locatePattern(TemplatesEnum.SERVE_EMU_OFFER_RESPLENDENT_CLOSE_2026, closeConfig);
+        if (!RecognitionConsensus.agrees(title, titleAgain, 12)
+                || !RecognitionConsensus.agrees(close, closeAgain, 12)) return false;
+        checkpoint.run();
+        taps.tapInside(closeAgain);
+        interruptibleWait(450);
+        if (searcher.locatePattern(TemplatesEnum.SERVE_EMU_OFFER_RESPLENDENT_TITLE_2026,
+                titleConfig).isFound()) {
+            throw new HomeNotFoundException("Resplendent offer did not close; refusing repeated taps");
+        }
+        broadcastInfo("Dismissed verified Resplendent Treasure Pack offer without purchasing");
+        return true;
     }
 
     /** Close only the recorded Resource Production Overview pop-up. */
