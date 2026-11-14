@@ -617,6 +617,7 @@ public class NavigationHelper {
         int budget = 4;
         int pass = 1;
         boolean overviewDismissed = false;
+        boolean welcomeBackDismissed = false;
         while (pass <= budget) {
             checkpoint.run();
             // detect reconnect
@@ -651,6 +652,16 @@ public class NavigationHelper {
                     interruptibleWait(700);
                     if (findWorldAnchor().isFound()) return target;
                 }
+            }
+
+            // The offline-income dialog may appear after a promotion is closed,
+            // including when navigation resumes after startup. Confirm only a
+            // doubly verified title/button pair; never claim a generic green button.
+            if (!atHome && !atWorld && !welcomeBackDismissed
+                    && dismissVerifiedWelcomeBack(checkpoint)) {
+                welcomeBackDismissed = true;
+                pass++;
+                continue;
             }
 
             // Only dismiss a verified, named purchase offer. Never tap its price.
@@ -751,6 +762,31 @@ public class NavigationHelper {
                     + "to protect against Quit game dialog");
         }
         throw new HomeNotFoundException("Home not found after " + budget + " verified recovery attempts");
+    }
+
+    /** Confirm the verified offline-income dialog; never act on an unrecognized green button. */
+    private boolean dismissVerifiedWelcomeBack(Runnable checkpoint) {
+        var titleConfig = TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
+                .withThreshold(90).withArea(AreaData.of(170, 170, 550, 340)).build();
+        var confirmConfig = TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
+                .withThreshold(90).withArea(AreaData.of(150, 880, 570, 1140)).build();
+        var title = searcher.locatePattern(TemplatesEnum.GAME_START_WELCOME_BACK_TITLE, titleConfig);
+        if (!title.isFound()) return false;
+        var confirm = searcher.locatePattern(TemplatesEnum.GAME_START_WELCOME_BACK_CONFIRM_BUTTON, confirmConfig);
+        if (!confirm.isFound()) return false;
+        interruptibleWait(160);
+        var titleAgain = searcher.locatePattern(TemplatesEnum.GAME_START_WELCOME_BACK_TITLE, titleConfig);
+        var confirmAgain = searcher.locatePattern(TemplatesEnum.GAME_START_WELCOME_BACK_CONFIRM_BUTTON, confirmConfig);
+        if (!RecognitionConsensus.agrees(title, titleAgain, 12)
+                || !RecognitionConsensus.agrees(confirm, confirmAgain, 12)) return false;
+        checkpoint.run();
+        taps.tapInside(confirmAgain);
+        interruptibleWait(550);
+        if (searcher.locatePattern(TemplatesEnum.GAME_START_WELCOME_BACK_TITLE, titleConfig).isFound()) {
+            throw new HomeNotFoundException("Welcome back remained open after confirmed tap; refusing repeat");
+        }
+        broadcastInfo("Confirmed verified Welcome back offline-income dialog");
+        return true;
     }
 
     /** Close the observed Resplendent Treasure Pack 1 promotion, not its purchase button. */
