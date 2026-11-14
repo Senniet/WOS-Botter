@@ -235,6 +235,7 @@ protected void loadConfiguration() {
             logInfo(routineLogTrainingLine("Training progress confirmed by a queue transitioning to TRAINING."));
         } else {
             logWarning(routineLogTrainingLine("No newly started training queue could be confirmed."));
+            markWorkIncomplete("Training: no ready queue was verified as training after attempted start");
         }
         allCompletionTimes.clear();
         allCompletionTimes.addAll(extractExistingCompletionTimesFlow(verifiedQueues));

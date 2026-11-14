@@ -298,6 +298,7 @@ public IntelligenceRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
 			logWarning(routineLogIntelligenceLine("No enabled Intel mission marker detected; "
 					+ TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
 							"intel", "mission-markers-missing")));
+			markWorkIncomplete("Intel: enabled mission markers not verified");
 			tryRescheduleFromCooldownFlow();
 			processingTask = false;
 			return;
@@ -307,6 +308,7 @@ public IntelligenceRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
 			logWarning(routineLogIntelligenceLine("Daily sidebar reports available Intel, but no Intel mission "
 					+ "categories were enabled for this task snapshot. Retrying at: "
 					+ retryAt.format(DATETIME_FORMATTER)));
+			markWorkIncomplete("Intel: available missions but no mission categories enabled");
 			reschedule(retryAt);
 			processingTask = false;
 			return;
@@ -338,6 +340,7 @@ public IntelligenceRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
                 // A World view with occupied marches but no Recall controls
                 // is NOT proof that gather marches were recalled. Yield
                 // instead of blocking other serial queue tasks for an hour.
+				markWorkIncomplete("Intel: gathering march recall not verified");
                 processingTask = false;
                 reschedule(LocalDateTime.now().plusMinutes(10));
                 return;
