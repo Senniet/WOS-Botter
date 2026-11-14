@@ -314,9 +314,20 @@ public class TaskQueue {
         if (taskBacklog.stream().anyMatch(task -> task.equals(replacement))) {
             return;
         }
-        emitInfo("Monitor task queued without interrupting active task: "
-                + replacement.getTaskName());
+        // Only an explicitly enabled, time-critical Bear Trap event may
+        // interrupt ordinary work. Normal rally/gather monitor work must wait.
+        boolean urgentBear = rule.getTaskToExecute() == TpDailyTaskEnum.BEAR_TRAP;
+        boolean mayInterrupt = urgentBear && active != null
+                && !active.getTask().isExclusiveUiTransaction()
+                && rankingStrategy.getPriority(replacement) > rankingStrategy.getPriority(active.getTask());
         enqueue(replacement);
+        if (mayInterrupt) {
+            emitWarn("Urgent Bear Trap interrupting " + active.getTask().getTaskName());
+            active.preempt(rule);
+        } else {
+            emitInfo("Monitor task queued without interrupting active task: "
+                    + replacement.getTaskName());
+        }
     }
 
     // ---- lifecycle ---------------------------------------------------------
