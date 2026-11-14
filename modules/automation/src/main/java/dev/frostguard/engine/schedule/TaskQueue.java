@@ -295,26 +295,28 @@ public class TaskQueue {
 
     // ---- preemption --------------------------------------------------------
 
+    /**
+     * Monitor-triggered work is queued, never allowed to interrupt the active
+     * game UI transaction. One emulator must have exactly one UI task owner.
+     */
     public synchronized void preemptActiveTask(PreemptionRule rule) {
         DelayedTask replacement = DelayedTaskRegistry.create(rule.getTaskToExecute(), profile);
-        if (replacement == null) { emitWarn("Preemption ignored - no mapping for " + rule.getTaskToExecute()); return; }
-
-        boolean shouldSignal = false;
-        ExecutionContext ctx = runningContext;
-        if (ctx != null) {
-            int runningRank  = rankingStrategy.getPriority(ctx.getTask());
-            int incomingRank = rankingStrategy.getPriority(replacement);
-            if (runningRank > incomingRank) { emitInfo("Preemption blocked - active task outranks"); }
-            else if (ctx.getTask().isExclusiveUiTransaction()) {
-                emitInfo("Preemption queued until UI transaction completes: "
-                        + ctx.getTask().getTaskName() + " -> " + rule.getRuleName());
-            } else { emitWarn("Interrupting " + ctx.getTask().getTaskName() + " for: " + rule.getRuleName()); shouldSignal = true; }
+        if (replacement == null) {
+            emitWarn("Monitor task ignored - no mapping for " + rule.getTaskToExecute());
+            return;
         }
-
-        if (taskBacklog.remove(replacement)) emitInfo("Moved " + replacement.getTaskName() + " to NOW");
-        else                                  emitInfo("Injecting " + replacement.getTaskName() + " NOW");
+        ExecutionContext active = runningContext;
+        if (active != null && active.getTask().getTpTask() == rule.getTaskToExecute()) {
+            emitInfo("Monitor task already executing: " + replacement.getTaskName());
+            return;
+        }
+        // Repeated monitor ticks must not flood the queue with duplicate work.
+        if (taskBacklog.stream().anyMatch(task -> task.equals(replacement))) {
+            return;
+        }
+        emitInfo("Monitor task queued without interrupting active task: "
+                + replacement.getTaskName());
         enqueue(replacement);
-        if (shouldSignal && ctx != null) ctx.preempt(rule);
     }
 
     // ---- lifecycle ---------------------------------------------------------
