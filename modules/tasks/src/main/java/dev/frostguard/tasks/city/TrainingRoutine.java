@@ -1575,8 +1575,28 @@ private void pressTrainButton() {
                 tapInside(replenishAll.getPoint(), replenishAll.getPoint(), 1, 300);
                 sleepTask(300);
                 PointData replenishConfirm = new PointData(442, 1064);
-                tapInside(replenishConfirm, replenishConfirm, 3, 100);
-                tapInside(trainButton.getPoint(), trainButton.getPoint(), 1, 500);
+                // Do not repeat a purchase/resource confirmation three times.
+                // One tap has an uncertain outcome until the dialog disappears.
+                tapInside(replenishConfirm, replenishConfirm, 1, 300);
+                emuManager.captureScreen(EMULATOR_NUMBER);
+                ImageSearchResultData replenishStillOpen = templateSearchHelper.locatePattern(
+                        REPLENISH_ALL_BUTTON, SearchConfigConstants.DEFAULT_SINGLE);
+                if (replenishStillOpen.isFound()) {
+                    logWarning(routineLogTrainingLine("Replenish dialog still visible; "
+                            + "refusing to submit Train through the overlay"));
+                    return;
+                }
+                // The earlier Train coordinate belongs to a previous frame.
+                // Re-locate the control after the overlay has closed.
+                ImageSearchResultData freshTrain = templateSearchHelper.locatePattern(
+                        TRAINING_TRAIN_BUTTON, SearchConfigConstants.DEFAULT_SINGLE);
+                if (freshTrain.isFound()) {
+                    tapInside(freshTrain.getPoint(), freshTrain.getPoint(), 1, 500);
+                } else {
+                    logWarning(routineLogTrainingLine("Train control missing after replenishment; "
+                            + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+                                    "training", "post-replenish-train-missing")));
+                }
             }
         } else {
             logWarning(routineLogTrainingLine("Train button not detected after fresh capture; "
