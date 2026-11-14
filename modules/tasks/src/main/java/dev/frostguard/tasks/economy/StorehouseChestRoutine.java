@@ -29,6 +29,8 @@ import dev.frostguard.engine.nav.SidebarDestination;
 import dev.frostguard.engine.nav.SearchConfigConstants;
 import dev.frostguard.engine.nav.CommonOCRSettings;
 import dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig;
+import dev.frostguard.engine.helper.GreenLabelActionDetector;
+import dev.frostguard.engine.helper.RecognitionConsensus;
 import dev.frostguard.tasks.diagnostics.TaskControlSignals;
 
 /**
@@ -73,6 +75,8 @@ public class StorehouseChestRoutine extends DelayedTask {
             new PointData(150, 740), new PointData(560, 885));
     private static final AreaData STAMINA_CLAIM_BUTTON_AREA = new AreaData(
             new PointData(200, 900), new PointData(520, 1020));
+    private static final GreenLabelActionDetector.Region STAMINA_CLAIM_GREEN_REGION =
+            new GreenLabelActionDetector.Region(200, 900, 520, 1020);
     private static final AreaData STAMINA_TOOLTIP_TITLE_AREA = new AreaData(
             new PointData(45, 670), new PointData(300, 750));
 
@@ -87,7 +91,9 @@ public class StorehouseChestRoutine extends DelayedTask {
     private static final int CLAIM_CLOSE_SETTLE_MILLIS = 800;
     private static final int BUBBLE_CONFIRMATION_MARGIN = 24;
     private static final int CLAIM_BUTTON_POLL_INTERVAL_MILLIS = 400;
-    private static final int CLAIM_BUTTON_TIMEOUT_MILLIS = 5_000;
+    // The actual 15:06 stamina popup appeared in the failure snapshot, after
+    // the five-second wait had already given up. Fast matches return early.
+    private static final int CLAIM_BUTTON_TIMEOUT_MILLIS = 9_000;
     private static final int REWARD_TITLE_THRESHOLD = 88;
     private static final int CLAIM_BUTTON_THRESHOLD = 88;
     private static final int TOOLTIP_TITLE_THRESHOLD = 88;
@@ -409,10 +415,28 @@ public class StorehouseChestRoutine extends DelayedTask {
 
                     @Override
                     public ImageSearchResultData findClaimButton() {
-                        return locateStaminaDialogTemplate(
+                        ImageSearchResultData textMatch = locateStaminaDialogTemplate(
                                 TemplatesEnum.STOREHOUSE_STAMINA_CLAIM_TEXT,
                                 STAMINA_CLAIM_BUTTON_AREA,
                                 CLAIM_BUTTON_THRESHOLD);
+                        if (textMatch != null && textMatch.isFound()) return textMatch;
+
+                        // Only called after "A Warm Welcome" was positively
+                        // identified by the flow. If gfxstream blurs the Claim
+                        // glyph during a transition, verify the green Claim
+                        // geometry on TWO fresh frames before an action.
+                        ImageSearchResultData first = GreenLabelActionDetector.detect(
+                                ImageConverter.toBufferedImage(
+                                        emuManager.captureScreen(EMULATOR_NUMBER)),
+                                STAMINA_CLAIM_GREEN_REGION);
+                        if (!first.isFound()) return ImageSearchResultData.miss();
+                        sleepTask(160);
+                        ImageSearchResultData second = GreenLabelActionDetector.detect(
+                                ImageConverter.toBufferedImage(
+                                        emuManager.captureScreen(EMULATOR_NUMBER)),
+                                STAMINA_CLAIM_GREEN_REGION);
+                        return RecognitionConsensus.agrees(first, second, 12)
+                                ? second : ImageSearchResultData.miss();
                     }
 
                     @Override
