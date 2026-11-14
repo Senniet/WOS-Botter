@@ -1030,6 +1030,31 @@ private Attempt<QueueHandlingResult> handleQueueAttempt(QueueReadout queueResult
                 return buildingAttempt(startBuildingAction("upgrade", furnace.upgrade()));
             }
 
+            // On the 14:57 Embassy prerequisite screen, the tutorial hand
+            // obscured the legacy generic Upgrade icon (10 control failures
+            // today) but the highlighted action remained visible. Require
+            // two independent frames at a strict threshold and retain the
+            // existing post-action construction confirmation. Never tap an
+            // arbitrary coordinate based on the tutorial pointer alone.
+            AreaData guidedArea = AreaData.of(275, 790, 475, 965);
+            ImageSearchResultData guided = locateOnFrame(frame,
+                    TemplatesEnum.SERVE_EMU_BUILDING_GUIDED_UPGRADE_2026,
+                    guidedArea, 94);
+            if (guided.isFound()) {
+                sleepTask(170);
+                RawImageData confirmationFrame = emuManager.captureScreen(EMULATOR_NUMBER);
+                ImageSearchResultData confirmed = locateOnFrame(confirmationFrame,
+                        TemplatesEnum.SERVE_EMU_BUILDING_GUIDED_UPGRADE_2026,
+                        guidedArea, 94);
+                if (dev.frostguard.engine.helper.RecognitionConsensus.agrees(guided, confirmed, 12)) {
+                    diagnostics.decision(confirmationFrame,
+                            "Guided Upgrade action verified across two captures: " + confirmed);
+                    return buildingAttempt(startBuildingAction("upgrade", confirmed));
+                }
+                diagnostics.decision(confirmationFrame,
+                        "Guided Upgrade artwork unstable; no unverified upgrade tap");
+            }
+
             ImageSearchResultData info = emuManager.locatePattern(EMULATOR_NUMBER, frame,
                     BUILDING_BUTTON_INFO, SearchConfigConstants.RESILIENT.getThreshold());
             ImageSearchResultData upgrade = info.isFound() ? null : emuManager.locatePattern(EMULATOR_NUMBER, frame,
