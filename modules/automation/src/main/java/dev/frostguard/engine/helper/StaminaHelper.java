@@ -77,7 +77,34 @@ public class StaminaHelper {
         this.hudStaminaUi = new HudStaminaUi() {
             @Override
             public void openStaminaDialog(int settleMs) {
-                taps.tapInside(CommonGameAreas.HUD_STAMINA_ENTRY, 1, settleMs);
+                // Live 14:12 diagnostic: the modern HUD arrow occupies
+                // x~7..62,y~117..163. Legacy tap y=163..193 falls below it
+                // and repeatedly fails to open the stamina dialog. Only tap
+                // an explicitly matched control; never an arbitrary HUD spot.
+                RawImageData screen = device.captureScreen(deviceSlot);
+                var arrow = device.locatePattern(deviceSlot, screen,
+                        TemplatesEnum.SERVE_EMU_STAMINA_HUD_ARROW_2026,
+                        new dev.frostguard.api.domain.PointData(3, 110),
+                        new dev.frostguard.api.domain.PointData(90, 174), 90);
+                if (arrow.isFound()) {
+                    taps.tapInside(arrow, 1, settleMs);
+                    return;
+                }
+                // Preserve the established click area for old interfaces only
+                // when their actual legacy root art is recognized.
+                AreaData legacyAnchor = AreaData.of(590, 1145, 715, 1275);
+                boolean legacyHud = device.locatePattern(deviceSlot, screen,
+                        TemplatesEnum.GAME_HOME_FURNACE,
+                        legacyAnchor.topLeft(), legacyAnchor.bottomRight(), 90).isFound()
+                        || device.locatePattern(deviceSlot, screen,
+                        TemplatesEnum.GAME_HOME_WORLD,
+                        legacyAnchor.topLeft(), legacyAnchor.bottomRight(), 90).isFound();
+                if (legacyHud) {
+                    taps.tapInside(CommonGameAreas.HUD_STAMINA_ENTRY, 1, settleMs);
+                    return;
+                }
+                throw new IllegalStateException(
+                        "Stamina HUD entry was not verified; refusing legacy blind tap");
             }
 
             @Override
@@ -203,6 +230,7 @@ public class StaminaHelper {
         for (TemplatesEnum template : new TemplatesEnum[] {
                 TemplatesEnum.SERVE_EMU_CITY_ANCHOR,
                 TemplatesEnum.SERVE_EMU_WORLD_ANCHOR,
+                TemplatesEnum.SERVE_EMU_WORLD_ANCHOR_CURRENT,
                 TemplatesEnum.GAME_HOME_FURNACE,
                 TemplatesEnum.GAME_HOME_WORLD }) {
             if (device.locatePattern(deviceSlot, frame, template,

@@ -304,8 +304,21 @@ public class HeroRecruitmentRoutine extends DelayedTask {
 
     /** Preserve the established green-Free reward flow independently of key rewards. */
     private boolean waitForFreeRewardsAndReturn() {
-        for (int attempt = 0; attempt < 18; attempt++) {
+        boolean chestAdvanced = false;
+        for (int attempt = 0; attempt < 24; attempt++) {
             sleepTask(300);
+            // The 14:05 diagnostic captured a full-screen blue chest in the
+            // snowy Hero Recruitment cutscene. This is a post-Free-claim
+            // animation, not the Rewards exit overlay. Advance it once only
+            // after a two-frame visual match; never repeat a Recruit tap.
+            if (!chestAdvanced && attempt >= 2 && confirmFreeChestCutscene()) {
+                logInfo("Advanced free recruitment chest animation confirmed; "
+                        + "opening the already-awarded chest once, no keys or gems used");
+                tapInside(AreaData.of(335, 705, 410, 810));
+                chestAdvanced = true;
+                sleepTask(600);
+                continue;
+            }
             var exit = templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_HERO_REWARD_EXIT,
                     TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
                             .withThreshold(89).withArea(AreaData.of(190, 1140, 530, 1240)).build());
@@ -326,6 +339,18 @@ public class HeroRecruitmentRoutine extends DelayedTask {
             return false;
         }
         return false;
+    }
+
+    private boolean confirmFreeChestCutscene() {
+        var config = TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
+                .withThreshold(92).withArea(AreaData.of(250, 620, 510, 860)).build();
+        var first = templateSearchHelper.locatePattern(
+                TemplatesEnum.SERVE_EMU_HERO_FREE_CHEST_CUTSCENE_2026, config);
+        if (!first.isFound()) return false;
+        sleepTask(180);
+        var second = templateSearchHelper.locatePattern(
+                TemplatesEnum.SERVE_EMU_HERO_FREE_CHEST_CUTSCENE_2026, config);
+        return RecognitionConsensus.agrees(first, second, 12);
     }
 
     /** Read only the numeric top-HUD slot; ambiguous OCR must never permit a key purchase. */
