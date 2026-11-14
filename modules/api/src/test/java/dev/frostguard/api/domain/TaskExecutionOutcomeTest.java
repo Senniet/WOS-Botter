@@ -17,6 +17,8 @@ class TaskExecutionOutcomeTest {
         assertEquals(TaskStateData.ExecutionOutcome.FAILED, state.getExecutionOutcome());
         assertEquals("HomeNotFoundException", state.getExecutionDetail());
         assertNotNull(state.getLastAttemptAt());
+        state.setLastSuccessfulAt(LocalDateTime.of(2026, 11, 13, 14, 0));
+        assertTrue(state.getLastSuccessfulAt().isBefore(state.getLastAttemptAt()));
     }
 
     @Test void unknownOutcomeIsRepresentableWithoutMarkingSuccess() {

@@ -753,6 +753,8 @@ public class TaskQueue {
             if (!shuttingDown) {
                 handleReschedule(task, priorSchedule);
                 st.setExecutionOutcome(outcome);
+                if (outcome == TaskStateData.ExecutionOutcome.SUCCEEDED)
+                    st.setLastSuccessfulAt(LocalDateTime.now());
                 st.setExecutionDetail(outcomeDetail);
                 st.setLastAttemptAt(LocalDateTime.now());
                 recordPostExecution(task, st, ok);
@@ -828,6 +830,9 @@ public class TaskQueue {
         TaskStateData s = new TaskStateData();
         s.setProfileId(profile.getId()); s.setTaskId(task.getTpDailyTaskId());
         Object k = task.getDistinctKey(); if (k != null) s.setCustomTaskName(k.toString());
+        TaskStateData previous = TaskManagementService.shared().lookupTaskState(
+                profile.getId(), task.getTpDailyTaskId(), s.getCustomTaskName());
+        if (previous != null) s.setLastSuccessfulAt(previous.getLastSuccessfulAt());
         s.setScheduled(true); s.setExecuting(true);
         s.setExecutionOutcome(TaskStateData.ExecutionOutcome.RUNNING);
         s.setLastAttemptAt(LocalDateTime.now());

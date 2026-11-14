@@ -17,6 +17,10 @@ public class TaskStateData {
     private ExecutionOutcome executionOutcome = ExecutionOutcome.NOT_RUN;
     private String executionDetail;
     private LocalDateTime lastAttemptAt;
+    private LocalDateTime lastSuccessfulAt;
+    public LocalDateTime getLastSuccessfulAt() { return lastSuccessfulAt; }
+    public void setLastSuccessfulAt(LocalDateTime time) { this.lastSuccessfulAt = time; }
+
 
     public ExecutionOutcome getExecutionOutcome() { return executionOutcome; }
     public void setExecutionOutcome(ExecutionOutcome outcome) {
