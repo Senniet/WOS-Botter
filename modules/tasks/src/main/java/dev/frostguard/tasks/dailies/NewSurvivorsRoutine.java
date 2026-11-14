@@ -101,6 +101,7 @@ private void scheduleUnknownRetry(String reason, String type) {
         String snapshot = TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER, "newsurvivors", type);
         logWarning(routineLogNewSurvivorsLine(reason + "; retrying at "
                 + retryAt.format(DATETIME_FORMATTER) + "; " + snapshot + "."));
+        markWorkIncomplete("New Survivors: " + reason);
         reschedule(retryAt);
     }
 

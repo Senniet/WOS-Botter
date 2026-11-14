@@ -108,6 +108,7 @@ public MailRewardsRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
             LocalDateTime retryAt = LocalDateTime.now().plusMinutes(ERROR_RETRY_MINUTES_VALUE);
             logWarning(routineLogMailRewardsLine("One or more mail tabs remained unverified; "
                     + "retrying at " + retryAt.format(DATETIME_FORMATTER)));
+            markWorkIncomplete("Mail: one or more tabs could not be verified");
             reschedule(retryAt);
             return;
         }
@@ -130,6 +131,7 @@ private String routineLogMailRewardsLine(String note) {
 
 private void manageMailMenuOpenFailure() {
         logError(routineLogMailRewardsLine("Could not open mail menu. Retrying in " + ERROR_RETRY_MINUTES_VALUE + " minutes."));
+        markWorkIncomplete("Mail: menu could not be opened");
         reschedule(LocalDateTime.now().plusMinutes(ERROR_RETRY_MINUTES_VALUE));
     }
 

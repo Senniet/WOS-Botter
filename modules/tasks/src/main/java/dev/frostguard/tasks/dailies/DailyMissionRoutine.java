@@ -90,6 +90,7 @@ public DailyMissionRoutine(AccountDescriptor profile, TpDailyTaskEnum dailyMissi
 		configureRecurringBehaviorFlow();
         if (!dailyScreenReached || !claimFlowCompleted) {
             LocalDateTime retryAt = nextUnverifiedRetry(LocalDateTime.now());
+            markWorkIncomplete("Daily Missions: screen or reward claim not verified");
             reschedule(retryAt);
             logWarning(routineLogDailyMissionLine("Daily mission result unverified; "
                     + "no completion recorded. Retrying at "
