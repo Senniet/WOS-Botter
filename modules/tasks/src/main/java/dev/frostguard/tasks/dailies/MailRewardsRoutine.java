@@ -95,8 +95,8 @@ public MailRewardsRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
         }
 
         boolean allTabsVerified = handleAllMailTabs();
-        dismissMailMenu();
-        if (!isCurrentMailMenuVisible()) {
+        boolean mailClosed = dismissMailMenu();
+        if (mailClosed && !isCurrentMailMenuVisible()) {
             try {
                 navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME, this::checkPreemption);
             } catch (dev.frostguard.engine.error.HomeNotFoundException missing) {
@@ -104,7 +104,7 @@ public MailRewardsRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
                         + missing.getMessage()));
             }
         }
-        if (!allTabsVerified) {
+        if (!allTabsVerified || !mailClosed) {
             LocalDateTime retryAt = LocalDateTime.now().plusMinutes(ERROR_RETRY_MINUTES_VALUE);
             logWarning(routineLogMailRewardsLine("One or more mail tabs remained unverified; "
                     + "retrying at " + retryAt.format(DATETIME_FORMATTER)));
@@ -372,7 +372,7 @@ private void switchToTabFlow(PointData tabButton) {
 
     }
 
-private void dismissMailMenu() {
+private boolean dismissMailMenu() {
         logDebug(routineLogMailRewardsLine("Closing mail menu."));
         if (isCurrentMailMenuVisible()) {
             // The 2026 UI exposes an explicit X. Android Back is unsafe on
@@ -385,8 +385,9 @@ private void dismissMailMenu() {
                 logWarning(routineLogMailRewardsLine("Mail close X did not dismiss the page; "
                         + "stopping rather than tapping the tab bar again"));
                 markWorkIncomplete("Mail: close action did not return to Home");
+                return false;
             }
-            return;
+            return true;
         }
         // Preserve legacy close behaviour only when its old mail header is present.
         if (templateSearchHelper.locatePattern(TemplatesEnum.MAIL_MENU_OPEN,
@@ -394,7 +395,13 @@ private void dismissMailMenu() {
                         .withArea(new AreaData(MAIL_MENU_OPEN_TOP_LEFT_VALUE,
                                 MAIL_MENU_OPEN_BOTTOM_RIGHT_VALUE)).build()).isFound()) {
             pressBack();
+            sleepTask(300);
+            return !templateSearchHelper.locatePattern(TemplatesEnum.MAIL_MENU_OPEN,
+                    SearchConfig.builder().withMaxAttempts(1)
+                            .withArea(new AreaData(MAIL_MENU_OPEN_TOP_LEFT_VALUE,
+                                    MAIL_MENU_OPEN_BOTTOM_RIGHT_VALUE)).build()).isFound();
         }
+        return false;
     }
 
 private boolean isCurrentMailMenuVisible() {
