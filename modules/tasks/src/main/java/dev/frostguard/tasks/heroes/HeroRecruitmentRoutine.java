@@ -316,8 +316,14 @@ public class HeroRecruitmentRoutine extends DelayedTask {
                             .withThreshold(89).withArea(AreaData.of(190, 1140, 530, 1240)).build());
             if (!RecognitionConsensus.agrees(exit, confirmed, 12)) continue;
             tapInside(confirmed);
-            sleepTask(550);
-            return currentHeroRecruitmentVisible();
+            // Rendering may lag after the verified exit tap on gfxstream.
+            // Poll without tapping again, so an uncertain reward never causes
+            // a second claim or a blind navigation action.
+            for (int settle = 0; settle < 5; settle++) {
+                sleepTask(350);
+                if (currentHeroRecruitmentVisible()) return true;
+            }
+            return false;
         }
         return false;
     }
