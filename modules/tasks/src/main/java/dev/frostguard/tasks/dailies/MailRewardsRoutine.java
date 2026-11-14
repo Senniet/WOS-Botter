@@ -377,8 +377,15 @@ private void dismissMailMenu() {
         if (isCurrentMailMenuVisible()) {
             // The 2026 UI exposes an explicit X. Android Back is unsafe on
             // a World map (it can open the Quit game confirmation).
-            tapInside(new PointData(661, 83), new PointData(708, 136));
-            sleepTask(250);
+            // Live 720x1280 Mail UI: X is at (680, 40), not (680, 110).
+            // The old coordinate was inside the tab bar and could leave Mail open.
+            tapInside(AreaData.of(656, 24, 705, 64));
+            sleepTask(350);
+            if (isCurrentMailMenuVisible()) {
+                logWarning(routineLogMailRewardsLine("Mail close X did not dismiss the page; "
+                        + "stopping rather than tapping the tab bar again"));
+                markWorkIncomplete("Mail: close action did not return to Home");
+            }
             return;
         }
         // Preserve legacy close behaviour only when its old mail header is present.
