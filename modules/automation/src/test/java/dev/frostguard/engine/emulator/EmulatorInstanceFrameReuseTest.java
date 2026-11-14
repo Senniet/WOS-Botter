@@ -4,6 +4,7 @@ import dev.frostguard.api.domain.RawImageData;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
+import java.util.HashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -23,6 +24,16 @@ class EmulatorInstanceFrameReuseTest {
 
         assertSame(cached, selected);
         assertEquals(0, captures.get());
+    }
+
+    @Test
+    void changingTheUiClearsAnyReusableOcrFrame() {
+        RawImageData oldFrame = RawImageData.capture(new byte[4], 1, 1, 32);
+        RawImageData fresh = RawImageData.capture(new byte[4], 1, 1, 32);
+        Map<String, RawImageData> frames = new HashMap<>();
+        frames.put("device", oldFrame);
+        EmulatorInstance.invalidateCapturedFrame(frames, "device");
+        assertSame(fresh, EmulatorInstance.selectFrame(frames, "device", true, () -> fresh));
     }
 
     @Test

@@ -32,9 +32,9 @@ public final class BlueStacksEmulatorInstance extends EmulatorInstance {
         ScreenGeometry geometry = ScreenGeometry.forPortraitCapture(raw);
         if (geometry == null) {
             screenGeometry.remove(id);
-            LOG.warn("BlueStacks capture {}x{} is not a 9:16 portrait frame; "
-                    + "coordinate normalization disabled for {}", raw.getWidth(), raw.getHeight(), id);
-            return raw;
+            throw new IllegalStateException("Unsafe BlueStacks capture geometry for " + id
+                    + ": " + raw.getWidth() + "x" + raw.getHeight()
+                    + "; refusing to use unmapped screenshot coordinates");
         }
         screenGeometry.put(id, geometry);
         if (geometry.needsResize()) {
@@ -51,7 +51,14 @@ public final class BlueStacksEmulatorInstance extends EmulatorInstance {
             captureScreenshot(id);
             geometry = screenGeometry.get(id);
         }
-        return geometry == null ? point : geometry.toDevice(point);
+        if (geometry == null) throw new IllegalStateException(
+                "No verified BlueStacks screenshot geometry for " + id);
+        return geometry.toDevice(point);
+    }
+
+    @Override public void invalidateAllCaches(String id) {
+        screenGeometry.remove(id);
+        super.invalidateAllCaches(id);
     }
 
     public BlueStacksEmulatorInstance(String path) { super(path); }

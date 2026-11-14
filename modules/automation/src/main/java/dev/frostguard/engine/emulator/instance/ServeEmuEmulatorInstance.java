@@ -92,9 +92,19 @@ public final class ServeEmuEmulatorInstance extends EmulatorInstance {
         return !result.timedOut() && result.exitCode() == 0 && result.output().trim().equals("device");
     }
 
+    @Override public void invalidateAllCaches(String id) {
+        geometry.remove(id);
+        super.invalidateAllCaches(id);
+    }
+
     @Override protected RawImageData prepareCapturedFrame(String id, RawImageData raw) {
         ScreenGeometry frame = ScreenGeometry.forPortraitCapture(raw);
-        if (frame == null) { geometry.remove(id); return raw; }
+        if (frame == null) {
+            geometry.remove(id);
+            throw new IllegalStateException("Unsafe serve-emu capture geometry for " + id
+                    + ": " + raw.getWidth() + "x" + raw.getHeight()
+                    + "; refusing to use unmapped screenshot coordinates");
+        }
         geometry.put(id, frame);
         return frame.normalize(raw);
     }
@@ -105,6 +115,8 @@ public final class ServeEmuEmulatorInstance extends EmulatorInstance {
             captureScreenshot(id);
             frame = geometry.get(id);
         }
-        return frame == null ? point : frame.toDevice(point);
+        if (frame == null) throw new IllegalStateException(
+                "No verified serve-emu screenshot geometry for " + id);
+        return frame.toDevice(point);
     }
 }

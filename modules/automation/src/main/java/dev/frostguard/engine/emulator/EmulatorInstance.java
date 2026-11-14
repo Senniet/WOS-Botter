@@ -38,6 +38,7 @@ public abstract class EmulatorInstance {
     private final ConcurrentHashMap<String, Boolean>      runCache  = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Long>         runExpiry = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, RawImageData> lastFrame = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, String> lastReportedGeometry = new ConcurrentHashMap<>();
     private final ReentrantLock bridgeMtx = new ReentrantLock();
     // Both the GlobalMonitor ticker and task queue capture the same emulator.
     // Serialize shell screencap by serial to avoid overlapping multi-MB ADB reads.
@@ -197,7 +198,16 @@ public abstract class EmulatorInstance {
     }
 
     protected void invalidateRunningStatusCache(String idx) { runCache.remove(idx); runExpiry.remove(idx); }
-    public void invalidateAllCaches(String idx) { invalidateDeviceCache(idx); invalidateRunningStatusCache(idx); }
+    public void invalidateAllCaches(String idx) {
+        invalidateDeviceCache(idx);
+        invalidateRunningStatusCache(idx);
+        invalidateCapturedFrame(lastFrame, idx);
+        lastReportedGeometry.remove(idx);
+    }
+
+    static void invalidateCapturedFrame(Map<String, RawImageData> frames, String idx) {
+        frames.remove(idx);
+    }
 
     // --- 3-phase retry ---
 
@@ -333,7 +343,15 @@ public abstract class EmulatorInstance {
             d.executeShellCommand("screencap", new CollectingOutputReceiver() {
                 @Override public void addOutput(byte[] data, int off, int len) { buf.write(data, off, len); }
             }, SCREENSHOT_COMMAND_TIMEOUT_MS, TimeUnit.MILLISECONDS);
-            RawImageData frame = prepareCapturedFrame(idx, decodeScreenshotPayload(buf.toByteArray()));
+            RawImageData raw = decodeScreenshotPayload(buf.toByteArray());
+            RawImageData frame = prepareCapturedFrame(idx, raw);
+            String signature = raw.getWidth() + "x" + raw.getHeight() + " -> "
+                    + frame.getWidth() + "x" + frame.getHeight();
+            String previous = lastReportedGeometry.put(idx, signature);
+            if (!signature.equals(previous)) {
+                LOG.info("Emulator {} ADB screenshot geometry {} (physical -> recognition); "
+                        + "tap mapping follows the active screenshot", idx, signature);
+            }
             lastFrame.put(idx, frame);
             return frame;
         } catch (Exception e) {
@@ -491,6 +509,10 @@ public abstract class EmulatorInstance {
             invalidateAllCaches(idx);
             throw new ADBConnectionException("Input dispatch outcome unknown for " + tag
                     + " on " + idx + "; command was not retried", failure);
+        } finally {
+            // A previous frame must never be reused for OCR after any input:
+            // even an unacknowledged tap may already have changed the UI.
+            invalidateCapturedFrame(lastFrame, idx);
         }
     }
 
