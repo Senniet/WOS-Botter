@@ -1554,7 +1554,15 @@ private void pressTrainButton() {
                 TRAINING_TRAIN_BUTTON,
                 SearchConfigConstants.DEFAULT_SINGLE);
 
+        if (!trainButton.isFound()) {
+            // A stale screenshot after selecting the highest tier can miss the
+            // Train control. Refresh once; do not scan all tiers again.
+            emuManager.captureScreen(EMULATOR_NUMBER);
+            trainButton = templateSearchHelper.locatePattern(
+                    TRAINING_TRAIN_BUTTON, SearchConfigConstants.DEFAULT_SINGLE);
+        }
         if (trainButton.isFound()) {
+            logInfo(routineLogTrainingLine("Train button located; submitting selected troop level."));
             tapInside(trainButton.getPoint(), trainButton.getPoint(), 1, 500);
 
             emuManager.captureScreen(EMULATOR_NUMBER);
@@ -1571,7 +1579,10 @@ private void pressTrainButton() {
                 tapInside(trainButton.getPoint(), trainButton.getPoint(), 1, 500);
             }
         } else {
-            logWarning(routineLogTrainingLine("Train button not detected."));
+            logWarning(routineLogTrainingLine("Train button not detected after fresh capture; "
+                    + "not tapping an unverified position. "
+                    + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+                            "training", "train-button-missing")));
         }
     }
 
