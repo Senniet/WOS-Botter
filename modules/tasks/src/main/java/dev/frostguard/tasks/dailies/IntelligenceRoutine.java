@@ -334,7 +334,14 @@ public IntelligenceRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
 			navigationHelper.ensureCorrectScreenLocation(LaunchPoint.WORLD);
 			logInfo(routineLogIntelligenceLine("Intel gather-priority mode active (smart=" + useSmartProcessing
 					+ ", recall=" + recallGatherTroopsFlow + "). Recalling all gather troops..."));
-			recallGatherTroopsFlow();
+            if (!recallGatherTroopsFlow()) {
+                // A World view with occupied marches but no Recall controls
+                // is NOT proof that gather marches were recalled. Yield
+                // instead of blocking other serial queue tasks for an hour.
+                processingTask = false;
+                reschedule(LocalDateTime.now().plusMinutes(10));
+                return;
+            }
 			shouldRequeueGatherAfterIntel = true;
 			logInfo(routineLogIntelligenceLine("All gather troops recalled. Proceeding with intel processing."));
 			initiallyIdleMarches = resolveConfiguredIntelMarchesFlow();
@@ -746,8 +753,13 @@ private void finalizePostIntelTaskFlow() {
         }
 	}
 
-private void recallGatherTroopsFlow() {
-		int maxRetries = 120;
+private boolean recallGatherTroopsFlow() {
+        // 120 legacy attempts caused >1-hour repeated template probes on a
+        // World screen where two marches were busy and no recall buttons
+        // were present. A bounded retry is safer for a serial task queue.
+        final int maxRetries = 12;
+        int unchangedMissingEvidence = 0;
+        int lastUnresolvedIdleCount = -1;
 
 		int attempt = 0;
 
@@ -785,7 +797,7 @@ private void recallGatherTroopsFlow() {
 				if (idleMarches >= configuredMarches) {
 					logInfo(routineLogIntelligenceLine("Zero march indicators detected and all marches are idle ("
 							+ idleMarches + "/" + configuredMarches + "). Recall is complete."));
-					return;
+					return true;
 				}
 
 				int vipAdjustedMarches = Math.max(MIN_INTEL_MARCH_SLOTS, configuredMarches - 1);
@@ -796,16 +808,31 @@ private void recallGatherTroopsFlow() {
 									+ " marches idle, possibly VIP expired.");
 					logInfo(routineLogIntelligenceLine("Recall treated as complete with adjusted Intel march capacity "
 							+ vipAdjustedMarches + "/" + configuredMarches + "."));
-					return;
+					return true;
 				}
 
-				logWarning(routineLogIntelligenceLine(
-						"Zero recall/view/speedup indicators detected, but only " + idleMarches +
-						"/" + configuredMarches + " marches are idle. Retrying recall to avoid false success."));
+                unchangedMissingEvidence = IntelRecallEvidencePolicy.nextMissingEvidenceStreak(
+                        unchangedMissingEvidence, lastUnresolvedIdleCount, idleMarches);
+                lastUnresolvedIdleCount = idleMarches;
+                if (IntelRecallEvidencePolicy.shouldStopUnverified(
+                        unchangedMissingEvidence, idleMarches, configuredMarches)) {
+                    logWarning(routineLogIntelligenceLine(
+                            "Recall could not be verified: " + idleMarches + "/" + configuredMarches
+                            + " idle and no Recall/View/Speedup control on "
+                            + unchangedMissingEvidence + " consecutive checks. "
+                            + "Leaving active marches untouched and retrying Intel later."));
+                    return false;
+                }
+                logWarning(routineLogIntelligenceLine(
+                        "No recall controls, " + idleMarches + "/" + configuredMarches
+                        + " marches idle; checking for a stable unresolved state ("
+                        + unchangedMissingEvidence + "/3)."));
 				sleepTask(600);
 				continue;
 			}
 
+            unchangedMissingEvidence = 0;
+            lastUnresolvedIdleCount = -1;
 			if (foundReturning) {
 				logInfo(routineLogIntelligenceLine("Returning arrow detected - attempting to tap recall button"));
 				tapInside(returningArrow.getPoint(), returningArrow.getPoint(), 1, 300);
@@ -820,7 +847,9 @@ private void recallGatherTroopsFlow() {
 			sleepTask(200);
 		}
 
-		logError(routineLogIntelligenceLine("recallGatherTroopsFlow exceeded max attempts (" + maxRetries + "), exiting to avoid deadlock"));
+        logWarning(routineLogIntelligenceLine("Recall was not verified within " + maxRetries
+                + " checks; yielding to the task scheduler without claiming success"));
+        return false;
 	}
 
 	// Changed by pernerch | Date: 2026-07-02 | Why: keep detection and recall click in the same
