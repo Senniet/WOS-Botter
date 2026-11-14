@@ -792,13 +792,41 @@ private boolean recallGatherTroopsFlow() {
 
 			if (!foundReturning && !foundView && !foundSpeedup) {
 				// Changed by pernerch | Date: 2026-07-04 | Why: replace hard-coded march ceiling with configured/adjusted runtime capacity.
-				int configuredMarches = resolveConfiguredIntelMarchesFlow();
-				int idleMarches = countIdleMarchesFlow();
-				if (idleMarches >= configuredMarches) {
+                int configuredMarches = resolveConfiguredIntelMarchesFlow();
+                List<MarchSlotState> queueSlots = marchHelper.readMarchQueue();
+                int idleMarches = countIdleMarchesFlow(queueSlots);
+                if (idleMarches >= configuredMarches) {
 					logInfo(routineLogIntelligenceLine("Zero march indicators detected and all marches are idle ("
 							+ idleMarches + "/" + configuredMarches + "). Recall is complete."));
 					return true;
 				}
+
+                // Actual live March Queue: 4 Idle, #5 Unlock and #6 Unavailable,
+                // although configured march count remains 6. Verify this
+                // stable, complete six-row state twice before concluding that
+                // no physical gathering march requires recall.
+                int firstUsable = IntelMarchSlotCapacityPolicy.fullyIdleUsableCapacity(
+                        queueSlots, configuredMarches);
+                if (firstUsable > 0) {
+                    List<MarchSlotState> confirmation = marchHelper.readMarchQueue();
+                    int secondUsable = IntelMarchSlotCapacityPolicy.fullyIdleUsableCapacity(
+                            confirmation, configuredMarches);
+                    if (IntelMarchSlotCapacityPolicy.confirmedByTwoReadings(
+                            firstUsable, secondUsable)) {
+                        applyIntelMarchCapacityOverrideFlow(firstUsable,
+                                "March Queue twice confirmed " + firstUsable
+                                        + " usable Idle slots and " + (6 - firstUsable)
+                                        + " locked/unavailable slots");
+                        logInfo(routineLogIntelligenceLine(
+                                "All actually usable march slots are idle (" + firstUsable
+                                        + "/" + configuredMarches + " configured). "
+                                        + "No recall required; continuing Intel."));
+                        return true;
+                    }
+                    logWarning(routineLogIntelligenceLine(
+                            "March Queue usable-slot readings disagreed: " + firstUsable
+                                    + "/" + secondUsable + "; no capacity adjustment"));
+                }
 
 				int vipAdjustedMarches = Math.max(MIN_INTEL_MARCH_SLOTS, configuredMarches - 1);
 				// Changed by pernerch | Date: 2026-07-04 | Why: treat configured-1 idle marches with zero indicators as possible VIP slot expiry.
