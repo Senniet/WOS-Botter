@@ -616,6 +616,7 @@ public class NavigationHelper {
         broadcastDebug("Locating screen - need " + target);
         int budget = 4;
         int pass = 1;
+        boolean overviewDismissed = false;
         while (pass <= budget) {
             checkpoint.run();
             // detect reconnect
@@ -650,6 +651,19 @@ public class NavigationHelper {
                     interruptibleWait(700);
                     if (findWorldAnchor().isFound()) return target;
                 }
+            }
+
+            // The Resource Production "Overview" modal hides the entire
+            // City/World navigation bar. It was confirmed in the 14:08-14:09
+            // diagnostics; without a typed recovery this loop probes unrelated
+            // Back and Wood/Meat patterns until HomeNotFoundException.
+            // Only close a double-confirmed Overview once in this invocation.
+            if (!atHome && !atWorld && !overviewDismissed
+                    && target != LaunchPoint.ANY
+                    && dismissVerifiedResourceOverview(checkpoint)) {
+                overviewDismissed = true;
+                pass++;
+                continue;
             }
 
             // A recognised Rewards overlay says "Tap anywhere to exit". Do
@@ -730,6 +744,40 @@ public class NavigationHelper {
                     + "to protect against Quit game dialog");
         }
         throw new HomeNotFoundException("Home not found after " + budget + " verified recovery attempts");
+    }
+
+    /** Close only the recorded Resource Production Overview pop-up. */
+    private boolean dismissVerifiedResourceOverview(Runnable checkpoint) {
+        var titleConfig = TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
+                .withThreshold(92).withArea(AreaData.of(0, 315, 250, 420)).build();
+        var closeConfig = TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
+                .withThreshold(92).withArea(AreaData.of(610, 310, 718, 420)).build();
+        var title = searcher.locatePattern(TemplatesEnum.SERVE_EMU_RESOURCES_OVERVIEW_TITLE_2026,
+                titleConfig);
+        if (!title.isFound()) return false;
+        var close = searcher.locatePattern(TemplatesEnum.SERVE_EMU_RESOURCES_OVERVIEW_CLOSE_2026,
+                closeConfig);
+        if (!close.isFound()) return false;
+        interruptibleWait(150);
+        var titleAgain = searcher.locatePattern(
+                TemplatesEnum.SERVE_EMU_RESOURCES_OVERVIEW_TITLE_2026, titleConfig);
+        var closeAgain = searcher.locatePattern(
+                TemplatesEnum.SERVE_EMU_RESOURCES_OVERVIEW_CLOSE_2026, closeConfig);
+        if (!RecognitionConsensus.agrees(title, titleAgain, 12)
+                || !RecognitionConsensus.agrees(close, closeAgain, 12)) {
+            broadcastWarn("Resource Overview title/X were not stable; leaving popup untouched");
+            return false;
+        }
+        checkpoint.run();
+        taps.tapInside(closeAgain);
+        broadcastInfo("Closed confirmed Resource Production Overview using its X control");
+        interruptibleWait(500);
+        if (searcher.locatePattern(TemplatesEnum.SERVE_EMU_RESOURCES_OVERVIEW_TITLE_2026,
+                titleConfig).isFound()) {
+            throw new HomeNotFoundException("Resource Overview remained open after one verified close; "
+                    + "refusing a second tap");
+        }
+        return true;
     }
 
     static boolean shouldRecheckUnknownScreen(int pass) {
