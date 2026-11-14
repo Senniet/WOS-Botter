@@ -958,7 +958,29 @@ private boolean openUpTrainingInterface() {
         }
 
         tapInside(trainingButton.getPoint(), trainingButton.getPoint(), 1, 1000);
+        if (!isTrainingCampInterfaceVisible()) {
+            logWarning(routineLogTrainingLine("Train control was tapped, but troop panel tab "
+                    + "was not confirmed; no tier scans or subsequent taps"));
+            return false;
+        }
         return true;
+    }
+
+private boolean isTrainingCampInterfaceVisible() {
+        var scope=SearchConfig.builder().withMaxAttempts(1).withThreshold(90)
+                .withArea(AreaData.of(0, 1160, 248, 1275)).build();
+        for (int attempt=0; attempt<3; attempt++) {
+            if (templateSearchHelper.locatePattern(
+                    TemplatesEnum.TRAINING_CAMP_INFANTRY_TAB_LABEL_2026, scope).isFound()
+                    || templateSearchHelper.locatePattern(
+                    TemplatesEnum.TRAINING_CAMP_INFANTRY_TAB_ACTIVE, scope).isFound()
+                    || templateSearchHelper.locatePattern(
+                    TemplatesEnum.TRAINING_CAMP_INFANTRY_TAB_INACTIVE, scope).isFound()) {
+                return true;
+            }
+            if (attempt<2) sleepTask(250);
+        }
+        return false;
     }
 
 private boolean manageAllTrainingQueues(List<QueueSlot> queues) {
@@ -1054,6 +1076,14 @@ private QueueSlot inspectForStateKeywords(
     }
 
 private int selectHighestUnlockedTroopLevel(TroopTypeShape troopType) {
+        // 14:07 logs show 11 tier templates scanned on City after the
+        // previous Train tap failed to open the troop interface. Never swipe
+        // or choose tier cards without a verified Infantry Camp tab.
+        if (!isTrainingCampInterfaceVisible()) {
+            logWarning(routineLogTrainingLine("Troop training panel not verified; "
+                    + "skipping tier search instead of swiping the City/World map"));
+            return -1;
+        }
         List<TemplatesEnum> templates = resolveTroopsTemplates(troopType);
         resetTroopListToEndFlow();
         emuManager.captureScreen(EMULATOR_NUMBER);
