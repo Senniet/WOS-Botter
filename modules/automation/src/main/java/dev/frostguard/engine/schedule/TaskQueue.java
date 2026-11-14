@@ -682,6 +682,8 @@ public class TaskQueue {
         TaskStateData st = recordPreExecution(task);
         long t0 = System.currentTimeMillis();
         boolean ok = false;
+        TaskStateData.ExecutionOutcome outcome = TaskStateData.ExecutionOutcome.UNKNOWN;
+        String outcomeDetail = null;
         ExecutionContext ctx = new ExecutionContext(task);
         synchronized (this) {
             runningContext = ctx;
@@ -709,11 +711,14 @@ public class TaskQueue {
                                 ? scheduledAfterRun.format(TS_FMT) : "none"));
                 AnalyticsService.getInstance().trackTaskCompleted(task.getTaskName(), "deferred", elapsed);
                 ok = false;
+                outcome = TaskStateData.ExecutionOutcome.DEFERRED;
+                outcomeDetail = task.getIncompleteWorkReason();
             } else {
                 emitInfoTask(task, "Completed: " + task.getTaskName() + " scheduled="
                         + (scheduledAfterRun != null ? scheduledAfterRun.format(TS_FMT) : "none"));
                 AnalyticsService.getInstance().trackTaskCompleted(task.getTaskName(), "success", elapsed);
                 ok = true;
+                outcome = TaskStateData.ExecutionOutcome.SUCCEEDED;
                 checkDailyMissionFollow(task);
                 try {
                     TaskFailureIncidentService.obtain().recordSuccess(
@@ -727,7 +732,12 @@ public class TaskQueue {
             emitWarnTask(task, "PREEMPTED: " + ex.getReasoning());
             AnalyticsService.getInstance().trackTaskCompleted(task.getTaskName(), "preempted", (System.currentTimeMillis()-t0)/1000);
             task.reschedule(LocalDateTime.now()); ok = false;
+            outcome = TaskStateData.ExecutionOutcome.PREEMPTED;
+            outcomeDetail = ex.getReasoning();
         } catch (Exception ex) {
+            outcome = ex.getClass().getSimpleName().contains("OutcomeUnknown")
+                    ? TaskStateData.ExecutionOutcome.UNKNOWN : TaskStateData.ExecutionOutcome.FAILED;
+            outcomeDetail = ex.getClass().getSimpleName() + ": " + ex.getMessage();
             if (shuttingDown) {
                 emitInfo("Task interrupted during shutdown: " + task.getTaskName());
                 ok = false;
@@ -742,6 +752,9 @@ public class TaskQueue {
             synchronized (this) { if (runningContext != null) runningContext.clear(); runningContext = null; }
             if (!shuttingDown) {
                 handleReschedule(task, priorSchedule);
+                st.setExecutionOutcome(outcome);
+                st.setExecutionDetail(outcomeDetail);
+                st.setLastAttemptAt(LocalDateTime.now());
                 recordPostExecution(task, st, ok);
             }
         }
@@ -816,6 +829,8 @@ public class TaskQueue {
         s.setProfileId(profile.getId()); s.setTaskId(task.getTpDailyTaskId());
         Object k = task.getDistinctKey(); if (k != null) s.setCustomTaskName(k.toString());
         s.setScheduled(true); s.setExecuting(true);
+        s.setExecutionOutcome(TaskStateData.ExecutionOutcome.RUNNING);
+        s.setLastAttemptAt(LocalDateTime.now());
         s.setLastExecutionTime(LocalDateTime.now()); s.setNextExecutionTime(task.getScheduled());
         TaskManagementService.shared().recordTaskState(profile.getId(), s);
         return s;
