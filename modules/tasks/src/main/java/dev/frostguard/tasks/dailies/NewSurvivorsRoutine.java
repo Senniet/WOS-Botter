@@ -49,8 +49,11 @@ public NewSurvivorsRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
                     return;
                 }
                 logInfo(routineLogNewSurvivorsLine("Welcome In dismissed; proceeding to assignment."));
-                logInfo(routineLogNewSurvivorsLine("Waiting briefly before reassigning survivors to buildings."));
-                sleepTask(10000);
+                // The old fixed 10-second wait delayed every admission even when
+                // the game had already returned to its normal UI. Refresh after
+                // the Welcome In transition; slot recognition below is the gate.
+                sleepTask(700);
+                emuManager.captureScreen(EMULATOR_NUMBER);
 
                 tapNear(new PointData(309, 20), 3);
                 sleepTask(300);
