@@ -25,5 +25,5 @@ The branch chain includes the user-in-chat fixes, a concurrently integrated hour
 
 - Every new action-relevant template was checked against a real positive screenshot and several negative screens. Template geometry and stable two-frame matching are required before any **new** tap.
 - No blind Android Back, no duplicate recruit/claim, no in-game purchase, no emulator reset; only passive ADB screenshots and read-only process checks.
-- Full Java regression after all fixes: **307 suites, 1,235 tests, 0 failures, 0 errors, 4 skipped** using `mvnw -pl modules/tasks -am test`. Report log: `~/.cache/survivalops-tests/diagnostic-followup-final-stamina-20261114.log`. Surefire results are retained under `modules/**/target/surefire-reports/`.
+- Full Java regression after all fixes: **308 suites, 1,238 tests, 0 failures, 0 errors, 4 skipped** using `mvnw -pl modules/tasks -am test`. Report log: `~/.cache/survivalops-tests/diagnostic-followup-combined-final-20261114.log`. Surefire results are retained under `modules/**/target/surefire-reports/`.
 - Existing priority/preemption and authored task logic remain unchanged except for the verified bug fixes listed above.
