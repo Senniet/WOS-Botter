@@ -71,9 +71,9 @@ public DailyMissionRoutine(AccountDescriptor profile, TpDailyTaskEnum dailyMissi
 	protected void execute() {
 
         claimActionObserved = false;
-		hydrateTaskConfiguration();
-		reachDailyMissions();
-		boolean dailyScreenReached = switchToDailyMissionsTabFlow();
+        hydrateTaskConfiguration();
+        boolean entryReady = reachDailyMissions();
+        boolean dailyScreenReached = entryReady && switchToDailyMissionsTabFlow();
 		boolean claimFlowCompleted = dailyScreenReached && redeemAllRewards();
         if (shouldCountClaim(claimFlowCompleted, claimActionObserved)) {
             StatisticsService.obtain().addToCounter(profile, "Daily Missions Claimed", 1);
@@ -89,6 +89,7 @@ public DailyMissionRoutine(AccountDescriptor profile, TpDailyTaskEnum dailyMissi
 
 		configureRecurringBehaviorFlow();
         if (!dailyScreenReached || !claimFlowCompleted) {
+            markWorkIncomplete("Daily Missions screen or claim not verified");
             LocalDateTime retryAt = nextUnverifiedRetry(LocalDateTime.now());
             reschedule(retryAt);
             logWarning(routineLogDailyMissionLine("Daily mission result unverified; "
@@ -306,15 +307,33 @@ private ImageSearchResultData seekForClaimAllButton() {
         return TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER, "daily-missions", kind);
     }
 
-private void reachDailyMissions() {
-		logInfo(routineLogDailyMissionLine("Moving to daily missions interface"));
+private boolean reachDailyMissions() {
+        logInfo(routineLogDailyMissionLine("Moving to daily missions interface"));
+        if (currentDailyTitle().isFound()) return true;
 
-        if (currentDailyTitle().isFound()) return;
+        // Actual failure snapshot: the Rewards overlay covers Daily Missions.
+        // Resume only this positively verified overlay before any HUD tap.
+        SearchConfig bannerSearch = SearchConfig.builder().withMaxAttempts(1)
+                .withThreshold(90).withArea(AreaData.of(40,245,680,425)).build();
+        ImageSearchResultData existingRewards = templateSearchHelper.locateAction(
+                TemplatesEnum.SERVE_EMU_REWARDS_BANNER, bannerSearch,
+                TemplatesEnum.SHARED_REWARDS_BANNER_CURRENT);
+        if (existingRewards.isFound()) {
+            logInfo(routineLogDailyMissionLine("Resuming existing verified Rewards overlay first"));
+            if (!dismissRewardPopupsFlow() || !currentDailyTitle().isFound()) {
+                logWarning(routineLogDailyMissionLine(
+                        "Daily screen not confirmed after Rewards; no blind HUD tap"));
+                return false;
+            }
+            return true;
+        }
+
+        navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME, this::checkPreemption);
         tapNear(DAILY_MISSIONS_BUTTON_VALUE);
-        // The next step verifies the title/tab, so a long fixed pause is unnecessary.
+        // The next step verifies title/tab; no automatic success on entry.
         sleepTask(450);
-
-	}
+        return true;
+    }
 
 static LocalDateTime nextUnverifiedRetry(LocalDateTime now) {
         return now.plusMinutes(UNVERIFIED_RETRY_MINUTES);

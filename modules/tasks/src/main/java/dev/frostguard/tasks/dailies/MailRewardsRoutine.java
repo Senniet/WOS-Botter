@@ -105,6 +105,7 @@ public MailRewardsRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
             }
         }
         if (!allTabsVerified) {
+            markWorkIncomplete("Mail reward tabs could not all be verified");
             LocalDateTime retryAt = LocalDateTime.now().plusMinutes(ERROR_RETRY_MINUTES_VALUE);
             logWarning(routineLogMailRewardsLine("One or more mail tabs remained unverified; "
                     + "retrying at " + retryAt.format(DATETIME_FORMATTER)));
@@ -129,6 +130,7 @@ private String routineLogMailRewardsLine(String note) {
     }
 
 private void manageMailMenuOpenFailure() {
+        markWorkIncomplete("Mail menu could not be opened or resumed");
         logError(routineLogMailRewardsLine("Could not open mail menu. Retrying in " + ERROR_RETRY_MINUTES_VALUE + " minutes."));
         reschedule(LocalDateTime.now().plusMinutes(ERROR_RETRY_MINUTES_VALUE));
     }
@@ -398,6 +400,41 @@ private boolean openUpMailMenu() {
         logInfo(routineLogMailRewardsLine("Entering mail menu."));
         if (isCurrentMailMenuVisible()) return true;
 
+        // Today's diagnostic showed the bot already inside a mail Battle
+        // Overview, where the HUD mailbox icon cannot be found. Return
+        // using its positively matched header Back control in two frames.
+        SearchConfig reportTitleSearch = SearchConfig.builder().withMaxAttempts(1)
+                .withThreshold(92).withArea(AreaData.of(85,7,192,76)).build();
+        ImageSearchResultData reportTitle = templateSearchHelper.locatePattern(
+                TemplatesEnum.SERVE_EMU_MAIL_REPORT_TITLE_NOV_2026, reportTitleSearch);
+        if (reportTitle.isFound()) {
+            SearchConfig reportBackSearch = SearchConfig.builder().withMaxAttempts(1)
+                    .withThreshold(92).withArea(AreaData.of(0,0,95,91)).build();
+            ImageSearchResultData back = templateSearchHelper.locatePattern(
+                    TemplatesEnum.SERVE_EMU_MAIL_REPORT_BACK_NOV_2026, reportBackSearch);
+            sleepTask(160);
+            ImageSearchResultData titleAgain = templateSearchHelper.locatePattern(
+                    TemplatesEnum.SERVE_EMU_MAIL_REPORT_TITLE_NOV_2026, reportTitleSearch);
+            ImageSearchResultData backAgain = templateSearchHelper.locatePattern(
+                    TemplatesEnum.SERVE_EMU_MAIL_REPORT_BACK_NOV_2026, reportBackSearch);
+            if (!dev.frostguard.engine.helper.RecognitionConsensus.agrees(reportTitle,titleAgain,12)
+                    || !dev.frostguard.engine.helper.RecognitionConsensus.agrees(back,backAgain,12)) {
+                logWarning(routineLogMailRewardsLine(
+                        "Mail report open but Back/title not stable; refusing a blind tap"));
+                return false;
+            }
+            logInfo(routineLogMailRewardsLine("Verified open Battle Overview; returning to Mail list"));
+            tapInside(backAgain);
+            sleepTask(500);
+            if (!confirmMailMenuOpened()) {
+                logWarning(routineLogMailRewardsLine(
+                        "Report Back did not reveal Mail list; refusing further mail taps"));
+                return false;
+            }
+            return true;
+        }
+
+        navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME, this::checkPreemption);
         ImageSearchResultData mailMenu = templateSearchHelper.locatePattern(
                 TemplatesEnum.MAIL_MENU,
                 SearchConfig.builder()
