@@ -42,6 +42,20 @@ class StaminaHelperHudReadTest {
     }
 
     @Test
+    void delayedDialogIsRecheckedWithoutRepeatingHudTap() {
+        StaminaService service = StaminaService.getServices();
+        RecordingHudUi ui = new RecordingHudUi(51);
+        ui.dialogVisibleAfterSecondCheck = true;
+        StaminaHelper helper = new StaminaHelper(service, 9320L, ui);
+
+        helper.updateStaminaFromHud();
+
+        assertEquals(List.of("open-hud", "verify-dialog", "verify-dialog", "read", "cleanup"), ui.events);
+        assertEquals(1, ui.dialogOpenCount);
+        assertEquals(51, service.findCurrentStamina(9320L).orElseThrow());
+    }
+
+    @Test
     void exhaustedOcrCapturesStaminaFailureBeforeOneCleanup() throws IOException {
         StaminaService service = StaminaService.getServices();
         RecordingHudUi ui = new RecordingHudUi(null);
@@ -102,7 +116,7 @@ class StaminaHelperHudReadTest {
 
         helper.updateStaminaFromHud();
 
-        assertEquals(List.of("open-hud", "verify-dialog", "snapshot"), ui.events);
+        assertEquals(List.of("open-hud", "verify-dialog", "verify-dialog", "snapshot"), ui.events);
         assertEquals(0, ui.ocrCount);
         assertEquals(0, ui.cleanupCount);
         assertEquals(1, helper.captureCount);
@@ -127,6 +141,8 @@ class StaminaHelperHudReadTest {
         private boolean failRead;
         private RuntimeException readFailure;
         private boolean dialogVisible = true;
+        private boolean dialogVisibleAfterSecondCheck;
+        private int dialogChecks;
         private final List<String> events = new ArrayList<>();
         private int dialogOpenCount;
         private int ocrCount;
@@ -147,7 +163,8 @@ class StaminaHelperHudReadTest {
         @Override
         public boolean isStaminaDialogVisible() {
             events.add("verify-dialog");
-            return dialogVisible;
+            dialogChecks++;
+            return dialogVisibleAfterSecondCheck ? dialogChecks > 1 : dialogVisible;
         }
 
         @Override

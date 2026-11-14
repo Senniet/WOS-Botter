@@ -178,6 +178,12 @@ public class StaminaHelper {
             hudStaminaUi.openStaminaDialog(STAMINA_DIALOG_SETTLE_MS);
             dialogVerified = hudStaminaUi.isStaminaDialogVisible();
             if (!dialogVerified) {
+                // On a loaded serve-emu the HUD tap can be acknowledged before
+                // the dialog finishes animating. Reobserve without a second tap.
+                pause(350);
+                dialogVerified = hudStaminaUi.isStaminaDialogVisible();
+            }
+            if (!dialogVerified) {
                 emitWarn("Stamina dialog was not confirmed after HUD tap; "
                         + "skipping OCR and blind Back; " + retainStaminaOcrFailureSnapshot());
                 return;
