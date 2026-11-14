@@ -909,12 +909,9 @@ private Integer extractMaxTroopCountFlow() {
             if (!trainingStartedSuccessfully) {
                 logWarning(routineLogTrainingLine("Multi-tab flow failed for " + queue.type().name() + ". Falling back to single queue flow."));
                 
-                // Reset state by forcing a menu close (which acts as a generic back/reset in many cases)
-                marchHelper.closeLeftMenu();
-                for (int i = 0; i < 3; i++) {
-                    dismissPopupsFlow();
-                }
-                
+                // Recover through the shared, screen-verified navigation path.
+                // Blind dismiss taps may claim rewards or select unrelated UI.
+                navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME);
                 inTrainingInterface = false;
 
                 LocalDateTime fallbackTime = trainSingleQueueFlow(queue);
@@ -1363,7 +1360,11 @@ private LocalDateTime trainSingleQueueFlow(QueueSlot queue) {
         }
 
 
-        performTrainingForQueue(queue);
+        if (!performTrainingForQueue(queue)) {
+            logWarning(routineLogTrainingLine("Training action not confirmed for "
+                    + queue.type().name() + "; not reporting a completion time."));
+            return null;
+        }
 
         return extractTrainingCompletionTimeFlow();
     }
