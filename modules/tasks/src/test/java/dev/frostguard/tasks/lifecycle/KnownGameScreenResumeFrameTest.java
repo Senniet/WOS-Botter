@@ -29,6 +29,22 @@ class KnownGameScreenResumeFrameTest {
         assertNull(KnownGameScreenResume.findSafeBackPage(frame("recruit-city-redacted.png")));
     }
 
+    @Test void recognizesBothLiveAllianceAndWarPagesWithoutExitingTheGame() throws Exception {
+        assertEquals(KnownGameScreenResume.Page.ALLIANCE,
+                KnownGameScreenResume.findSafeBackPage(frame(
+                        "alliance-war-20261114/alliance-header-redacted.png")));
+        assertEquals(KnownGameScreenResume.Page.WAR,
+                KnownGameScreenResume.findSafeBackPage(frame(
+                        "alliance-war-20261114/war-header-redacted.png")));
+    }
+
+    @Test void allianceAndWarScreensDoNotMislabelCityWorldOrIntel() throws Exception {
+        for(String f:new String[]{"city", "world", "intel"}) {
+            assertNull(KnownGameScreenResume.findSafeBackPage(frame(
+                    "alliance-war-20261114/"+f+"-header-redacted.png")));
+        }
+    }
+
     @Test void requiresTwoMatchingFreshTitleObservationsAndCorrectViewport() throws Exception {
         var page=KnownGameScreenResume.Page.HERO_RECRUITMENT;
         assertTrue(KnownGameScreenResume.confirmsSamePage(page,page));

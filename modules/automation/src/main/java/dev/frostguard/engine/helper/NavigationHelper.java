@@ -867,6 +867,19 @@ public class NavigationHelper {
             var next = searcher.locatePattern(TemplatesEnum.SERVE_EMU_HEADER_BACK_HERO_2026, intelConfig);
             if (RecognitionConsensus.agrees(first, next, 12)) return next;
         }
+        // 16:05 and 16:25 diagnostics: both Alliance lobby and Alliance
+        // War / Rally show a top-left Back arrow, but old blue-arrow
+        // templates scored only 40-79%. Require the respective unique page
+        // title AND its own arrow in TWO frames before navigating. This
+        // avoids the HomeNotFoundException / Initialize loop on a valid page.
+        var typedBack = findVerifiedAllianceWarBack(
+                TemplatesEnum.SERVE_EMU_WAR_TITLE_NOV_2026,
+                TemplatesEnum.SERVE_EMU_WAR_BACK_NOV_2026);
+        if (typedBack.isFound()) return typedBack;
+        typedBack = findVerifiedAllianceWarBack(
+                TemplatesEnum.SERVE_EMU_ALLIANCE_TITLE_NOV_2026,
+                TemplatesEnum.SERVE_EMU_ALLIANCE_BACK_NOV_2026);
+        if (typedBack.isFound()) return typedBack;
         first = searcher.locatePattern(TemplatesEnum.SERVE_EMU_HEADER_BACK, currentConfig);
         if (first.isFound()) {
             interruptibleWait(120);
@@ -874,6 +887,27 @@ public class NavigationHelper {
             if (RecognitionConsensus.agrees(first, next, 12)) return next;
         }
         return ImageSearchResultData.miss();
+    }
+
+    /** Page-specific arrow recovery requires stable title and arrow together. */
+    private ImageSearchResultData findVerifiedAllianceWarBack(
+            TemplatesEnum titleTemplate, TemplatesEnum backTemplate) {
+        var titleArea = TemplateSearchHelper.SearchConfig.builder()
+                .withMaxAttempts(1).withThreshold(92)
+                .withArea(AreaData.of(68, 5, 200, 85)).build();
+        var backArea = TemplateSearchHelper.SearchConfig.builder()
+                .withMaxAttempts(1).withThreshold(92)
+                .withArea(AreaData.of(0, 0, 90, 85)).build();
+        var title = searcher.locatePattern(titleTemplate, titleArea);
+        if (!title.isFound()) return ImageSearchResultData.miss();
+        var back = searcher.locatePattern(backTemplate, backArea);
+        if (!back.isFound()) return ImageSearchResultData.miss();
+        interruptibleWait(150);
+        var titleAfter = searcher.locatePattern(titleTemplate, titleArea);
+        var backAfter = searcher.locatePattern(backTemplate, backArea);
+        return RecognitionConsensus.agrees(title, titleAfter, 12)
+                && RecognitionConsensus.agrees(back, backAfter, 12)
+                ? backAfter : ImageSearchResultData.miss();
     }
 
     private ImageSearchResultData findHomeAnchor() {

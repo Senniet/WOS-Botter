@@ -17,7 +17,7 @@ import java.util.function.Supplier;
  */
 final class KnownGameScreenResume {
     enum Page {
-        HERO_RECRUITMENT, HEROES, SQUAD_SETTINGS, DAILY, EXPLORATION, MAIL, VIP, ARENA, RESEARCH
+        HERO_RECRUITMENT, HEROES, SQUAD_SETTINGS, DAILY, EXPLORATION, MAIL, VIP, ARENA, RESEARCH, ALLIANCE, WAR
     }
 
     record PagePattern(Page page, TemplatesEnum template, PointData topLeft, PointData bottomRight) { }
@@ -58,6 +58,19 @@ final class KnownGameScreenResume {
         if (frame == null || !frame.isValid() || frame.getWidth() != 720 || frame.getHeight() != 1280) {
             return null;
         }
+        // The November Alliance lobby and War Rally pages use a Back arrow
+        // high in the top-left (y~5..65); the old generic Back ROI starts at
+        // y=65, so Initialize previously gave up and could stop the game.
+        // Only authorize recovery if BOTH the exact page title and its own
+        // arrow are present in the same capture; the caller verifies again
+        // on a separate screenshot before issuing any Android Back action.
+        if (isTypedAllianceWarPage(frame,
+                TemplatesEnum.SERVE_EMU_WAR_TITLE_NOV_2026,
+                TemplatesEnum.SERVE_EMU_WAR_BACK_NOV_2026)) return Page.WAR;
+        if (isTypedAllianceWarPage(frame,
+                TemplatesEnum.SERVE_EMU_ALLIANCE_TITLE_NOV_2026,
+                TemplatesEnum.SERVE_EMU_ALLIANCE_BACK_NOV_2026)) return Page.ALLIANCE;
+
         boolean headerBack = OpenCvPatternLocator.locatePattern(frame,
                 TemplatesEnum.SERVE_EMU_HEADER_BACK.getTemplate(), BACK_TOP_LEFT,
                 BACK_BOTTOM_RIGHT, BACK_THRESHOLD).isFound();
@@ -74,6 +87,14 @@ final class KnownGameScreenResume {
             }
         }
         return null;
+    }
+
+    private static boolean isTypedAllianceWarPage(RawImageData frame,
+            TemplatesEnum titleTemplate, TemplatesEnum backTemplate) {
+        return OpenCvPatternLocator.locatePattern(frame, titleTemplate.getTemplate(),
+                new PointData(68,5), new PointData(200,85), 92).isFound()
+                && OpenCvPatternLocator.locatePattern(frame, backTemplate.getTemplate(),
+                        new PointData(0,0), new PointData(90,85), 92).isFound();
     }
 
     /**
