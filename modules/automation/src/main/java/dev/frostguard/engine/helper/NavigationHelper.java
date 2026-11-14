@@ -100,6 +100,11 @@ public class NavigationHelper {
     // ── alliance menu ────────────────────────────────────────────────
 
     public boolean navigateToAllianceMenu(AllianceMenu menu) {
+        // Diagnostic 15:11: Alliance War was searched while the previous
+        // Intel screen (with its own Back arrow) was still visible. The
+        // bottom Alliance button is not present there. Home recovery must
+        // complete BEFORE the first Alliance tap; never tap blindly on Intel.
+        ensureCorrectScreenLocation(LaunchPoint.HOME);
         taps.tapInside(ButtonConstants.BOTTOM_MENU_ALLIANCE_BUTTON);
 
         TemplatesEnum tpl;
