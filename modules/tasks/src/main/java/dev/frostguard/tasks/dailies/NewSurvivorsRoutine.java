@@ -59,6 +59,37 @@ public NewSurvivorsRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
                 sleepTask(300);
 
 
+                // 14 Nov diagnostic frame shows a single blue "Allocate All"
+                // button while five workers are resting. Prefer this verified
+                // bulk assignment over repeatedly probing per-building pluses.
+                ImageSearchResultData allocateAll = templateSearchHelper.locatePattern(
+                        TemplatesEnum.GAME_HOME_NEW_SURVIVORS_ALLOCATE_ALL_2026,
+                        SearchConfigConstants.DEFAULT_SINGLE);
+                if (allocateAll.isFound()) {
+                    sleepTask(150);
+                    ImageSearchResultData stable = templateSearchHelper.locatePattern(
+                            TemplatesEnum.GAME_HOME_NEW_SURVIVORS_ALLOCATE_ALL_2026,
+                            SearchConfigConstants.DEFAULT_SINGLE);
+                    if (!RecognitionConsensus.agrees(allocateAll, stable, 12)) {
+                        scheduleUnknownRetry("Allocate All control unstable", "allocate-all-unstable");
+                        return;
+                    }
+                    tapInside(stable);
+                    sleepTask(450);
+                    emuManager.captureScreen(EMULATOR_NUMBER);
+                    ImageSearchResultData stillEnabled = templateSearchHelper.locatePattern(
+                            TemplatesEnum.GAME_HOME_NEW_SURVIVORS_ALLOCATE_ALL_2026,
+                            SearchConfigConstants.DEFAULT_SINGLE);
+                    if (stillEnabled.isFound()) {
+                        scheduleUnknownRetry("Allocate All remained enabled after tap", "allocate-all-unconfirmed");
+                        return;
+                    }
+                    logInfo(routineLogNewSurvivorsLine("Allocate All blue control disappeared after tap."));
+                    this.reschedule(LocalDateTime.now().plusMinutes(
+                            profile.getConfig(ConfigurationKeyEnum.CITY_ACCEPT_NEW_SURVIVORS_OFFSET_INT, Integer.class)));
+                    return;
+                }
+
                 logInfo(routineLogNewSurvivorsLine("Assigning survivors to available building slots."));
                 emuManager.swipeScreen(EMULATOR_NUMBER, new PointData(340, 610), new PointData(340, 900));
                 sleepTask(200);
