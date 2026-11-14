@@ -735,7 +735,7 @@ public class TaskQueue {
             outcome = TaskStateData.ExecutionOutcome.PREEMPTED;
             outcomeDetail = ex.getReasoning();
         } catch (Exception ex) {
-            outcome = ex.getClass().getSimpleName().contains("OutcomeUnknown")
+            outcome = ex instanceof dev.frostguard.engine.error.TaskOutcomeUnknownException
                     ? TaskStateData.ExecutionOutcome.UNKNOWN : TaskStateData.ExecutionOutcome.FAILED;
             outcomeDetail = ex.getClass().getSimpleName() + ": " + ex.getMessage();
             if (shuttingDown) {
