@@ -1,0 +1,25 @@
+# SurvivalOps diagnostics follow-up — 14 November 2026
+
+## Scope and evidence
+
+Source: the LAN-only diagnostics inbox on `webserver` (`~/survivalops-diagnostics/inbox/2026-11-14/`, more than 460 JSON events collected in the initial pass), actual sanitized screenshots, and a passive ADB capture from **WOS_Sennie121** at 720×1280. No other emulator, user profiles, gem-purchasing control, or automation schedules were modified. Live Windows runtime is not redeployed by these commits: tests only execute on source and recorded real frames until a separate release is requested.
+
+The branch chain includes the user-in-chat fixes, a concurrently integrated hourly maintenance commit, and the later isolated chat changes. No MSI, tag, or stable feed update was produced.
+
+| Diagnostic / time CET | Finding | Code/test action | Remaining validation |
+| --- | --- | --- | --- |
+| Intel 14:15–14:25, 4/6 Idle | Repeated `Zero recall/view/speedup indicators` with unchanged 4/6 idle, previously 120 retry attempts blocking the serial queue | Stop after three unchanged missing-indicator checks; schedule 10-minute bounded retry without claiming recall success. Actual live March Queue shows slots #1–4 **Idle**, #5 **Unlock**, #6 **Unavailable**; twice verify the six-row locked-versus-idle state before adjusting march capacity to 4, preserving checks for occupied/unknown rows | Re-run Windows Intel flow after deployment; no live recall attempted |
+| Navigation 14:08–14:09; HomeNotFound | `Overview` → `Resource Production` overlay obscured City/World anchors, old navigator searched unrelated Wood/Meat pages | Two-frame recognition of actual Overview title and its X, close at most once; reject City, World and Rewards frames | Full live close transition from Windows client not yet observed |
+| Training 14:07–14:09, tier T11–T1 | Selected City HUD and attempted all Infantry tier patterns even though troop panel was not open | Require positively identified Infantry Camp tab before tier searching/swiping and after Train action. Matches previously captured authentic camp; rejects diagnostic City/World | The current account's actual training panel may have additional variants |
+| Hero Recruitment 14:05, and again 15:03 in still-running old build | Green-Free tap brought up full-screen snowy blue chest cutscene, not the Rewards exit label; prior code timed out | Double-verify actual chest image and advance once; **never** retap recruit or pay gems/keys; retain distinct final Rewards postcondition | Need Windows end-to-end free recruit when cooldown permits |
+| Stamina 14:02–14:12 and repeated | Legacy click y=163..193 was **below** current blue HUD stamina arrow y~117..163 | Match and tap current arrow from 2 root frames (City/World) instead of blind old coordinate; preserve legacy click only with independent old Home evidence. Real frame tests + existing OCR/control tests pass | Need Windows live stamina-dialog/post-cleanup confirmation |
+| Do Exploration 14:12, `entry-unverified` | Actual Exploration heading already at upper-left y~20..60, outside old y=65..160 fallback; blue Explore and green Claim were visible | Added current heading template/ROI to Do Exploration, Exploration rewards and Initialize nested-page resume; positive diagnostic frame and negatives City/World/Rewards, existing Do Exploration tests pass | No new battle or paid action triggered by tests |
+| City Upgrade 14:03 and 14:57, `control-not-recognized` | Building selected correctly from UI flow but tutorial hand masked ordinary blue Upgrade artwork | Added special double-confirmed highlighted Upgrade template, preserving existing building-action confirmation and failure recovery; tests against actual failed screenshot and City/World/Research negatives | Actual construction action not executed during QA; avoid claiming resources were spent or upgrade completed |
+| New diagnostics through 15:04 | Latest runtime was still running an older Windows MSI; it continued logging failures from before these source changes | No silent MSI deployment; these logs cannot prove the new code is ineffective | Verify after a user-requested release |
+
+## Test policy
+
+- Every new action-relevant template was checked against a real positive screenshot and several negative screens. Template geometry and stable two-frame matching are required before any **new** tap.
+- No blind Android Back, no duplicate recruit/claim, no in-game purchase, no emulator reset; only passive ADB screenshots and read-only process checks.
+- Full Java regression after all fixes: **306 suites, 1,233 tests, 0 failures, 0 errors, 4 skipped** using `mvnw -pl modules/tasks -am test`. Report log: `~/.cache/survivalops-tests/diagnostic-followup-full-20261114.log`. Surefire results are retained under `modules/**/target/surefire-reports/`.
+- Existing priority/preemption and authored task logic remain unchanged except for the verified bug fixes listed above.
