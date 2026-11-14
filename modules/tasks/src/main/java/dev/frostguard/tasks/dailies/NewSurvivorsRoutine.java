@@ -7,6 +7,7 @@ import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.api.domain.ImageSearchResultData;
 import dev.frostguard.api.domain.PointData;
 import dev.frostguard.engine.nav.SearchConfigConstants;
+import dev.frostguard.engine.helper.RecognitionConsensus;
 import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.schedule.LaunchPoint;
 import dev.frostguard.tasks.diagnostics.TaskDiagnosticSnapshots;
@@ -36,7 +37,18 @@ public NewSurvivorsRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
             ImageSearchResultData welcomeIn = templateSearchHelper.locatePattern(
                     TemplatesEnum.GAME_HOME_NEW_SURVIVORS_WELCOME_IN, SearchConfigConstants.DEFAULT_SINGLE);
             if (welcomeIn.isFound()) {
+                // "Welcome In" is the admission action, not the assignment step.
+                // Verify that admission changed the UI before assigning anybody.
                 tapInside(welcomeIn);
+                sleepTask(650);
+                ImageSearchResultData welcomeStillVisible = templateSearchHelper.locatePattern(
+                        TemplatesEnum.GAME_HOME_NEW_SURVIVORS_WELCOME_IN,
+                        SearchConfigConstants.DEFAULT_SINGLE);
+                if (welcomeStillVisible.isFound()) {
+                    scheduleUnknownRetry("Welcome In remained visible after admission tap", "welcome-not-confirmed");
+                    return;
+                }
+                logInfo(routineLogNewSurvivorsLine("Welcome In dismissed; proceeding to assignment."));
                 logInfo(routineLogNewSurvivorsLine("Waiting briefly before reassigning survivors to buildings."));
                 sleepTask(10000);
 
@@ -85,8 +97,22 @@ private boolean assignVisibleSlots(String section) {
             if (!plusButton.isFound()) {
                 return true;
             }
-            tapInside(plusButton);
-            sleepTask(50);
+            sleepTask(150);
+            ImageSearchResultData confirmed = templateSearchHelper.locatePattern(
+                    TemplatesEnum.GAME_HOME_NEW_SURVIVORS_PLUS_BUTTON, SearchConfigConstants.DEFAULT_SINGLE);
+            if (!RecognitionConsensus.agrees(plusButton, confirmed, 12)) {
+                logWarning(routineLogNewSurvivorsLine(section + " assignment control unstable; stopping"));
+                return false;
+            }
+            tapInside(confirmed);
+            sleepTask(350);
+            ImageSearchResultData afterTap = templateSearchHelper.locatePattern(
+                    TemplatesEnum.GAME_HOME_NEW_SURVIVORS_PLUS_BUTTON, SearchConfigConstants.DEFAULT_SINGLE);
+            if (afterTap.isFound() && RecognitionConsensus.agrees(confirmed, afterTap, 12)) {
+                logWarning(routineLogNewSurvivorsLine(section
+                        + " assignment control did not change after tap; refusing repeated taps"));
+                return false;
+            }
         }
 
         ImageSearchResultData remaining = templateSearchHelper.locatePattern(
