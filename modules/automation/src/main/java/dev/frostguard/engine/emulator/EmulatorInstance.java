@@ -483,7 +483,10 @@ public abstract class EmulatorInstance {
                     + tag + " on " + idx + "; command was not sent");
         }
         try {
-            device.executeShellCommand(command, new NullOutputReceiver(), 3, TimeUnit.SECONDS);
+            // Under heavy emulator load the Android input service may take longer
+            // than three seconds to acknowledge a dispatched tap. Keep a
+            // bounded timeout but never resend a possibly executed action.
+            device.executeShellCommand(command, new NullOutputReceiver(), 8, TimeUnit.SECONDS);
         } catch (Exception failure) {
             invalidateAllCaches(idx);
             throw new ADBConnectionException("Input dispatch outcome unknown for " + tag
