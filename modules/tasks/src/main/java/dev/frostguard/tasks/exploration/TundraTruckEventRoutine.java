@@ -50,6 +50,11 @@ public class TundraTruckEventRoutine extends DelayedTask {
 	private static final AreaData REFRESH_BUTTON = new AreaData(
 			new PointData(588, 405),
 			new PointData(622, 436));
+	// Verified against 720x1280 live 2026 Tundra Tips screen: blue
+	// Confirm button occupies x~380..640, y~744..832.
+	private static final AreaData TIPS_CONFIRM_BUTTON = new AreaData(
+			new PointData(440, 765),
+			new PointData(590, 815));
 	private static final AreaData CONFIRM_CHECKBOX = new AreaData(
 			new PointData(445, 667),
 			new PointData(586, 806));
@@ -74,10 +79,6 @@ public class TundraTruckEventRoutine extends DelayedTask {
 	private static final AreaData RIGHT_TRUCK_TIME = new AreaData(
 			new PointData(432, 852),
 			new PointData(535, 875));
-
-	private static final AreaData TIPS_POPUP_CHECKBOX = new AreaData(
-			new PointData(198, 699),
-			new PointData(225, 726));
 
 	// When a truck is already departed and selected, the details screen is different and the truck position is shifted up by 143 pixels.
 	private static final int TRUCK_ALT_POSITION_Y_OFFSET = -143;
@@ -646,9 +647,20 @@ public class TundraTruckEventRoutine extends DelayedTask {
 				TemplatesEnum.TUNDRA_TRUCK_TIPS_POPUP,
 				SearchConfigConstants.SINGLE_WITH_2_RETRIES);
 		if (tipsPopup.isFound()) {
-			tapInside(TIPS_POPUP_CHECKBOX.topLeft(), TIPS_POPUP_CHECKBOX.bottomRight(), 1, 300);
-			sleepTask(100);
-			tapInside(CONFIRM_CHECKBOX.topLeft(), CONFIRM_CHECKBOX.bottomRight(), 1, 300);
+			// The "Don't show this again today" checkbox may already be
+			// checked. Never toggle it as part of accepting the warning.
+			tapInside(TIPS_CONFIRM_BUTTON.topLeft(), TIPS_CONFIRM_BUTTON.bottomRight(), 1, 400);
+			emuManager.captureScreen(EMULATOR_NUMBER);
+			ImageSearchResultData stillOpen = templateSearchHelper.locatePattern(
+					TemplatesEnum.TUNDRA_TRUCK_TIPS_POPUP,
+					SearchConfigConstants.DEFAULT_SINGLE);
+			if (stillOpen.isFound()) {
+				logWarning("Tundra Truck Tips confirmation did not dismiss; "
+						+ TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+								"tundratruck", "tips-confirm-not-dismissed"));
+				return false;
+			}
+			logInfo("Tundra Truck Tips confirmation dismissed.");
 		}
 
 		return true;
