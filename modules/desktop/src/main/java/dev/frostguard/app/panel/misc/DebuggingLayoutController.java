@@ -4,6 +4,11 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
+import java.util.Map;
+import java.util.TreeSet;
+import dev.frostguard.api.runtime.WorkspacePaths;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -85,6 +90,12 @@ public class DebuggingLayoutController {
     @FXML
     private Button btnCaptureAdb;
 
+    @FXML
+    private ComboBox<String> auditGroupComboBox;
+
+    @FXML
+    private Button btnAuditLibrary;
+
     private File currentScreenshotFile;
     private List<File> allTemplates = new ArrayList<>();
 
@@ -99,6 +110,7 @@ public class DebuggingLayoutController {
         setupDragAndDrop();
         setupProfiles();
         loadTemplates();
+        populateAuditGroups();
         setupSearchFilter();
         setupActions();
     }
@@ -486,6 +498,182 @@ public class DebuggingLayoutController {
                 }
             }
         }
+    }
+
+    private void populateAuditGroups() {
+        TreeSet<String> groups = new TreeSet<>();
+        for (File template : allTemplates) {
+            String group = ScreenTemplateAudit.groupForTemplate(template.toPath());
+            if (!group.equals("unclassified")) groups.add(group);
+        }
+        groups.add("world");
+        auditGroupComboBox.setItems(FXCollections.observableArrayList(groups));
+        if (groups.contains("home")) auditGroupComboBox.setValue("home");
+    }
+
+    @FXML
+    private void handleSaveAuditScreen(ActionEvent event) {
+        String group = auditGroupComboBox.getValue();
+        if (currentScreenshotFile == null) {
+            log("Capture an emulator screenshot before saving it to the screen library.");
+            return;
+        }
+        if (group == null) {
+            log("Select the screen group that ACTUALLY appears in the screenshot.");
+            return;
+        }
+        try {
+            Path root = WorkspacePaths.current().cache().resolve("template-screen-library");
+            Path saved = ScreenTemplateAudit.save(root, group, currentScreenshotFile.toPath());
+            log("Screen saved as " + group + " at " + saved + ". No screenshot is uploaded.");
+            log("Capture a second independent screenshot of the SAME screen, and two other screen groups, "
+                    + "to enable reliable positive/negative verification.");
+        } catch (Exception ex) {
+            log("Could not save labelled screen: " + ex.getMessage());
+        }
+    }
+
+    @FXML
+    private void handleAuditLibrary(ActionEvent event) {
+        String group = auditGroupComboBox.getValue();
+        if (group == null || group.isBlank()) {
+            log("Choose a screen group first.");
+            return;
+        }
+        Path root = WorkspacePaths.current().cache().resolve("template-screen-library");
+        final Map<String, List<Path>> screenGroups;
+        try {
+            screenGroups = ScreenTemplateAudit.loadScreens(root);
+        } catch (Exception ex) {
+            log("Could not load screenshot library: " + ex.getMessage());
+            return;
+        }
+        List<Path> positives = screenGroups.getOrDefault(group, List.of());
+        if (positives.size() < 2) {
+            log("Group " + group + " has " + positives.size() + " saved screenshot(s). "
+                    + "Capture two independent screenshots of this screen first.");
+            return;
+        }
+        List<Path> negatives = ScreenTemplateAudit.negativeScreens(screenGroups, group);
+        List<File> candidates = allTemplates.stream()
+                .filter(file -> ScreenTemplateAudit.groupForTemplate(file.toPath()).equals(group)).toList();
+        if (candidates.isEmpty()) {
+            log("No templates assigned to group " + group + ".");
+            return;
+        }
+        log("Auditing " + candidates.size() + " " + group + " templates against "
+                + positives.size() + " positive and " + negatives.size() + " other-screen captures.");
+        btnAuditLibrary.setDisable(true);
+        javafx.concurrent.Task<List<String>> task = new javafx.concurrent.Task<>() {
+            @Override
+            protected List<String> call() throws Exception {
+                List<AuditFrame> positiveFrames = readAuditFrames(positives);
+                List<AuditFrame> negativeFrames = readAuditFrames(negatives);
+                List<String> report = new ArrayList<>();
+                List<String> rows = new ArrayList<>();
+                rows.add("group,template,positive_frames,positive_hits,negative_groups,negative_hits,best_positive_score,best_negative_score,status");
+                java.util.EnumMap<ScreenTemplateAudit.Verdict, Integer> counts =
+                        new java.util.EnumMap<>(ScreenTemplateAudit.Verdict.class);
+                int num = 0;
+                for (File template : candidates) {
+                    if (isCancelled()) break;
+                    num++;
+                    String resource = template.getAbsolutePath().replace("\\", "/");
+                    int index = resource.lastIndexOf("/templates/");
+                    if (index < 0) {
+                        report.add("ERROR " + template.getName() + ": unexpected template location");
+                        continue;
+                    }
+                    resource = resource.substring(index);
+                    java.awt.image.BufferedImage sprite = javax.imageio.ImageIO.read(template);
+                    if (sprite == null || OpenCvPatternLocator.class.getResource(resource) == null) {
+                        report.add("ERROR " + template.getName() + ": missing/invalid template resource");
+                        continue;
+                    }
+                    List<ScreenTemplateAudit.Match> positiveScores = new ArrayList<>();
+                    List<ScreenTemplateAudit.Match> negativeScores = new ArrayList<>();
+                    for (AuditFrame frame : positiveFrames) {
+                        positiveScores.add(auditMatch(frame, resource, sprite));
+                    }
+                    // Only probe other screen categories for potentially stable positives.
+                    if (positiveScores.stream().filter(ScreenTemplateAudit.Match::strong).count() >= 2) {
+                        for (AuditFrame frame : negativeFrames) {
+                            negativeScores.add(auditMatch(frame, resource, sprite));
+                        }
+                    }
+                    int posHits = (int) positiveScores.stream().filter(ScreenTemplateAudit.Match::strong).count();
+                    int negHits = (int) negativeScores.stream().filter(ScreenTemplateAudit.Match::strong).count();
+                    double bestPos = positiveScores.stream().mapToDouble(ScreenTemplateAudit.Match::score)
+                            .filter(Double::isFinite).max().orElse(0);
+                    double bestNeg = negativeScores.stream().mapToDouble(ScreenTemplateAudit.Match::score)
+                            .filter(Double::isFinite).max().orElse(0);
+                    ScreenTemplateAudit.Verdict verdict = ScreenTemplateAudit.classify(positiveScores,
+                            negativeScores, negativeFrames.size(), sprite.getWidth(), sprite.getHeight());
+                    counts.merge(verdict, 1, Integer::sum);
+                    rows.add(ScreenTemplateAudit.csvEscape(group) + ","
+                            + ScreenTemplateAudit.csvEscape(resource) + "," + positiveScores.size() + ","
+                            + posHits + "," + negativeFrames.size() + "," + negHits + ","
+                            + String.format(java.util.Locale.ROOT, "%.2f,%.2f,", bestPos, bestNeg)
+                            + verdict.name());
+                    if (verdict != ScreenTemplateAudit.Verdict.VERIFIED_CONTEXT) {
+                        report.add(String.format(java.util.Locale.ROOT,
+                                "%s %s (positive %d/%d, best %.1f%%; other screens %d/%d, max %.1f%%)",
+                                verdict, resource, posHits, positiveScores.size(), bestPos,
+                                negHits, negativeScores.size(), bestNeg));
+                    }
+                    if (num % 5 == 0) updateMessage("Group " + group + ": " + num + "/" + candidates.size());
+                }
+                Path reports = root.resolve("reports");
+                Files.createDirectories(reports);
+                String filename = "audit-" + group + "-" + java.time.LocalDateTime.now()
+                        .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")) + ".csv";
+                Path csv = reports.resolve(filename);
+                Files.writeString(csv, String.join("\n", rows) + "\n", StandardCharsets.UTF_8);
+                report.add(0, "Context audit: " + group + " — " + counts + ". Full CSV: " + csv);
+                report.add("A verified CONTEXT is not permission to click; actions still need their own confirmation.");
+                return report;
+            }
+        };
+        task.messageProperty().addListener((obs, before, after) -> log(after));
+        task.setOnSucceeded(done -> {
+            for (String line : task.getValue()) log(line);
+            btnAuditLibrary.setDisable(false);
+        });
+        task.setOnFailed(failed -> {
+            log("Screen library audit failed: " + task.getException());
+            btnAuditLibrary.setDisable(false);
+        });
+        task.setOnCancelled(cancelled -> btnAuditLibrary.setDisable(false));
+        Thread worker = new Thread(task, "survivalops-context-template-audit");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    private record AuditFrame(byte[] png, int width, int height) {}
+
+    private static List<AuditFrame> readAuditFrames(List<Path> screenshots) throws java.io.IOException {
+        List<AuditFrame> frames = new ArrayList<>();
+        for (Path path : screenshots) {
+            byte[] png = Files.readAllBytes(path);
+            java.awt.image.BufferedImage image = javax.imageio.ImageIO.read(path.toFile());
+            if (image == null) throw new java.io.IOException("Invalid stored screenshot: " + path);
+            frames.add(new AuditFrame(png, image.getWidth(), image.getHeight()));
+        }
+        return frames;
+    }
+
+    private static ScreenTemplateAudit.Match auditMatch(AuditFrame frame, String resource,
+                                                         java.awt.image.BufferedImage template) {
+        if (template.getWidth() > frame.width() || template.getHeight() > frame.height()) {
+            return new ScreenTemplateAudit.Match(0, -1, -1);
+        }
+        ImageSearchResultData matched = OpenCvPatternLocator.locatePattern(frame.png(), resource,
+                new PointData(0, 0), new PointData(frame.width(), frame.height()), 0.0);
+        if (matched == null || matched.getPoint() == null) {
+            return new ScreenTemplateAudit.Match(matched == null ? 0 : matched.getMatchPercentage(), -1, -1);
+        }
+        return new ScreenTemplateAudit.Match(matched.getMatchPercentage(),
+                matched.getPoint().getX(), matched.getPoint().getY());
     }
 
     private void setupActions() {
