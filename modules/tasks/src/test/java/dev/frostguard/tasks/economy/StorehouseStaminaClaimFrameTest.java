@@ -88,6 +88,17 @@ class StorehouseStaminaClaimFrameTest {
     }
 
     @Test
+    void november15RejectedClaimHasTitleClaimAndVerifiableCloseIcon() throws IOException {
+        byte[] frame = encoded("stamina-reward-claim-unaccepted-20261115-redacted.png");
+        assertTrue(matches(frame, TemplatesEnum.STOREHOUSE_STAMINA_REWARD_TITLE,
+                TITLE_AREA_TOP_LEFT, TITLE_AREA_BOTTOM_RIGHT));
+        assertTrue(matches(frame, TemplatesEnum.STOREHOUSE_STAMINA_CLAIM_TEXT,
+                CLAIM_AREA_TOP_LEFT, CLAIM_AREA_BOTTOM_RIGHT));
+        assertTrue(matches(frame, TemplatesEnum.STOREHOUSE_STAMINA_REWARD_CLOSE,
+                new PointData(560, 135), new PointData(665, 235)));
+    }
+
+    @Test
     void identifiesTooltipAndRejectsClaimWhileTooltipCoversTheButton() throws IOException {
         for (String name : new String[]{
                 "stamina-tooltip-obscures-claim.png",
