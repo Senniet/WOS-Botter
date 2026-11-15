@@ -20,14 +20,15 @@ import zipfile
 MAX_ARCHIVE_BYTES = 30 * 1024 * 1024
 MAX_UNCOMPRESSED_BYTES = 60 * 1024 * 1024
 MAX_ENTRY_BYTES = 4 * 1024 * 1024
-MAX_FILES = 96
+MAX_FILES = 104
 MAX_RUNS_PER_DAY = 250
 RETENTION_DAYS = 30
 SESSION_RE = re.compile(r"[0-9]{8}-[0-9]{6}-[a-z0-9]{1,20}\Z")
-IMAGE_RE = re.compile(r"(?:captures|proposals)/[a-zA-Z0-9_-]{1,115}\.png\Z")
+IMAGE_RE = re.compile(r"(?:captures/[a-zA-Z0-9_-]{1,115}\.(?:png|jpg)|proposals/[a-zA-Z0-9_-]{1,115}\.png)\Z")
 FILES = frozenset({"run.txt", "summary.txt", "recognition-events.csv", "upload-manifest.json"})
 LOCK = threading.RLock()
 PNG_HEADER = bytes.fromhex("89504e470d0a1a0a")
+JPEG_HEADER = bytes.fromhex("ffd8ff")
 
 
 class UploadRejected(ValueError):
@@ -75,6 +76,10 @@ def _verify_archive(data: bytes) -> list[zipfile.ZipInfo]:
             for entry in entries:
                 if entry.filename.endswith(".png") and not container.read(entry, pwd=None).startswith(PNG_HEADER):
                     raise ValueError("Invalid PNG evidence")
+                if entry.filename.endswith(".jpg"):
+                    raw = container.read(entry, pwd=None)
+                    if not raw.startswith(JPEG_HEADER) or not raw.endswith(bytes.fromhex("ffd9")):
+                        raise ValueError("Invalid JPEG evidence")
         except (ValueError, KeyError, RuntimeError, zipfile.BadZipFile, UnicodeDecodeError):
             raise UploadRejected("Evidence archive failed validation") from None
     return entries

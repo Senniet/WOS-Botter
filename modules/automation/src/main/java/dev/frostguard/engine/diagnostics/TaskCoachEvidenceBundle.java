@@ -3,6 +3,11 @@ package dev.frostguard.engine.diagnostics;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
+import java.awt.image.BufferedImage;
+import javax.imageio.ImageIO;
+import javax.imageio.ImageWriteParam;
+import javax.imageio.ImageWriter;
+import javax.imageio.stream.MemoryCacheImageOutputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -18,9 +23,11 @@ import java.util.zip.ZipOutputStream;
  * configuration, log files, secrets, databases, or arbitrary directories.
  */
 final class TaskCoachEvidenceBundle {
-    private static final int MAX_IMAGE_FILES = 65;
+    // Task Coach can produce 70 captures plus up to 16 proposals. The server
+    // accepts a bounded total of at most 96 image files and 4 text/manifest files.
+    private static final int MAX_IMAGE_FILES = 90;
     private static final long MAX_TOTAL_IMAGE_BYTES = 25L * 1024 * 1024;
-    private static final long MAX_INDIVIDUAL_IMAGE_BYTES = 2L * 1024 * 1024;
+    private static final long MAX_INDIVIDUAL_IMAGE_BYTES = 4L * 1024 * 1024;
     private static final long MAX_TEXT_BYTES = 3L * 1024 * 1024;
     private static final int MAX_ZIP_BYTES = 30 * 1024 * 1024;
 
@@ -56,11 +63,13 @@ final class TaskCoachEvidenceBundle {
                         .sorted(Comparator.comparing(Path::getFileName)).toList());
             }
         }
-        // Review proposals first, then misses, then hits. A full set is sent
-        // when it fits. The manifest explicitly states omitted evidence.
+        // Review proposals first. Captures are FULL resolution JPEGs, so all
+        // phases of a coached run fit: old PNG uploads exhausted 25MiB before
+        // important late task screenshots (e.g. Alliance Triumph claim state).
+        // Originals remain untouched and lossless in the local workspace.
         candidates.sort(Comparator.comparingInt(TaskCoachEvidenceBundle::imagePriority)
                 .thenComparing(Path::toString));
-        int included = 0, omitted = 0;
+        int included = 0, omitted = 0, jpegCaptures = 0;
         long imageBytes = 0;
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         try (ZipOutputStream zip = new ZipOutputStream(bytes)) {
@@ -75,21 +84,31 @@ final class TaskCoachEvidenceBundle {
                     continue;
                 }
                 long length = Files.size(file);
-                if (included >= MAX_IMAGE_FILES || length > MAX_INDIVIDUAL_IMAGE_BYTES
-                        || imageBytes + length > MAX_TOTAL_IMAGE_BYTES) {
+                if (included >= MAX_IMAGE_FILES || length > MAX_INDIVIDUAL_IMAGE_BYTES) {
                     omitted++;
                     continue;
                 }
-                byte[] data = Files.readAllBytes(file);
-                if (data.length < 8 || !isPng(data)) {
+                byte[] source = Files.readAllBytes(file);
+                if (source.length < 8 || !isPng(source)) {
                     omitted++;
                     continue;
                 }
+                boolean isCapture = file.getParent().getFileName().toString().equals("captures");
+                byte[] data = source;
                 String name = file.getParent().getFileName() + "/" + file.getFileName();
+                if (isCapture) {
+                    data = fullResolutionJpeg(source);
+                    name = name.substring(0, name.length() - 4) + ".jpg";
+                }
+                if (imageBytes + data.length > MAX_TOTAL_IMAGE_BYTES) {
+                    omitted++;
+                    continue;
+                }
                 zip.putNextEntry(new ZipEntry(name));
                 zip.write(data);
                 zip.closeEntry();
-                imageBytes += length;
+                imageBytes += data.length;
+                if (isCapture) jpegCaptures++;
                 included++;
             }
             JSONObject manifest = new JSONObject()
@@ -97,6 +116,7 @@ final class TaskCoachEvidenceBundle {
                     .put("session_id", session)
                     .put("image_files_included", included)
                     .put("image_files_omitted", omitted)
+                    .put("jpeg_captures_full_resolution", jpegCaptures)
                     .put("screenshots_enabled", includeScreenshots)
                     .put("description", "Task Coach local task evidence; no application configuration or database");
             zip.putNextEntry(new ZipEntry("upload-manifest.json"));
@@ -107,6 +127,35 @@ final class TaskCoachEvidenceBundle {
             throw new IOException("Task Coach evidence archive exceeds 30 MiB limit");
         }
         return new Package(bytes.toByteArray(), session, included, omitted, includeScreenshots);
+    }
+
+    /** Full pixel dimensions, encoded as high-quality JPEG for evidence review.
+     * Never use these lossy copies as automatic template-repair candidates;
+     * proposal PNGs are transferred without modification.
+     */
+    static byte[] fullResolutionJpeg(byte[] png) throws IOException {
+        BufferedImage original = ImageIO.read(new java.io.ByteArrayInputStream(png));
+        if (original == null || original.getWidth() <= 0 || original.getHeight() <= 0
+                || (long) original.getWidth() * original.getHeight() > 4_000_000L)
+            throw new IOException("Invalid evidence frame dimensions");
+        BufferedImage rgb = new BufferedImage(original.getWidth(), original.getHeight(),
+                BufferedImage.TYPE_INT_RGB);
+        var graphics = rgb.createGraphics();
+        try { graphics.drawImage(original, 0, 0, null); }
+        finally { graphics.dispose(); }
+        var writers = ImageIO.getImageWritersByFormatName("jpeg");
+        if (!writers.hasNext()) throw new IOException("No JPEG writer available");
+        ImageWriter writer = writers.next();
+        ByteArrayOutputStream encoded = new ByteArrayOutputStream(180_000);
+        try (MemoryCacheImageOutputStream output = new MemoryCacheImageOutputStream(encoded)) {
+            writer.setOutput(output);
+            ImageWriteParam params = writer.getDefaultWriteParam();
+            params.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
+            params.setCompressionQuality(0.9f);
+            writer.write(null, new javax.imageio.IIOImage(rgb, null, null), params);
+            output.flush();
+        } finally { writer.dispose(); }
+        return encoded.toByteArray();
     }
 
     private static int imagePriority(Path file) {

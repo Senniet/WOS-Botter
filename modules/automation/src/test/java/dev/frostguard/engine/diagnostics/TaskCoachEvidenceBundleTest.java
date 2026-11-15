@@ -35,11 +35,18 @@ class TaskCoachEvidenceBundleTest {
         Map<String, byte[]> entries = unzip(archive.zip());
         assertTrue(entries.containsKey("summary.txt"));
         assertTrue(entries.containsKey("recognition-events.csv"));
-        assertTrue(entries.containsKey("captures/001-training-camp-miss.png"));
+        assertTrue(entries.containsKey("captures/001-training-camp-miss.jpg"));
+        BufferedImage screenshot = ImageIO.read(new ByteArrayInputStream(
+                entries.get("captures/001-training-camp-miss.jpg")));
+        assertNotNull(screenshot);
+        assertEquals(720, screenshot.getWidth());
+        assertEquals(1280, screenshot.getHeight());
         assertTrue(entries.containsKey("proposals/training-camp-unverified.png"));
         assertFalse(entries.containsKey("private-token.txt"));
         assertEquals(2, new JSONObject(new String(entries.get("upload-manifest.json")))
                 .getInt("image_files_included"));
+        assertEquals(1, new JSONObject(new String(entries.get("upload-manifest.json")))
+                .getInt("jpeg_captures_full_resolution"));
     }
 
     @Test void neverLeaksScreenshotsWhenConsentIsDisabled() throws Exception {
@@ -52,9 +59,35 @@ class TaskCoachEvidenceBundleTest {
         assertEquals(0, bundle.imageFiles());
         assertEquals(1, bundle.omittedImages());
         assertTrue(entries.containsKey("summary.txt"));
-        assertFalse(entries.containsKey("captures/001-test-miss.png"));
+        assertFalse(entries.containsKey("captures/001-test-miss.jpg"));
         assertFalse(new JSONObject(new String(entries.get("upload-manifest.json")))
                 .getBoolean("screenshots_enabled"));
+    }
+
+    @Test void allFortyFiveTrainingFramesFitWithoutDiscardingLateScreens() throws Exception {
+        Path folder = goodRun();
+        Path captures = Files.createDirectory(folder.resolve("captures"));
+        BufferedImage image = new BufferedImage(720, 1280, BufferedImage.TYPE_INT_RGB);
+        var paint = image.createGraphics();
+        try {
+            for (int index = 1; index <= 45; index++) {
+                paint.setColor(new java.awt.Color((index * 19) % 256, (index * 31) % 256,
+                        (index * 47) % 256));
+                paint.fillRect(0, 0, 720, 1280);
+                paint.setColor(java.awt.Color.WHITE);
+                paint.drawString("Claim and task evidence phase " + index, 42, 900);
+                String file = String.format("%03d-training-screen-miss.png", index);
+                assertTrue(ImageIO.write(image, "png", captures.resolve(file).toFile()));
+            }
+        } finally { paint.dispose(); }
+        var archive = TaskCoachEvidenceBundle.create(folder, true);
+        assertEquals(45, archive.imageFiles());
+        assertEquals(0, archive.omittedImages());
+        Map<String, byte[]> entries = unzip(archive.zip());
+        assertTrue(entries.containsKey("captures/045-training-screen-miss.jpg"),
+                "Last capture must remain in the evidence upload");
+        assertTrue(entries.containsKey("captures/001-training-screen-miss.jpg"));
+        assertTrue(archive.zip().length < 30 * 1024 * 1024);
     }
 
     @Test void refusesIncompleteOrUnexpectedSessions() throws Exception {

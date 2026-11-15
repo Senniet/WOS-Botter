@@ -10,7 +10,7 @@ service is involved. Each uploaded session is stored on the webserver in:
   recognition-events.csv
   run.txt                 (when present)
   upload-manifest.json
-  captures/               (if screenshot sharing enabled)
+  captures/               (full-resolution JPEG copies if screenshot sharing enabled)
   proposals/              (if screenshot sharing enabled)
   receipt.json
 ```
@@ -28,9 +28,11 @@ status appears in Debugging > Task Coach. Click **Upload evidence** to retry or
 to send the most recently completed run after restarting the app. The UI
 shows `UPLOADED`, `NOT_SHARED` or `UPLOAD_FAILED` without disrupting the game.
 
-The archive prioritizes candidate templates and failed captures, contains at
-most 65 PNG files and 25 MiB of PNGs, and includes an explicit count of images
-that did not fit. Reports and recognition CSV remain complete. Local originals
+The archive prioritizes candidate templates. Candidate PNGs remain lossless;
+full-resolution captures are encoded as JPEG (quality 90) to fit the whole
+run, including the final claim screenshots, without cropping. Local original
+PNGs are never changed. The upload is bounded at 90 images and 25 MiB of image
+data and includes an explicit count of images that did not fit. Reports and recognition CSV remain complete. Local originals
 are never deleted.
 
 ## HTTPS server deployment

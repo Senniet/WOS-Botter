@@ -54,6 +54,20 @@ class ReceiverTests(unittest.TestCase):
             store_taskcoach_archive(self.root, RUN, bundle({'run.txt': 'changed'}))
         self.assertEqual(case.exception.status, 409)
 
+    def test_accepts_jpeg_frames_and_rejects_invalid_jpeg(self):
+        bad = bundle({'captures/001-screen.jpg': b'not-a-jpeg'})
+        with self.assertRaises(UploadRejected):
+            store_taskcoach_archive(self.root, RUN, bad)
+        jpeg = bytes.fromhex('ffd8ff') + b'sample' + bytes.fromhex('ffd9')
+        status, location = store_taskcoach_archive(self.root, RUN,
+                                                    bundle({'captures/001-screen.jpg': jpeg}))
+        self.assertEqual(status, 201)
+        self.assertEqual((self.root / location / 'captures/001-screen.jpg').read_bytes(), jpeg)
+        with self.assertRaises(UploadRejected):
+            store_taskcoach_archive(self.root, '20261115-163819-other',
+                                    bundle({'proposals/template.jpg': jpeg},
+                                           manifest_session='20261115-163819-other'))
+
     def test_accepts_images_and_rejects_duplicate_paths(self):
         with self.assertRaises(UploadRejected):
             store_taskcoach_archive(self.root, RUN, bundle({'captures/test.png': b'not a PNG'}))
