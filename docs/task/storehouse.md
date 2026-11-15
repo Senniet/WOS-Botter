@@ -15,6 +15,12 @@ white, with whitelist `0123456789:d`. Compact `001558` is 00:15:58. These are
 visual/OCR assumptions; do not infer the timer's game meaning from its text
 alone.
 
+The claim dialog is evaluated on one fresh screenshot per poll. Do not capture
+separate frames for its title, Claim button, tooltip, and city: four remote ADB
+reads can exhaust the claim timeout even while Claim is visibly available.
+The 15 November 2026 live dialog positively matches both reward templates on
+the encoded and raw 720x1280 screenshot paths; do not lower the thresholds.
+
 The Storehouse stamina reward uses its own `A Warm Welcome` title and Claim-text
 templates. Search the Claim text in the full lower button area (x=200..520,
 y=900..1020 on 720x1280 frames); the Daily Mission Claim crop is too small for
