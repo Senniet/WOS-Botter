@@ -58,6 +58,8 @@ public final class VerifiedTemplateOverrides {
         metadata.setProperty("centerY", Integer.toString(centerY));
         metadata.setProperty("width", Integer.toString(frameWidth));
         metadata.setProperty("height", Integer.toString(frameHeight));
+        metadata.setProperty("templateWidth", Integer.toString(image.getWidth()));
+        metadata.setProperty("templateHeight", Integer.toString(image.getHeight()));
         Path meta = target.resolveSibling(target.getFileName() + ".properties");
         try {
             Files.copy(candidate, pending, StandardCopyOption.REPLACE_EXISTING);
@@ -94,11 +96,14 @@ public final class VerifiedTemplateOverrides {
             int y = Integer.parseInt(props.getProperty("centerY"));
             if (Integer.parseInt(props.getProperty("width")) != frame.getWidth()
                     || Integer.parseInt(props.getProperty("height")) != frame.getHeight()) return null;
-            int margin = 32;
-            int left = Math.max(Math.max(0, x - margin - 75), searchTopLeft.getX());
-            int top = Math.max(Math.max(0, y - margin - 75), searchTopLeft.getY());
-            int right = Math.min(Math.min(frame.getWidth(), x + margin + 75), searchBottomRight.getX());
-            int bottom = Math.min(Math.min(frame.getHeight(), y + margin + 75), searchBottomRight.getY());
+            int templateWidth = Integer.parseInt(props.getProperty("templateWidth"));
+            int templateHeight = Integer.parseInt(props.getProperty("templateHeight"));
+            if (templateWidth < 24 || templateHeight < 24 || templateWidth > 500 || templateHeight > 500)
+                return null;
+            int left = Math.max(Math.max(0, x - templateWidth / 2 - 32), searchTopLeft.getX());
+            int top = Math.max(Math.max(0, y - templateHeight / 2 - 32), searchTopLeft.getY());
+            int right = Math.min(Math.min(frame.getWidth(), x + templateWidth / 2 + 32), searchBottomRight.getX());
+            int bottom = Math.min(Math.min(frame.getHeight(), y + templateHeight / 2 + 32), searchBottomRight.getY());
             if (right <= left || bottom <= top) return null;
             PointData tl = new PointData(left, top);
             PointData br = new PointData(right, bottom);

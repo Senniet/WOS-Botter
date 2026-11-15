@@ -93,6 +93,15 @@ class TaskTemplateCoachTest {
         }
     }
 
+    @Test void neverAutomaticallyRepairAClaimedOrSuccessfullyCompletedButton() {
+        assertFalse(TaskTemplateCoach.mayAutomaticallyApply("SUCCEEDED", false, false));
+        assertFalse(TaskTemplateCoach.mayAutomaticallyApply("FAILED", true, false));
+        assertFalse(TaskTemplateCoach.mayAutomaticallyApply("FAILED", false, true));
+        assertFalse(TaskTemplateCoach.mayAutomaticallyApply("DEFERRED", false, false));
+        assertFalse(TaskTemplateCoach.mayAutomaticallyApply("UNKNOWN", false, false));
+        assertTrue(TaskTemplateCoach.mayAutomaticallyApply("FAILED", false, false));
+    }
+
     @Test void screenContextValidationDistinguishesDifferentPages() {
         BufferedImage a = new BufferedImage(240, 360, BufferedImage.TYPE_INT_RGB);
         BufferedImage b = new BufferedImage(240, 360, BufferedImage.TYPE_INT_RGB);

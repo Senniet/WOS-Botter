@@ -115,6 +115,7 @@ public class EmulatorController {
     private void dispatchTap(String idx, PointData pt) {
         requireBackend();
         LOG.info("{} tap ({},{}) dev {}", label(idx), pt.getX(), pt.getY(), idx);
+        dev.frostguard.engine.diagnostics.TaskTemplateCoach.tapped(idx, pt);
         backend.touchArea(idx, pt, pt);
     }
 

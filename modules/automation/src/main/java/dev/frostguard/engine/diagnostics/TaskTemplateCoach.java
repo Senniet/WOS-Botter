@@ -62,6 +62,7 @@ public final class TaskTemplateCoach {
         final List<Path> failures = new ArrayList<>();
         boolean proposed;
         boolean multiMatchObserved;
+        boolean tappedAfterPositive;
         Stats(String name, String resource) { this.name = name; this.resource = resource; }
     }
 
@@ -88,6 +89,7 @@ public final class TaskTemplateCoach {
         volatile String note = "Waiting for selected task to start in the existing task queue";
         volatile boolean active;
         volatile Thread ownerThread;
+        volatile String outcome = "UNKNOWN";
         Session(long profileId, String device, TpDailyTaskEnum task, Path dir, boolean autoApply) {
             this.profileId = profileId; this.device = device; this.task = task; this.dir = dir;
             this.autoApply = autoApply;
@@ -167,6 +169,7 @@ public final class TaskTemplateCoach {
         if (session == null || profileId == null || session.profileId != profileId
                 || !session.device.equals(device) || session.task != task) return;
         session.active = false;
+        session.outcome = result;
         if (session.phase.equals("STOPPED") || session.phase.equals("ERROR")) return;
         session.phase = "FINALIZING";
         // Final review happens only after capture queue drains; it cannot be dropped
@@ -214,9 +217,13 @@ public final class TaskTemplateCoach {
                 }
                 report.add("Verified overlays applied=" + session.repaired.get()
                         + "; base bundled assets are never overwritten. Rollback is available in Debugging.");
+                report.add("Diagnostic snapshots copied to standard snapshot store="
+                        + publishRepresentativeFailures(session) + " (LAN transfer only with existing diagnostics opt-in)");
                 report.add("Strict gate: known prior location, same screen context, two improved frames, "
                         + "low false-positive scores on >=2 different screen groups.");
                 report.add("Any incomplete evidence is REVIEW_ONLY and NOT activated.");
+                report.add("APPLIED means detection candidate passed strict checks, NOT that the in-game task is solved. "
+                        + "Rerun the task and verify its actual completion before marking SOLVED.");
                 Files.write(session.dir.resolve("summary.txt"), report, StandardCharsets.UTF_8);
                 session.note = "Task " + result + ": " + session.proposals.size()
                         + " proposed, " + session.repaired.get() + " verified repair(s) enabled, "
@@ -302,6 +309,27 @@ public final class TaskTemplateCoach {
         }
     }
 
+    /** Records actual game input so a claimed/disabled button cannot be
+     * "repaired" into the old actionable button after the click. */
+    public static void tapped(String device, PointData location) {
+        Session session = CURRENT.get();
+        if (session == null || !session.active || session.ownerThread != Thread.currentThread()
+                || !session.device.equals(device) || location == null) return;
+        for (Stats stat : session.stats.values()) {
+            synchronized (stat) {
+                if (stat.lastX >= 0 && stat.lastY >= 0 && stat.hits > 0
+                        && Math.abs(location.getX() - stat.lastX) <= 55
+                        && Math.abs(location.getY() - stat.lastY) <= 55) {
+                    stat.tappedAfterPositive = true;
+                }
+            }
+        }
+    }
+
+    static boolean mayAutomaticallyApply(String outcome, boolean tapped, boolean multi) {
+        return !tapped && !multi && "FAILED".equals(outcome);
+    }
+
     private static void proposeIfSupported(Session session, Stats stat) throws IOException {
         Path success;
         List<Path> failures;
@@ -335,8 +363,10 @@ public final class TaskTemplateCoach {
             Path candidate = session.dir.resolve("proposals").resolve(stat.name.toLowerCase(Locale.ROOT) + ".png");
             if (!ImageIO.write(first, "png", candidate.toFile())) return;
             stat.proposed = true;
-            String status = "new crop at a previously confirmed position (NOT yet verified)";
-            if (session.autoApply && !stat.multiMatchObserved
+            String status = "REVIEW_ONLY: stable crop at a previously recognized position";
+            boolean failedTask = session.outcome.equals("FAILED");
+            if (session.autoApply && mayAutomaticallyApply(session.outcome,
+                    stat.tappedAfterPositive, stat.multiMatchObserved)
                     && !VerifiedTemplateOverrides.isActive(stat.resource)) {
                 String validation = validateSafely(stat.resource, oldBytes, candidate, prior,
                         frames, x, y, width, height);
@@ -345,10 +375,12 @@ public final class TaskTemplateCoach {
                     VerifiedTemplateOverrides.activate(stat.resource, candidate,
                             x, y, prior.getWidth(), prior.getHeight());
                     session.repaired.incrementAndGet();
-                    status = "APPLIED (reversible verified overlay, original unchanged)";
+                    status = "APPLIED (reversible detection overlay; RETEST task outcome; original unchanged)";
                 }
             }
-            if (stat.multiMatchObserved) status = "REVIEW_ONLY: multi-match templates require separate validation";
+            if (stat.tappedAfterPositive) status = "REVIEW_ONLY: button was tapped; state change may be intentional";
+            else if (!failedTask) status = "REVIEW_ONLY: task did not fail; button may have changed after success";
+            else if (stat.multiMatchObserved) status = "REVIEW_ONLY: multi-match templates require separate validation";
             session.proposals.add(new Proposal(stat.name, status, candidate, difference));
         }
     }
@@ -521,6 +553,31 @@ public final class TaskTemplateCoach {
                     + Math.abs((p & 255) - (q & 255))) / 3.0;
         }
         return sum / (a.getWidth() * (double) a.getHeight());
+    }
+
+    /** Existing diagnostics settings govern storage and LAN sharing. This
+     * reuses the established, explicitly opt-in upload path; never bypass it.
+     */
+    private static int publishRepresentativeFailures(Session session) {
+        DiagnosticSnapshotStore store = DiagnosticSnapshotStore.forCurrentWorkspace();
+        if (!store.isEnabled()) return 0;
+        int copied = 0;
+        for (Stats stat : session.stats.values().stream()
+                .sorted(Comparator.comparingInt((Stats item) -> item.misses).reversed()).toList()) {
+            if (copied >= 4) break;
+            List<Path> frames;
+            synchronized (stat) { frames = List.copyOf(stat.failures); }
+            if (frames.isEmpty()) continue;
+            try {
+                BufferedImage image = ImageIO.read(frames.get(0).toFile());
+                if (image == null) continue;
+                if (store.write(asRaw(image), "taskcoach" + session.task.name().toLowerCase(Locale.ROOT),
+                        "miss-" + stat.name.toLowerCase(Locale.ROOT), Instant.now()).isPresent()) copied++;
+            } catch (Exception ignored) {
+                // Nonessential upload may never change game task behavior.
+            }
+        }
+        return copied;
     }
 
     private static void pruneOldRuns(Path root) throws IOException {
