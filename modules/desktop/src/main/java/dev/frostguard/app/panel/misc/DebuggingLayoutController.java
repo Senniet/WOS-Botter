@@ -402,7 +402,17 @@ public class DebuggingLayoutController {
         possibleTemplateDirs.add(new File("../modules/vision/src/main/resources/templates"));
         possibleTemplateDirs.add(new File("../../modules/vision/src/main/resources/templates"));
         possibleTemplateDirs.add(new File("templates"));
-
+        // jpackage stages input/templates under <install>/app/templates,
+        // while the launcher lives in <install>/SurvivalOps.exe. The process
+        // working directory is not guaranteed to be the installation folder.
+        String launcherPath = System.getProperty("jpackage.app-path", "");
+        if (!launcherPath.isBlank()) {
+            File launcherDir = new File(launcherPath).getAbsoluteFile().getParentFile();
+            if (launcherDir != null) {
+                possibleTemplateDirs.add(new File(launcherDir, "app/templates"));
+                possibleTemplateDirs.add(new File(launcherDir, "templates"));
+            }
+        }
         File currentDir = new File(System.getProperty("user.dir")).getAbsoluteFile();
         while (currentDir != null && currentDir.exists()) {
             possibleTemplateDirs.add(new File(currentDir, "modules/vision/src/main/resources/templates"));
@@ -411,7 +421,7 @@ public class DebuggingLayoutController {
 
         File templateDir = null;
         for (File dir : possibleTemplateDirs) {
-            if (dir.exists() && dir.isDirectory()) {
+            if (dir.isDirectory() && containsTemplateImages(dir)) {
                 templateDir = dir;
                 break;
             }
@@ -448,6 +458,18 @@ public class DebuggingLayoutController {
                 }
             }
         });
+    }
+
+    private boolean containsTemplateImages(File directory) {
+        File[] files = directory.listFiles();
+        if (files == null) return false;
+        for (File file : files) {
+            if (file.isDirectory() && containsTemplateImages(file)) return true;
+            String name = file.getName().toLowerCase(java.util.Locale.ROOT);
+            if (file.isFile() && (name.endsWith(".png") || name.endsWith(".jpg")
+                    || name.endsWith(".bmp"))) return true;
+        }
+        return false;
     }
 
     private void findImageFiles(File dir, List<File> list) {
