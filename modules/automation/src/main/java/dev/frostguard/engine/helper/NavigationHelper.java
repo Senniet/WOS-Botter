@@ -626,9 +626,11 @@ public class NavigationHelper {
                 throw new ProfileInReconnectStateException(accountName + " in reconnect state");
             }
 
-            ImageSearchResultData cityButton = findHomeAnchor();
+            // Most recovery calls begin on a stable screen. First try cheap
+            // exact anchors; retain the resilient matcher for later passes.
+            ImageSearchResultData cityButton = findHomeAnchor(pass == 1);
             boolean atHome = cityButton.isFound();
-            ImageSearchResultData worldButton = atHome ? ImageSearchResultData.miss() : findWorldAnchor();
+            ImageSearchResultData worldButton = atHome ? ImageSearchResultData.miss() : findWorldAnchor(pass == 1);
             boolean atWorld = worldButton.isFound();
 
             checkpoint.run();
@@ -965,21 +967,39 @@ public class NavigationHelper {
     }
 
     private ImageSearchResultData findHomeAnchor() {
+        return findHomeAnchor(false);
+    }
+
+    private ImageSearchResultData findHomeAnchor(boolean fast) {
         var config = TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
                 .withThreshold(90).withArea(AreaData.of(590, 1145, 715, 1275)).build();
-        var current = searcher.locatePattern(TemplatesEnum.SERVE_EMU_CITY_ANCHOR, config);
+        var current = fast
+                ? searcher.locatePatternFast(TemplatesEnum.SERVE_EMU_CITY_ANCHOR, config)
+                : searcher.locatePattern(TemplatesEnum.SERVE_EMU_CITY_ANCHOR, config);
         if (current.isFound()) return current;
-        return searcher.locatePattern(TemplatesEnum.GAME_HOME_FURNACE, config);
+        return fast
+                ? searcher.locatePatternFast(TemplatesEnum.GAME_HOME_FURNACE, config)
+                : searcher.locatePattern(TemplatesEnum.GAME_HOME_FURNACE, config);
     }
 
     private ImageSearchResultData findWorldAnchor() {
+        return findWorldAnchor(false);
+    }
+
+    private ImageSearchResultData findWorldAnchor(boolean fast) {
         var config = TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
                 .withThreshold(90).withArea(AreaData.of(590, 1145, 715, 1275)).build();
-        var current = searcher.locatePattern(TemplatesEnum.SERVE_EMU_WORLD_ANCHOR_CURRENT, config);
+        var current = fast
+                ? searcher.locatePatternFast(TemplatesEnum.SERVE_EMU_WORLD_ANCHOR_CURRENT, config)
+                : searcher.locatePattern(TemplatesEnum.SERVE_EMU_WORLD_ANCHOR_CURRENT, config);
         if (current.isFound()) return current;
-        current = searcher.locatePattern(TemplatesEnum.SERVE_EMU_WORLD_ANCHOR, config);
+        current = fast
+                ? searcher.locatePatternFast(TemplatesEnum.SERVE_EMU_WORLD_ANCHOR, config)
+                : searcher.locatePattern(TemplatesEnum.SERVE_EMU_WORLD_ANCHOR, config);
         if (current.isFound()) return current;
-        return searcher.locatePattern(TemplatesEnum.GAME_HOME_WORLD, config);
+        return fast
+                ? searcher.locatePatternFast(TemplatesEnum.GAME_HOME_WORLD, config)
+                : searcher.locatePattern(TemplatesEnum.GAME_HOME_WORLD, config);
     }
 
     private boolean stableHomeWorldAnchor(ImageSearchResultData before, boolean atHome) {

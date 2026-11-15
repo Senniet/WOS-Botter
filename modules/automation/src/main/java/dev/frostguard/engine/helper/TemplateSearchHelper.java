@@ -63,6 +63,16 @@ public class TemplateSearchHelper {
         return retrySearch(tpl, cfg, false, false);
     }
 
+    /** Cheap first-pass observation for passive navigation anchors only.
+     * No greyscale/multiscale retries, diagnostic snapshots or implicit taps.
+     * Never use this alone to authorize an action.
+     */
+    public ImageSearchResultData locatePatternFast(TemplatesEnum tpl, SearchConfig cfg) {
+        preemptionHook.run();
+        ImageSearchResultData result = doSearch(tpl, cfg);
+        return result == null ? ImageSearchResultData.miss() : result;
+    }
+
     // ── single-match (greyscale) ─────────────────────────────────────
 
     public ImageSearchResultData locatePatternMono(TemplatesEnum tpl, SearchConfig cfg) {
