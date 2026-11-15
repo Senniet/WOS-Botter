@@ -6,6 +6,8 @@ import dev.frostguard.api.domain.ImageSearchResultData;
 import dev.frostguard.api.domain.RawImageData;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.api.io.CleanupMode;
+import org.junit.jupiter.api.BeforeAll;
 
 import java.awt.image.BufferedImage;
 import java.nio.file.Files;
@@ -15,7 +17,18 @@ import javax.imageio.ImageIO;
 import static org.junit.jupiter.api.Assertions.*;
 
 class TaskTemplateCoachTest {
-    @TempDir Path root;
+    // The diagnostics settings can initialise SQLite in this workspace. On
+    // Windows, OpenCV JNI DLLs and SQLite WAL handles are still locked when
+    // JUnit attempts to remove @TempDir, even though assertions passed.
+    // GitHub-hosted runners discard the entire temporary workspace after jobs.
+    @TempDir(cleanup = CleanupMode.NEVER) Path root;
+
+    @BeforeAll
+    static void loadOpenCvOutsideTestWorkspace() throws Exception {
+        // JNI libraries cannot be unloaded until the JVM exits on Windows.
+        // Never extract them into a JUnit directory that must be deleted.
+        dev.frostguard.vision.match.OpenCvPatternLocator.loadNativeLibrary();
+    }
 
     @Test void onlyChosenTaskAndDeviceProduceEvidenceAndStopAfterItEnds() throws Exception {
         String old = System.getProperty("frostguard.workspace");
@@ -106,7 +119,6 @@ class TaskTemplateCoachTest {
         String old = System.getProperty("frostguard.workspace");
         System.setProperty("frostguard.workspace", root.toString());
         try {
-            dev.frostguard.vision.match.OpenCvPatternLocator.loadNativeLibrary();
             BufferedImage screenshot = new BufferedImage(720, 1280, BufferedImage.TYPE_INT_RGB);
             BufferedImage badge;
             try (var stream = getClass().getResourceAsStream(
