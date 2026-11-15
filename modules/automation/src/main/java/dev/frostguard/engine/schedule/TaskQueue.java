@@ -695,6 +695,8 @@ public class TaskQueue {
             emitInfoTask(task, "Executing: " + task.getTaskName());
             broadcastStatus("Executing " + task.getTaskName());
             AnalyticsService.getInstance().trackTaskStarted(task.getTaskName());
+            dev.frostguard.engine.diagnostics.TaskTemplateCoach.taskStarted(
+                    profile.getId(), profile.getEmulatorNumber(), task.getTpTask());
             task.setLastExecutionTime(LocalDateTime.now());
             task.run();
             // Keep the initial force flag until Initialize reports success. A profile cooldown
@@ -749,6 +751,8 @@ public class TaskQueue {
                 ok = false;
             }
         } finally {
+            dev.frostguard.engine.diagnostics.TaskTemplateCoach.taskFinished(
+                    profile.getId(), profile.getEmulatorNumber(), task.getTpTask(), outcome.name());
             synchronized (this) { if (runningContext != null) runningContext.clear(); runningContext = null; }
             if (!shuttingDown) {
                 handleReschedule(task, priorSchedule);

@@ -16,6 +16,11 @@ import dev.frostguard.vision.match.OpenCvPatternLocator;
 import dev.frostguard.api.domain.ImageSearchResultData;
 import dev.frostguard.api.domain.PointData;
 import dev.frostguard.api.domain.AccountDescriptor;
+import dev.frostguard.api.configs.TpDailyTaskEnum;
+import dev.frostguard.engine.diagnostics.TaskTemplateCoach;
+import dev.frostguard.engine.diagnostics.VerifiedTemplateOverrides;
+import dev.frostguard.engine.service.ScheduleService;
+import dev.frostguard.engine.schedule.TaskQueue;
 import dev.frostguard.engine.service.ProfileService;
 import dev.frostguard.vision.ocr.OcrEngine;
 
@@ -96,6 +101,18 @@ public class DebuggingLayoutController {
     @FXML
     private Button btnAuditLibrary;
 
+    @FXML
+    private ComboBox<TpDailyTaskEnum> coachTaskComboBox;
+
+    @FXML
+    private javafx.scene.control.CheckBox coachAutoRepairCheckBox;
+
+    @FXML
+    private Label coachStatusLabel;
+
+    private javafx.animation.Timeline coachStatusTimer;
+    private String lastCoachPhase = "IDLE";
+
     private File currentScreenshotFile;
     private List<File> allTemplates = new ArrayList<>();
 
@@ -111,6 +128,7 @@ public class DebuggingLayoutController {
         setupProfiles();
         loadTemplates();
         populateAuditGroups();
+        setupTaskCoach();
         setupSearchFilter();
         setupActions();
     }
@@ -497,6 +515,131 @@ public class DebuggingLayoutController {
                     }
                 }
             }
+        }
+    }
+
+    private void setupTaskCoach() {
+        List<TpDailyTaskEnum> selectable = java.util.Arrays.stream(TpDailyTaskEnum.values())
+                .filter(t -> t != TpDailyTaskEnum.INITIALIZE
+                        && t != TpDailyTaskEnum.CREATE_CHARACTER
+                        && t != TpDailyTaskEnum.SKIP_TUTORIAL
+                        && t != TpDailyTaskEnum.CUSTOM_TASK
+                        && t != TpDailyTaskEnum.DUMMY_TASK)
+                .sorted(java.util.Comparator.comparing(TpDailyTaskEnum::getName)).toList();
+        coachTaskComboBox.setItems(FXCollections.observableArrayList(selectable));
+        coachStatusTimer = new javafx.animation.Timeline(new javafx.animation.KeyFrame(
+                javafx.util.Duration.seconds(1), event -> refreshTaskCoachStatus(false)));
+        coachStatusTimer.setCycleCount(javafx.animation.Animation.INDEFINITE);
+        coachStatusLabel.sceneProperty().addListener((obs, oldScene, scene) -> {
+            if (scene == null) coachStatusTimer.stop();
+            else coachStatusTimer.play();
+        });
+        refreshTaskCoachStatus(false);
+    }
+
+    @FXML
+    private void handleStartTaskCoach(ActionEvent event) {
+        AccountDescriptor profile = profileComboBox.getValue();
+        TpDailyTaskEnum task = coachTaskComboBox.getValue();
+        if (profile == null || task == null || profile.getId() == null) {
+            log("Choose an ADB profile and the exact task to diagnose.");
+            return;
+        }
+        TaskQueue queue;
+        try {
+            queue = ScheduleService.obtain().getCoordinator().getQueue(profile.getId());
+        } catch (Exception ex) {
+            log("Cannot access task queue: " + ex.getMessage());
+            return;
+        }
+        if (queue == null || !queue.isActive()) {
+            log("Start the bot/profile first; Task Coach uses the normal task queue.");
+            return;
+        }
+        if (queue.hasExecutingTask()) {
+            log("Another task is executing. Try again when it has completed.");
+            return;
+        }
+        try {
+            var status = TaskTemplateCoach.arm(profile.getId(), profile.getEmulatorNumber(), task,
+                    coachAutoRepairCheckBox.isSelected());
+            queue.runNow(task, false);
+            log("Task Coach armed: " + task.getName() + " for selected profile."
+                    + " The routine will execute once via the existing queue.");
+            log("Evidence will be saved locally in: " + status.directory());
+            refreshTaskCoachStatus(false);
+        } catch (Exception ex) {
+            TaskTemplateCoach.stop();
+            log("Could not start Task Coach: " + ex.getMessage());
+        }
+    }
+
+    @FXML
+    private void handleStopTaskCoach(ActionEvent event) {
+        TaskTemplateCoach.stop();
+        log("Stopped Task Coach evidence collection. Running game task continues normally.");
+        refreshTaskCoachStatus(false);
+    }
+
+    @FXML
+    private void handleRollbackCoachTemplate(ActionEvent event) {
+        File template = templateListView.getSelectionModel().getSelectedItem();
+        if (template == null) {
+            log("Select a repaired template in the template list first.");
+            return;
+        }
+        String resource = ScreenTemplateAudit.resourceForTemplate(template.toPath());
+        try {
+            boolean reverted = VerifiedTemplateOverrides.rollback(resource);
+            log(reverted ? "Rolled back verified repair for " + resource
+                    + ". Bundled original is now used again."
+                    : "No active verified repair found for " + resource);
+        } catch (Exception ex) {
+            log("Could not roll back template repair: " + ex.getMessage());
+        }
+    }
+
+    @FXML
+    private void handleShowTaskCoach(ActionEvent event) {
+        refreshTaskCoachStatus(true);
+        var status = TaskTemplateCoach.snapshot();
+        if (status.directory().isBlank()) return;
+        Path summary = Path.of(status.directory()).resolve("summary.txt");
+        if (!Files.isRegularFile(summary)) {
+            log("Detailed report appears after the task completes (or diagnostics are stopped).");
+            return;
+        }
+        try {
+            List<String> lines = Files.readAllLines(summary);
+            for (int index = 0; index < Math.min(85, lines.size()); index++) log(lines.get(index));
+            if (lines.size() > 85) log("... " + (lines.size() - 85)
+                    + " more lines in " + summary);
+            log("Individual scores and locations: "
+                    + Path.of(status.directory()).resolve("recognition-events.csv"));
+        } catch (Exception ex) {
+            log("Could not read Task Coach report: " + ex.getMessage());
+        }
+    }
+
+    private void refreshTaskCoachStatus(boolean detailed) {
+        var status = TaskTemplateCoach.snapshot();
+        coachStatusLabel.setText(status.phase() + " | " + status.task()
+                + " | checks " + status.checks() + ", hits " + status.hits()
+                + ", misses " + status.misses() + ", captures " + status.captures()
+                + ", proposed " + status.proposals() + ", repaired " + status.repaired()
+                + "\n" + status.note());
+        if (!lastCoachPhase.equals(status.phase())) {
+            lastCoachPhase = status.phase();
+            if (status.phase().equals("COMPLETED") || status.phase().equals("ERROR")) {
+                log("Task Coach: " + status.note() + ". Output: " + status.directory());
+            }
+        }
+        if (detailed) {
+            log("Task Coach " + status.phase() + ": " + status.task() + " — " + status.note());
+            log("Checks: " + status.checks() + ", matched: " + status.hits()
+                    + ", missed: " + status.misses() + ", evidence: " + status.captures()
+                    + ", staged suggestions: " + status.proposals() + ", active repairs: " + status.repaired());
+            log("Evidence directory: " + status.directory());
         }
     }
 

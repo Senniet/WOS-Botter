@@ -30,7 +30,9 @@
             </StackPane>
         </VBox>
 
-        <!-- Right Side: Developer Controls / Action Panel -->
+        <!-- Right Side: scrollable diagnostics controls and reports -->
+        <ScrollPane fitToWidth="true" hbarPolicy="NEVER" styleClass="controls-scroll">
+          <content>
         <VBox spacing="16.0" styleClass="controls-card" alignment="TOP_CENTER" VBox.vgrow="ALWAYS">
             
             <!-- ADB Extraction Tools -->
@@ -48,6 +50,21 @@
                 </GridPane>
             </VBox>
                         
+            <!-- Guided diagnostics: run one real task while capturing its template decisions -->
+            <VBox spacing="8.0" styleClass="module-card">
+                <Label text="Task Coach — follow a running task" styleClass="module-title"/>
+                <ComboBox fx:id="coachTaskComboBox" maxWidth="Infinity" promptText="Select task to diagnose"/>
+                <CheckBox fx:id="coachAutoRepairCheckBox" text="Automatically activate strictly verified repairs" selected="true"/>
+                <HBox spacing="8" alignment="CENTER_LEFT">
+                    <Button text="Run task + diagnose" onAction="#handleStartTaskCoach" styleClass="compact-button"/>
+                    <Button text="Stop diagnostics" onAction="#handleStopTaskCoach" styleClass="compact-button"/>
+                    <Button text="Show report" onAction="#handleShowTaskCoach" styleClass="compact-button"/>
+                </HBox>
+                <Label fx:id="coachStatusLabel" text="Idle — select a task and profile" wrapText="true" styleClass="field-label"/>
+                <Button text="Rollback selected template repair" onAction="#handleRollbackCoachTemplate" styleClass="compact-button" maxWidth="Infinity"/>
+                <Label text="Original templates are preserved. Unverified proposals remain inactive." wrapText="true" styleClass="field-label"/>
+            </VBox>
+
             <!-- Image Recognition Tools -->
             <!-- pernerch/2026-07-02: Fixed debugging UI - templates list now visible only when "Template Search" is selected -->
             <VBox spacing="12.0" styleClass="module-card" VBox.vgrow="ALWAYS">
@@ -75,5 +92,7 @@
                 <TextArea fx:id="logTextArea" editable="false" promptText="Logs will appear here..." styleClass="terminal-text-area" wrapText="true" VBox.vgrow="ALWAYS" />
             </VBox>
         </VBox>
+          </content>
+        </ScrollPane>
     </items>
 </SplitPane>
