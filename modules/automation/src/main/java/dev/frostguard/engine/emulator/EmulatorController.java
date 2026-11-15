@@ -214,7 +214,7 @@ public class EmulatorController {
                           frame, regionTpl(t.getTemplate()), th, tl, br);
                   if (repaired != null) result = repaired;
               }
-              dev.frostguard.engine.diagnostics.TaskTemplateCoach.observe(idx, t, "color", th, result, frame);
+              dev.frostguard.engine.diagnostics.TaskTemplateCoach.observe(idx, t, "color", th, result, frame, tl, br);
               return result;
         } finally { OpenCvPatternLocator.clearContextLabel(); }
     }
@@ -236,7 +236,7 @@ public class EmulatorController {
                           frame, regionTpl(t.getTemplate()), th, tl, br);
                   if (repaired != null) result = repaired;
               }
-              dev.frostguard.engine.diagnostics.TaskTemplateCoach.observe(idx, t, "multiscale", th, result, frame);
+              dev.frostguard.engine.diagnostics.TaskTemplateCoach.observe(idx, t, "multiscale", th, result, frame, tl, br);
               return result;
         } finally { OpenCvPatternLocator.clearContextLabel(); }
     }
@@ -261,7 +261,7 @@ public class EmulatorController {
                           frame, regionTpl(t.getTemplate()), th, tl, br);
                   if (repaired != null) result = repaired;
               }
-              dev.frostguard.engine.diagnostics.TaskTemplateCoach.observe(idx, t, "mono", th, result, frame);
+              dev.frostguard.engine.diagnostics.TaskTemplateCoach.observe(idx, t, "mono", th, result, frame, tl, br);
               return result;
         } finally { OpenCvPatternLocator.clearContextLabel(); }
     }
@@ -275,7 +275,7 @@ public class EmulatorController {
         try { OpenCvPatternLocator.setContextLabel(label(idx));
               List<ImageSearchResultData> results = OpenCvPatternLocator.locateAllPatternsMono(
                       frame, regionTpl(t.getTemplate()), tl, br, th, max);
-              observeMultiple(idx, t, "multi-mono", th, results, frame);
+              observeMultiple(idx, t, "multi-mono", th, results, frame, tl, br);
               return results;
         } finally { OpenCvPatternLocator.clearContextLabel(); }
     }
@@ -289,7 +289,7 @@ public class EmulatorController {
         try { OpenCvPatternLocator.setContextLabel(label(idx));
               List<ImageSearchResultData> results = OpenCvPatternLocator.locateAllPatterns(
                       frame, regionTpl(t.getTemplate()), tl, br, th, max);
-              observeMultiple(idx, t, "multi", th, results, frame);
+              observeMultiple(idx, t, "multi", th, results, frame, tl, br);
               return results;
         } finally { OpenCvPatternLocator.clearContextLabel(); }
     }
@@ -299,7 +299,7 @@ public class EmulatorController {
         try { OpenCvPatternLocator.setContextLabel(label(idx));
               List<ImageSearchResultData> results = OpenCvPatternLocator.locateAllPatterns(
                       frame, regionTpl(t.getTemplate()), tl, br, th, max);
-              observeMultiple(idx, t, "multi", th, results, frame);
+              observeMultiple(idx, t, "multi", th, results, frame, tl, br);
               return results;
         } finally { OpenCvPatternLocator.clearContextLabel(); }
     }
@@ -308,14 +308,15 @@ public class EmulatorController {
     }
 
     private void observeMultiple(String idx, TemplatesEnum template, String method, double threshold,
-                                 List<ImageSearchResultData> results, RawImageData frame) {
+                                 List<ImageSearchResultData> results, RawImageData frame,
+                                 PointData tl, PointData br) {
         ImageSearchResultData strongest = results == null ? null : results.stream()
                 .filter(java.util.Objects::nonNull)
                 .filter(ImageSearchResultData::isFound)
                 .max(java.util.Comparator.comparingDouble(ImageSearchResultData::getMatchScore))
                 .orElse(null);
         dev.frostguard.engine.diagnostics.TaskTemplateCoach.observe(idx, template, method,
-                threshold, strongest == null ? ImageSearchResultData.miss() : strongest, frame);
+                threshold, strongest == null ? ImageSearchResultData.miss() : strongest, frame, tl, br);
     }
 
     // --- file-based template searches ---

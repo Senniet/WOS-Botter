@@ -102,6 +102,50 @@ class TaskTemplateCoachTest {
         assertTrue(TaskTemplateCoach.mayAutomaticallyApply("FAILED", false, false));
     }
 
+    @Test void diagnosesWrongSearchRegionInsteadOfReplacingValidTemplate() throws Exception {
+        String old = System.getProperty("frostguard.workspace");
+        System.setProperty("frostguard.workspace", root.toString());
+        try {
+            dev.frostguard.vision.match.OpenCvPatternLocator.loadNativeLibrary();
+            BufferedImage screenshot = new BufferedImage(720, 1280, BufferedImage.TYPE_INT_RGB);
+            BufferedImage badge;
+            try (var stream = getClass().getResourceAsStream(
+                    TemplatesEnum.SIDEBAR_CLAIM_ACTION.getTemplate())) {
+                assertNotNull(stream);
+                badge = ImageIO.read(stream);
+            }
+            var graphics = screenshot.createGraphics();
+            graphics.drawImage(badge, 382, 535, null);
+            graphics.dispose();
+            RawImageData frame = TaskTemplateCoach.asRaw(screenshot);
+            long profileId = 30303L;
+            TaskTemplateCoach.arm(profileId, "emu0", TpDailyTaskEnum.TRAINING_TROOPS, false);
+            TaskTemplateCoach.taskStarted(profileId, "emu0", TpDailyTaskEnum.TRAINING_TROOPS);
+            for (int i = 0; i < 3; i++) {
+                TaskTemplateCoach.observe("emu0", TemplatesEnum.SIDEBAR_CLAIM_ACTION,
+                        "color", 87, ImageSearchResultData.miss(), frame,
+                        new dev.frostguard.api.domain.PointData(350, 578),
+                        new dev.frostguard.api.domain.PointData(445, 640));
+            }
+            TaskTemplateCoach.taskFinished(profileId, "emu0", TpDailyTaskEnum.TRAINING_TROOPS, "FAILED");
+            for (int i = 0; i < 160 && !TaskTemplateCoach.snapshot().phase().equals("COMPLETED"); i++) {
+                Thread.sleep(50);
+            }
+            var status = TaskTemplateCoach.snapshot();
+            assertEquals("COMPLETED", status.phase(), status.note());
+            String report = Files.readString(Path.of(status.directory(), "summary.txt"));
+            assertTrue(report.contains("REGION_MISMATCH_REVIEW SIDEBAR_CLAIM_ACTION"), report);
+            assertTrue(report.contains("likely wrong ROI, not a broken PNG"));
+            assertFalse(VerifiedTemplateOverrides.isActive(TemplatesEnum.SIDEBAR_CLAIM_ACTION.getTemplate()));
+            String records = Files.readString(Path.of(status.directory(), "recognition-events.csv"));
+            assertTrue(records.contains(",350,578,445,640"), records);
+        } finally {
+            TaskTemplateCoach.stop();
+            if (old == null) System.clearProperty("frostguard.workspace");
+            else System.setProperty("frostguard.workspace", old);
+        }
+    }
+
     @Test void screenContextValidationDistinguishesDifferentPages() {
         BufferedImage a = new BufferedImage(240, 360, BufferedImage.TYPE_INT_RGB);
         BufferedImage b = new BufferedImage(240, 360, BufferedImage.TYPE_INT_RGB);

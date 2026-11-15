@@ -52,6 +52,20 @@ public final class TaskTemplateCoach {
                           int captures, int proposals, int repaired, String directory, String note) {}
     public record Proposal(String template, String reason, Path path, double similarity) {}
 
+    /** Exact area the routine actually searched; not the OCR/text region. */
+    private record SearchBox(int left, int top, int right, int bottom) {
+        static SearchBox of(PointData tl, PointData br) {
+            if (tl == null || br == null) return null;
+            return new SearchBox(tl.getX(), tl.getY(), br.getX(), br.getY());
+        }
+        boolean containsWholeTemplate(int x, int y, int width, int height) {
+            return x - width / 2 >= left && y - height / 2 >= top
+                    && x - width / 2 + width <= right
+                    && y - height / 2 + height <= bottom;
+        }
+        String describe() { return "(" + left + "," + top + ")-(" + right + "," + bottom + ")"; }
+    }
+
     private static final class Stats {
         final String name;
         final String resource;
@@ -60,6 +74,7 @@ public final class TaskTemplateCoach {
         int templateWidth, templateHeight;
         Path positive;
         final List<Path> failures = new ArrayList<>();
+        final Map<Path, SearchBox> failedSearchAreas = new java.util.HashMap<>();
         boolean proposed;
         boolean multiMatchObserved;
         boolean tappedAfterPositive;
@@ -181,6 +196,20 @@ public final class TaskTemplateCoach {
                     session.note = "Capture backlog timed out; proposals could be incomplete";
                 }
                 List<String> report = new ArrayList<>();
+                int inspectedRegions = 0;
+                for (Stats stat : session.stats.values().stream()
+                        .sorted(Comparator.comparingInt((Stats item) -> item.misses).reversed())
+                        .toList()) {
+                    if (inspectedRegions >= 20) break;
+                    if (stat.misses < 2 || stat.failures.isEmpty()) continue;
+                    inspectedRegions++;
+                    try {
+                        String regionWarning = diagnoseWrongSearchRegion(stat);
+                        if (regionWarning != null) report.add(regionWarning);
+                    } catch (Exception ex) {
+                        report.add("REGION_DIAG_ERROR " + stat.name + " " + ex.getClass().getSimpleName());
+                    }
+                }
                 for (Stats stat : session.stats.values().stream()
                         .sorted(Comparator.comparingInt((Stats item) -> item.misses).reversed())
                         .limit(40).toList()) {
@@ -189,7 +218,7 @@ public final class TaskTemplateCoach {
                             + ex.getClass().getSimpleName()); }
                 }
                 List<String> events = new ArrayList<>();
-                events.add("time_utc,template,method,threshold,score,hit,x,y");
+                events.add("time_utc,template,method,threshold,score,hit,x,y,roi_left,roi_top,roi_right,roi_bottom");
                 events.addAll(session.observations);
                 Files.write(session.dir.resolve("recognition-events.csv"), events,
                         StandardCharsets.UTF_8);
@@ -241,6 +270,12 @@ public final class TaskTemplateCoach {
     /** Called on the real recognition path; constant time unless a bounded capture is due. */
     public static void observe(String device, TemplatesEnum template, String method, double threshold,
                                ImageSearchResultData result, RawImageData frame) {
+        observe(device, template, method, threshold, result, frame, null, null);
+    }
+
+    public static void observe(String device, TemplatesEnum template, String method, double threshold,
+                               ImageSearchResultData result, RawImageData frame,
+                               PointData topLeft, PointData bottomRight) {
         Session session = CURRENT.get();
         if (session == null || !session.active || session.ownerThread != Thread.currentThread()
                 || !session.device.equals(device)
@@ -250,9 +285,14 @@ public final class TaskTemplateCoach {
         int posX = hit && result.getPoint() != null ? result.getPoint().getX() : -1;
         int posY = hit && result.getPoint() != null ? result.getPoint().getY() : -1;
         double score = result == null ? Double.NaN : result.getMatchScore();
+        SearchBox searchBox = SearchBox.of(topLeft, bottomRight);
         session.observations.addLast(String.format(Locale.ROOT,
-                "%s,%s,%s,%.2f,%.2f,%s,%d,%d",
-                Instant.now(), template.name(), method, threshold, score, hit, posX, posY));
+                "%s,%s,%s,%.2f,%.2f,%s,%d,%d,%d,%d,%d,%d",
+                Instant.now(), template.name(), method, threshold, score, hit, posX, posY,
+                searchBox == null ? -1 : searchBox.left(),
+                searchBox == null ? -1 : searchBox.top(),
+                searchBox == null ? -1 : searchBox.right(),
+                searchBox == null ? -1 : searchBox.bottom()));
         if (session.bufferedEvents.incrementAndGet() > 1200) {
             session.observations.pollFirst();
             session.bufferedEvents.decrementAndGet();
@@ -300,13 +340,52 @@ public final class TaskTemplateCoach {
                     ImageIO.write(image, "png", file.toFile());
                     synchronized (target) {
                         if (hit && target.positive == null) target.positive = file;
-                        else if (!hit) target.failures.add(file);
+                        else if (!hit) {
+                            target.failures.add(file);
+                            if (searchBox != null) target.failedSearchAreas.put(file, searchBox);
+                        }
                     }
                 } catch (Exception ex) {
                     session.drops.incrementAndGet();
                 }
             });
         }
+    }
+
+    /** A full-frame exact match outside the caller's ROI means the picture may
+     * be right but the task's coordinates wrong. Report; NEVER auto-tap or
+     * silently widen the runtime action region (other rows may have same icon).
+     */
+    private static String diagnoseWrongSearchRegion(Stats stat) throws IOException {
+        Path evidence;
+        SearchBox box;
+        synchronized (stat) {
+            if (stat.failures.isEmpty()) return null;
+            evidence = stat.failures.get(0);
+            box = stat.failedSearchAreas.get(evidence);
+        }
+        if (box == null) return null;
+        BufferedImage frame = ImageIO.read(evidence.toFile());
+        if (frame == null) return null;
+        BufferedImage sprite;
+        try (InputStream resource = TaskTemplateCoach.class.getResourceAsStream(stat.resource)) {
+            if (resource == null) return null;
+            sprite = ImageIO.read(resource);
+        }
+        if (sprite == null || sprite.getWidth() > frame.getWidth()
+                || sprite.getHeight() > frame.getHeight()) return null;
+        ImageSearchResultData anywhere = OpenCvPatternLocator.locatePattern(
+                Files.readAllBytes(evidence), stat.resource,
+                new PointData(0, 0), new PointData(frame.getWidth(), frame.getHeight()), 90.0);
+        if (anywhere == null || !anywhere.isFound() || anywhere.getPoint() == null) return null;
+        int x = anywhere.getPoint().getX(), y = anywhere.getPoint().getY();
+        if (box.containsWholeTemplate(x, y, sprite.getWidth(), sprite.getHeight())) return null;
+        return String.format(Locale.ROOT,
+                "REGION_MISMATCH_REVIEW %s existing search=%s; full-frame %.1f%% at (%d,%d); "
+                        + "template %dx%d; likely wrong ROI, not a broken PNG. "
+                        + "Review correct task row before changing code; never blind-tap. screenshot=%s",
+                stat.name, box.describe(), anywhere.getMatchScore(), x, y,
+                sprite.getWidth(), sprite.getHeight(), evidence);
     }
 
     /** Records actual game input so a claimed/disabled button cannot be

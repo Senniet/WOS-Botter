@@ -190,6 +190,10 @@ protected void loadConfiguration() {
                         + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
                                 "training", "completed-troops-unverified")));
                 reschedule(retryAt);
+                // Don't tell Task Coach the task succeeded while finished
+                // troops remain uncollected and no new training was started.
+                markWorkIncomplete("Training: completed troops could not be collected; "
+                        + "claim button or confirmation was not verified");
                 return;
             }
             analyzedQueues = inspectAllQueues();
@@ -809,15 +813,15 @@ private Integer extractMaxTroopCountFlow() {
             if (slot.status() != QueueMood.COMPLETE) continue;
             navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME);
             marchHelper.openLeftMenuCitySection(true);
-            boolean currentLayout = SidebarFrameClassifier.isCurrentLayout(
-                    ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER)));
-            AreaData queueArea = currentLayout
-                    ? currentSidebarQueueArea(slot.type()) : resolvePipelineArea(slot.type());
+            // IMPORTANT: Queue status OCR reads the text column, which is not
+            // vertically aligned to the green action badge at the right.
+            // 2026 live capture: infantry checkmark centre approximately (405,558),
+            // while the OCR band starts at y=590. The previous relative ROI
+            // therefore excluded the entire 46px checkmark template.
+            AreaData claimArea = sidebarClaimButtonArea(slot.type());
             ImageSearchResultData collect = templateSearchHelper.locateAction(
                     TemplatesEnum.SIDEBAR_CLAIM_ACTION,
-                    SearchConfig.builder().withArea(AreaData.of(350,
-                            queueArea.topLeft().getY() - 12, 445,
-                            queueArea.bottomRight().getY() + 12))
+                    SearchConfig.builder().withArea(claimArea)
                             .withThreshold(87).withMaxAttempts(2).build());
             if (!collect.isFound()) {
                 logWarning(routineLogTrainingLine("Completed " + slot.type()
@@ -1457,6 +1461,18 @@ private Optional<LocalDateTime> earliestReservationCheck() {
                 .map(this::reservationUntil)
                 .flatMap(Optional::stream)
                 .min(LocalDateTime::compareTo);
+    }
+
+/** Claim buttons are visually separate from the status-text OCR bands.
+ * These non-overlapping action rows come from a 720x1280 live training capture.
+ * The action window must include the entire 46x46 green badge.
+ */
+static AreaData sidebarClaimButtonArea(TroopTypeShape type) {
+        return switch (type) {
+            case INFANTRY -> AreaData.of(361, 516, 450, 596);
+            case LANCER -> AreaData.of(361, 597, 450, 671);
+            case MARKSMAN -> AreaData.of(361, 672, 450, 748);
+        };
     }
 
 static AreaData currentSidebarQueueArea(TroopTypeShape type) {
