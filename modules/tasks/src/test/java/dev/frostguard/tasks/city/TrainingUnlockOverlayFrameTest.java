@@ -17,6 +17,9 @@ class TrainingUnlockOverlayFrameTest {
     @Test void acceptsTwoAnimatedFramesWithExplicitContinueInstruction() throws Exception {
         assertTrue(TrainingUnlockOverlay.visible(screenshot("/serveemu/training-unlock-163919-masked.png")));
         assertTrue(TrainingUnlockOverlay.visible(screenshot("/serveemu/training-unlock-164146-masked.png")));
+        // Latest Windows bot failure, 18:53:59 CET: full-screen VI Heroic Lancer.
+        // This is an independent capture, not the older masked Infantry frames.
+        assertTrue(TrainingUnlockOverlay.visible(screenshot("/serveemu/training-unlock-175359.png")));
     }
 
     @Test void ignoresNormalCitySidebarAndUnlabelledBlueBackground() throws Exception {
