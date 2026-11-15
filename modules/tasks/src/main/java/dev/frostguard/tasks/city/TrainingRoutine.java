@@ -244,7 +244,7 @@ protected void loadConfiguration() {
         List<LocalDateTime> newCompletionTimes = trainAllReadyQueuesFlow(readyQueues);
 
         logInfo(routineLogTrainingLine("Verifying final queue states via sidebar."));
-        navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME);
+        ensureHomeAfterTrainingPanel();
         List<QueueSlot> verifiedQueues = inspectAllQueues();
         trainingProgressConfirmed = hasConfirmedTrainingProgress(readyQueues, verifiedQueues);
         if (trainingProgressConfirmed) {
@@ -960,9 +960,9 @@ private Integer extractMaxTroopCountFlow() {
             if (!trainingStartedSuccessfully) {
                 logWarning(routineLogTrainingLine("Multi-tab flow failed for " + queue.type().name() + ". Falling back to single queue flow."));
                 
-                // Recover through the shared, screen-verified navigation path.
-                // Blind dismiss taps may claim rewards or select unrelated UI.
-                navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME);
+                // Recover from our own verified training page first. If the
+                // screen is not a training page, use the general safe recovery.
+                ensureHomeAfterTrainingPanel();
                 inTrainingInterface = false;
 
                 LocalDateTime fallbackTime = trainSingleQueueFlow(queue);
@@ -1097,20 +1097,43 @@ private boolean dismissConfirmedTroopUnlockOverlay() {
     }
 
 private boolean isTrainingCampInterfaceVisible() {
-        var scope=SearchConfig.builder().withMaxAttempts(1).withThreshold(90)
-                .withArea(AreaData.of(0, 1160, 248, 1275)).build();
-        for (int attempt=0; attempt<3; attempt++) {
-            if (templateSearchHelper.locatePattern(
-                    TemplatesEnum.TRAINING_CAMP_INFANTRY_TAB_LABEL_2026, scope).isFound()
-                    || templateSearchHelper.locatePattern(
-                    TemplatesEnum.TRAINING_CAMP_INFANTRY_TAB_ACTIVE, scope).isFound()
-                    || templateSearchHelper.locatePattern(
-                    TemplatesEnum.TRAINING_CAMP_INFANTRY_TAB_INACTIVE, scope).isFound()) {
+        // Previously each verification could scan 3 footer templates through
+        // colour + multiscale + greyscale, often in 3 retry rounds, causing
+        // 39 repeated Infantry footer checks in a single coached task.
+        // One ADB screenshot and two narrow OpenCV probes now identify the
+        // task-specific footer PLUS its game header Back arrow on the SAME
+        // frame. No Alliance/Rewards/Fishing templates are involved here.
+        for (int attempt=0; attempt<2; attempt++) {
+            checkPreemption();
+            RawImageData screenshot=emuManager.captureScreen(EMULATOR_NUMBER);
+            if (TrainingScopedScreen.backArrowOnTrainingPanel(screenshot).isFound())
                 return true;
-            }
-            if (attempt<2) sleepTask(250);
+            if (attempt==0) sleepTask(250);
         }
         return false;
+    }
+
+    private void ensureHomeAfterTrainingPanel() {
+        // The general navigator intentionally knows many possible screens,
+        // but after our own training action we know exactly where we are.
+        // One verified Back avoids expensive scans of Alliance, Rewards,
+        // resource searches and offers. If no troop panel is visible, retain
+        // the existing general recovery path for unknown genuine overlays.
+        TrainingScopedScreen.ExitResult exit=TrainingScopedScreen.tryExit(
+                () -> {checkPreemption();return emuManager.captureScreen(EMULATOR_NUMBER);},
+                point -> {checkPreemption();tapNear(point);},
+                () -> sleepTask(400));
+        if (exit==TrainingScopedScreen.ExitResult.RETURNED_HOME) {
+            logInfo(routineLogTrainingLine("Returned Home via verified training-page Back; "
+                    + "skipped unrelated global overlay templates"));
+            return;
+        }
+        if (exit==TrainingScopedScreen.ExitResult.UNVERIFIED) {
+            markWorkIncomplete("Training: dedicated screen exit did not verify Home");
+            throw new IllegalStateException("Training panel Back/return not verified; "
+                    + "refusing broad recovery scans or repeated blind Back actions");
+        }
+        navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME);
     }
 
 private boolean manageAllTrainingQueues(List<QueueSlot> queues) {
