@@ -9,6 +9,9 @@ import dev.frostguard.api.domain.ImageSearchResultData;
 final class StorehouseStaminaClaimFlow {
 
     interface Actions {
+        /** Begin a new poll using one fresh frame for all screen-state checks. */
+        default void beginObservation() { }
+
         boolean isRewardDialogVisible();
 
         ImageSearchResultData findClaimButton();
@@ -41,6 +44,7 @@ final class StorehouseStaminaClaimFlow {
         boolean rewardDialogSeen = false;
         int cityObservations = 0;
         while (nanoTime.getAsLong() < deadline) {
+            actions.beginObservation();
             if (actions.isRewardDialogVisible()) {
                 rewardDialogSeen = true;
                 ImageSearchResultData claimButton = actions.findClaimButton();

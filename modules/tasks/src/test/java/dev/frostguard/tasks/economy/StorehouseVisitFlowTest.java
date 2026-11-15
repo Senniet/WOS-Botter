@@ -76,6 +76,36 @@ class StorehouseVisitFlowTest {
     }
 
     @Test
+    void knownFullStaminaCapacityDefersWithoutClaimCreditOrRepeatedFiveMinuteRetries() {
+        ScriptedActions actions = new ScriptedActions()
+                .chests(absent())
+                .stamina(found("stamina-full"))
+                .staminaCollections(StorehouseVisitFlow.CollectionState.BLOCKED_CAPACITY);
+
+        StorehouseVisitFlow.VisitDecision decision = run(actions);
+
+        assertEquals(StorehouseVisitFlow.VisitState.WAITING_CAPACITY, decision.state());
+        assertEquals(Duration.ofMinutes(30), decision.delay());
+        assertEquals(0, decision.confirmedChestCollections());
+        assertEquals(0, decision.confirmedStaminaCollections());
+        assertEquals(0, actions.cooldownReads);
+    }
+
+    @Test
+    void collectedChestIsPreservedWhenStaminaCapacityBlocksFurtherClaims() {
+        ScriptedActions actions = new ScriptedActions()
+                .chests(found("chest-ready"))
+                .stamina(found("stamina-full"))
+                .chestCollections(StorehouseVisitFlow.CollectionState.CONFIRMED)
+                .staminaCollections(StorehouseVisitFlow.CollectionState.BLOCKED_CAPACITY);
+        StorehouseVisitFlow.VisitDecision decision = run(actions);
+        assertEquals(StorehouseVisitFlow.VisitState.WAITING_CAPACITY, decision.state());
+        assertEquals(1, decision.confirmedChestCollections());
+        assertEquals(0, decision.confirmedStaminaCollections());
+        assertEquals(0, actions.cooldownReads);
+    }
+
+    @Test
     void readsCooldownWhenBothPoisAreInitiallyAbsent() {
         ScriptedActions actions = new ScriptedActions()
                 .chests(absent())

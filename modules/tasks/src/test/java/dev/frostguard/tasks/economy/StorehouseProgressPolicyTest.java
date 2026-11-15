@@ -35,6 +35,13 @@ class StorehouseProgressPolicyTest {
     }
 
     @Test
+    void knownFullStaminaCapacityDoesNotCountAsProgressOrUnknownFailure() {
+        assertFalse(StorehouseChestRoutine.hasConfirmedProgress(0, 0));
+        assertFalse(StorehouseChestRoutine.shouldPropagateUnknownOutcome(
+                StorehouseVisitFlow.VisitState.WAITING_CAPACITY, false));
+    }
+
+    @Test
     void normalCooldownWithoutRewardsIsNotAnUnknownFailure() {
         assertFalse(StorehouseChestRoutine.shouldPropagateUnknownOutcome(
                 StorehouseVisitFlow.VisitState.WAITING_COOLDOWN, false));

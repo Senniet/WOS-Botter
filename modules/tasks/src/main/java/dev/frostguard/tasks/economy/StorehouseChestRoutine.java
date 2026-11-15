@@ -73,8 +73,6 @@ public class StorehouseChestRoutine extends DelayedTask {
             new PointData(150, 740), new PointData(560, 885));
     private static final AreaData STAMINA_CLAIM_BUTTON_AREA = new AreaData(
             new PointData(200, 900), new PointData(520, 1020));
-    // Verified X of the 2026 A Warm Welcome overlay, not an arbitrary Back tap.
-    private static final AreaData STAMINA_REWARD_CLOSE_AREA = AreaData.of(590, 160, 634, 210);
     private static final AreaData STAMINA_TOOLTIP_TITLE_AREA = new AreaData(
             new PointData(45, 670), new PointData(300, 750));
 
@@ -88,13 +86,17 @@ public class StorehouseChestRoutine extends DelayedTask {
     private static final long BUBBLE_SEARCH_DELAY_MILLIS = 250L;
     private static final int CLAIM_CLOSE_SETTLE_MILLIS = 800;
     private static final int BUBBLE_CONFIRMATION_MARGIN = 24;
-    private static final int CLAIM_BUTTON_POLL_INTERVAL_MILLIS = 400;
-    private static final int CLAIM_BUTTON_TIMEOUT_MILLIS = 5_000;
+    private static final int CLAIM_BUTTON_POLL_INTERVAL_MILLIS = 250;
+    private static final int CLAIM_BUTTON_TIMEOUT_MILLIS = 8_000;
     private static final int REWARD_TITLE_THRESHOLD = 88;
     private static final int CLAIM_BUTTON_THRESHOLD = 88;
     private static final int TOOLTIP_TITLE_THRESHOLD = 88;
     private static final String BUILDING_COUNTDOWN_WHITELIST = "0123456789:d";
     private static final int BASE_STOREHOUSE_STAMINA = 120;
+    private static final AreaData STAMINA_CAPACITY_NOTICE_AREA = AreaData.of(40, 300, 680, 430);
+    private static final AreaData STAMINA_DIALOG_CLOSE_AREA = AreaData.of(560, 135, 665, 235);
+    private static final int STAMINA_CAPACITY_NOTICE_THRESHOLD = 88;
+    private static final int STAMINA_DIALOG_CLOSE_THRESHOLD = 85;
 
     // On-building countdown glyphs measured on a 720x1280 city frame.
     static final Color BUILDING_TIMER_GREEN = new Color(61, 216, 13);
@@ -309,42 +311,57 @@ public class StorehouseChestRoutine extends DelayedTask {
                     + (pendingAgnesStamina == null ? "unreadable" : pendingAgnesStamina));
             logInfo("Stamina Claim button confirmed. Claiming the reward.");
             tapInside(claimButton);
-            sleepTask(CLAIM_CLOSE_SETTLE_MILLIS);
-            StorehouseStaminaClaimRecovery.Outcome recovery =
+            sleepTask(450);
+            if (isStaminaCapacityBlocked()) {
+                logInfo("Storehouse Claim responded with a full Chief Stamina capacity notice;"
+                        + " reward was not collected.");
+                pendingAgnesStamina = null;
+                if (!closeStaminaRewardDialog()) {
+                    captureInterfaceFailure("stamina-full-dialog-close-unverified");
+                    return StorehouseVisitFlow.CollectionState.UNKNOWN;
+                }
+                return StorehouseVisitFlow.CollectionState.BLOCKED_CAPACITY;
+            }
+            // Reuse the existing verified 2026 close control even when the
+            // max-capacity toast was absent or disappeared too quickly to scan.
+            // An unaccepted Claim is not a collected stamina reward.
+            RawImageData postClaim = emuManager.captureScreen(EMULATOR_NUMBER);
+            StorehouseStaminaClaimRecovery.Outcome rejection =
                     StorehouseStaminaClaimRecovery.dismissUnacceptedClaim(
                             new StorehouseStaminaClaimRecovery.Actions() {
+                                private boolean closeVerified;
+
                                 @Override
                                 public boolean rewardTitleVisible() {
-                                    return isStaminaRewardTitleVisible();
+                                    return matchesPostClaim(postClaim,
+                                            TemplatesEnum.STOREHOUSE_STAMINA_REWARD_TITLE,
+                                            STAMINA_REWARD_TITLE_AREA, REWARD_TITLE_THRESHOLD);
                                 }
 
                                 @Override
                                 public boolean claimButtonVisible() {
-                                    ImageSearchResultData stillClaimable = locateStaminaDialogTemplate(
+                                    return matchesPostClaim(postClaim,
                                             TemplatesEnum.STOREHOUSE_STAMINA_CLAIM_TEXT,
                                             STAMINA_CLAIM_BUTTON_AREA, CLAIM_BUTTON_THRESHOLD);
-                                    return stillClaimable != null && stillClaimable.isFound();
                                 }
 
                                 @Override
                                 public void dismiss() {
-                                    logWarning("Storehouse stamina Claim did not dismiss A Warm Welcome; "
-                                            + "closing the verified reward overlay without recording a collection.");
+                                    logWarning("Storehouse stamina Claim was not accepted; "
+                                            + "closing the identified reward overlay without crediting stamina.");
                                     captureInterfaceFailure("stamina-claim-not-accepted");
-                                    tapInside(STAMINA_REWARD_CLOSE_AREA);
-                                    sleepTask(CLAIM_CLOSE_SETTLE_MILLIS);
+                                    closeVerified = closeStaminaRewardDialog();
                                 }
 
                                 @Override
                                 public boolean cityVisible() {
-                                    ImageSearchResultData city = templateSearchHelper.locatePattern(
-                                            TemplatesEnum.GAME_HOME_FURNACE,
-                                            SearchConfigConstants.DEFAULT_SINGLE);
-                                    return city != null && city.isFound();
+                                    // Dialog disappearance is the actual postcondition.
+                                    // The city HUD anchor may be hidden or delayed.
+                                    return closeVerified;
                                 }
                             });
-            if (recovery != StorehouseStaminaClaimRecovery.Outcome.NOT_PRESENT) {
-                if (recovery == StorehouseStaminaClaimRecovery.Outcome.CLOSE_UNCONFIRMED) {
+            if (rejection != StorehouseStaminaClaimRecovery.Outcome.NOT_PRESENT) {
+                if (rejection == StorehouseStaminaClaimRecovery.Outcome.CLOSE_UNCONFIRMED) {
                     captureInterfaceFailure("stamina-claim-dialog-close-unconfirmed");
                 }
                 pendingAgnesStamina = null;
@@ -437,24 +454,84 @@ public class StorehouseChestRoutine extends DelayedTask {
         return StorehouseVisitFlow.Observation.absent();
     }
 
-    private boolean isStaminaRewardTitleVisible() {
-        ImageSearchResultData title = locateStaminaDialogTemplate(
-                TemplatesEnum.STOREHOUSE_STAMINA_REWARD_TITLE,
-                STAMINA_REWARD_TITLE_AREA, REWARD_TITLE_THRESHOLD);
-        return title != null && title.isFound();
+    private boolean isStaminaCapacityBlocked() {
+        for (int attempt = 0; attempt < 2; attempt++) {
+            RawImageData frame = emuManager.captureScreen(EMULATOR_NUMBER);
+            ImageSearchResultData notice = emuManager.locatePattern(EMULATOR_NUMBER, frame,
+                    TemplatesEnum.STOREHOUSE_STAMINA_CAPACITY_MAXED,
+                    STAMINA_CAPACITY_NOTICE_AREA.topLeft(),
+                    STAMINA_CAPACITY_NOTICE_AREA.bottomRight(), STAMINA_CAPACITY_NOTICE_THRESHOLD);
+            if (notice != null && notice.isFound()) return true;
+            // If the dialog already disappeared, do not spend a second capture
+            // seeking a toast: the normal post-claim check will verify it.
+            ImageSearchResultData title = emuManager.locatePattern(EMULATOR_NUMBER, frame,
+                    TemplatesEnum.STOREHOUSE_STAMINA_REWARD_TITLE,
+                    STAMINA_REWARD_TITLE_AREA.topLeft(),
+                    STAMINA_REWARD_TITLE_AREA.bottomRight(), REWARD_TITLE_THRESHOLD);
+            if (title == null || !title.isFound()) return false;
+            if (attempt == 0) sleepTask(250);
+        }
+        return false;
+    }
+
+    private boolean matchesPostClaim(
+            RawImageData frame, TemplatesEnum template, AreaData area, int threshold) {
+        ImageSearchResultData result = locateStaminaDialogTemplate(frame, template, area, threshold);
+        return result != null && result.isFound();
+    }
+
+    private boolean closeStaminaRewardDialog() {
+        RawImageData frame = emuManager.captureScreen(EMULATOR_NUMBER);
+        ImageSearchResultData close = emuManager.locatePattern(EMULATOR_NUMBER, frame,
+                TemplatesEnum.STOREHOUSE_STAMINA_REWARD_CLOSE,
+                STAMINA_DIALOG_CLOSE_AREA.topLeft(),
+                STAMINA_DIALOG_CLOSE_AREA.bottomRight(), STAMINA_DIALOG_CLOSE_THRESHOLD);
+        if (close == null || !close.isFound()) {
+            logWarning("Stamina reward dialog close icon was not verified.");
+            return false;
+        }
+        // The detected X has transparent corners; tap its narrow center,
+        // not a randomized point anywhere in its full template rectangle.
+        tapNear(close.getPoint(), 3);
+        sleepTask(CLAIM_CLOSE_SETTLE_MILLIS);
+        for (int attempt = 0; attempt < 2; attempt++) {
+            RawImageData after = emuManager.captureScreen(EMULATOR_NUMBER);
+            ImageSearchResultData title = emuManager.locatePattern(EMULATOR_NUMBER, after,
+                    TemplatesEnum.STOREHOUSE_STAMINA_REWARD_TITLE,
+                    STAMINA_REWARD_TITLE_AREA.topLeft(),
+                    STAMINA_REWARD_TITLE_AREA.bottomRight(), REWARD_TITLE_THRESHOLD);
+            if (title != null && title.isFound()) {
+                logWarning("Stamina reward dialog remained open after its verified close control.");
+                return false;
+            }
+            if (attempt == 0) sleepTask(150);
+        }
+        logInfo("Storehouse reward dialog closed and title disappearance verified.");
+        return true;
     }
 
     private ImageSearchResultData awaitStaminaClaimButton() {
         StorehouseStaminaClaimFlow.Result result = StorehouseStaminaClaimFlow.awaitClaimButton(
                 new StorehouseStaminaClaimFlow.Actions() {
+                    private RawImageData pollFrame;
+
+                    @Override
+                    public void beginObservation() {
+                        pollFrame = emuManager.captureScreen(EMULATOR_NUMBER);
+                    }
+
                     @Override
                     public boolean isRewardDialogVisible() {
-                        return isStaminaRewardTitleVisible();
+                        ImageSearchResultData title = locateStaminaDialogTemplate(pollFrame,
+                                TemplatesEnum.STOREHOUSE_STAMINA_REWARD_TITLE,
+                                STAMINA_REWARD_TITLE_AREA,
+                                REWARD_TITLE_THRESHOLD);
+                        return title != null && title.isFound();
                     }
 
                     @Override
                     public ImageSearchResultData findClaimButton() {
-                        return locateStaminaDialogTemplate(
+                        return locateStaminaDialogTemplate(pollFrame,
                                 TemplatesEnum.STOREHOUSE_STAMINA_CLAIM_TEXT,
                                 STAMINA_CLAIM_BUTTON_AREA,
                                 CLAIM_BUTTON_THRESHOLD);
@@ -462,22 +539,21 @@ public class StorehouseChestRoutine extends DelayedTask {
 
                     @Override
                     public boolean isTooltipVisible() {
-                        return isStaminaTooltipVisible();
+                        return isStaminaTooltipVisible(pollFrame);
                     }
 
                     @Override
                     public boolean isBackAtCity() {
-                        ImageSearchResultData city = templateSearchHelper.locatePattern(
+                        ImageSearchResultData city = locateStaminaDialogTemplate(pollFrame,
                                 TemplatesEnum.GAME_HOME_FURNACE,
-                                SearchConfig.builder().withMaxAttempts(1).withDelay(0)
-                                        .withThreshold(90)
-                                        .withArea(AreaData.of(580, 1120, 720, 1280)).build());
+                                AreaData.of(580, 1120, 720, 1280), 90);
                         return city != null && city.isFound();
                     }
 
                     @Override
                     public void pressBack() {
                         logInfo("Stamina tooltip confirmed after opening the Storehouse reward; dismissing it once with Back.");
+                        pollFrame = null;
                         StorehouseChestRoutine.this.pressBack();
                     }
 
@@ -488,6 +564,7 @@ public class StorehouseChestRoutine extends DelayedTask {
 
                     @Override
                     public void waitForNextPoll() {
+                        pollFrame = null;
                         sleepTask(CLAIM_BUTTON_POLL_INTERVAL_MILLIS);
                     }
                 }, Duration.ofMillis(CLAIM_BUTTON_TIMEOUT_MILLIS), System::nanoTime);
@@ -500,17 +577,16 @@ public class StorehouseChestRoutine extends DelayedTask {
     }
 
     private ImageSearchResultData locateStaminaDialogTemplate(
-            TemplatesEnum template, AreaData area, int threshold) {
-        return templateSearchHelper.locatePattern(template, SearchConfig.builder()
-                .withArea(area)
-                .withThreshold(threshold)
-                .withMaxAttempts(1)
-                .withDelay(0)
-                .build());
+            RawImageData frame, TemplatesEnum template, AreaData area, int threshold) {
+        // All checks in one poll must use the exact same captured game state.
+        // Independently capturing for title, button, tooltip and city consumed
+        // the claim timeout on slow remote ADB before a valid Claim was acted on.
+        return emuManager.locatePattern(EMULATOR_NUMBER, frame, template,
+                area.topLeft(), area.bottomRight(), threshold);
     }
 
-    private boolean isStaminaTooltipVisible() {
-        ImageSearchResultData tooltipTitle = locateStaminaDialogTemplate(
+    private boolean isStaminaTooltipVisible(RawImageData frame) {
+        ImageSearchResultData tooltipTitle = locateStaminaDialogTemplate(frame,
                 TemplatesEnum.STOREHOUSE_STAMINA_TOOLTIP_TITLE,
                 STAMINA_TOOLTIP_TITLE_AREA,
                 TOOLTIP_TITLE_THRESHOLD);
