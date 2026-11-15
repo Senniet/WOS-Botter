@@ -895,6 +895,30 @@ public class NavigationHelper {
     }
 
     private ImageSearchResultData findVerifiedBackArrow() {
+        // Alliance and Alliance > Tech use a high blue arrow. Require a
+        // matching page title AND arrow on two observations: an isolated
+        // arrow is not sufficient to authorize navigation away from a modal.
+        var allianceTitleConfig = TemplateSearchHelper.SearchConfig.builder()
+                .withMaxAttempts(1).withThreshold(91)
+                .withArea(AreaData.of(85, 10, 270, 75)).build();
+        var allianceBackConfig = TemplateSearchHelper.SearchConfig.builder()
+                .withMaxAttempts(1).withThreshold(91)
+                .withArea(AreaData.of(0, 0, 110, 105)).build();
+        for (TemplatesEnum allianceTitle : new TemplatesEnum[] {
+                TemplatesEnum.SERVE_EMU_ALLIANCE_HEADER_LIVE_2026,
+                TemplatesEnum.SERVE_EMU_ALLIANCE_TECH_HEADER_LIVE_2026}) {
+            var title = searcher.locatePattern(allianceTitle, allianceTitleConfig);
+            if (!title.isFound()) continue;
+            var arrow = searcher.locatePattern(TemplatesEnum.SERVE_EMU_ALLIANCE_BACK_LIVE_2026,
+                    allianceBackConfig);
+            if (!arrow.isFound()) continue;
+            interruptibleWait(150);
+            var titleAgain = searcher.locatePattern(allianceTitle, allianceTitleConfig);
+            var arrowAgain = searcher.locatePattern(TemplatesEnum.SERVE_EMU_ALLIANCE_BACK_LIVE_2026,
+                    allianceBackConfig);
+            if (RecognitionConsensus.agrees(title, titleAgain, 12)
+                    && RecognitionConsensus.agrees(arrow, arrowAgain, 12)) return arrowAgain;
+        }
         var oldConfig = TemplateSearchHelper.SearchConfig.builder()
                 .withMaxAttempts(1).withThreshold(91)
                 .withArea(AreaData.of(0, 0, 110, 105)).build();
