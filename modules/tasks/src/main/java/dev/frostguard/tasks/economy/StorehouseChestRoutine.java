@@ -86,8 +86,8 @@ public class StorehouseChestRoutine extends DelayedTask {
     private static final long BUBBLE_SEARCH_DELAY_MILLIS = 250L;
     private static final int CLAIM_CLOSE_SETTLE_MILLIS = 800;
     private static final int BUBBLE_CONFIRMATION_MARGIN = 24;
-    private static final int CLAIM_BUTTON_POLL_INTERVAL_MILLIS = 400;
-    private static final int CLAIM_BUTTON_TIMEOUT_MILLIS = 5_000;
+    private static final int CLAIM_BUTTON_POLL_INTERVAL_MILLIS = 250;
+    private static final int CLAIM_BUTTON_TIMEOUT_MILLIS = 8_000;
     private static final int REWARD_TITLE_THRESHOLD = 88;
     private static final int CLAIM_BUTTON_THRESHOLD = 88;
     private static final int TOOLTIP_TITLE_THRESHOLD = 88;
@@ -398,9 +398,16 @@ public class StorehouseChestRoutine extends DelayedTask {
     private ImageSearchResultData awaitStaminaClaimButton() {
         StorehouseStaminaClaimFlow.Result result = StorehouseStaminaClaimFlow.awaitClaimButton(
                 new StorehouseStaminaClaimFlow.Actions() {
+                    private RawImageData pollFrame;
+
+                    @Override
+                    public void beginObservation() {
+                        pollFrame = emuManager.captureScreen(EMULATOR_NUMBER);
+                    }
+
                     @Override
                     public boolean isRewardDialogVisible() {
-                        ImageSearchResultData title = locateStaminaDialogTemplate(
+                        ImageSearchResultData title = locateStaminaDialogTemplate(pollFrame,
                                 TemplatesEnum.STOREHOUSE_STAMINA_REWARD_TITLE,
                                 STAMINA_REWARD_TITLE_AREA,
                                 REWARD_TITLE_THRESHOLD);
@@ -409,7 +416,7 @@ public class StorehouseChestRoutine extends DelayedTask {
 
                     @Override
                     public ImageSearchResultData findClaimButton() {
-                        return locateStaminaDialogTemplate(
+                        return locateStaminaDialogTemplate(pollFrame,
                                 TemplatesEnum.STOREHOUSE_STAMINA_CLAIM_TEXT,
                                 STAMINA_CLAIM_BUTTON_AREA,
                                 CLAIM_BUTTON_THRESHOLD);
@@ -417,22 +424,21 @@ public class StorehouseChestRoutine extends DelayedTask {
 
                     @Override
                     public boolean isTooltipVisible() {
-                        return isStaminaTooltipVisible();
+                        return isStaminaTooltipVisible(pollFrame);
                     }
 
                     @Override
                     public boolean isBackAtCity() {
-                        ImageSearchResultData city = templateSearchHelper.locatePattern(
+                        ImageSearchResultData city = locateStaminaDialogTemplate(pollFrame,
                                 TemplatesEnum.GAME_HOME_FURNACE,
-                                SearchConfig.builder().withMaxAttempts(1).withDelay(0)
-                                        .withThreshold(90)
-                                        .withArea(AreaData.of(580, 1120, 720, 1280)).build());
+                                AreaData.of(580, 1120, 720, 1280), 90);
                         return city != null && city.isFound();
                     }
 
                     @Override
                     public void pressBack() {
                         logInfo("Stamina tooltip confirmed after opening the Storehouse reward; dismissing it once with Back.");
+                        pollFrame = null;
                         StorehouseChestRoutine.this.pressBack();
                     }
 
@@ -443,6 +449,7 @@ public class StorehouseChestRoutine extends DelayedTask {
 
                     @Override
                     public void waitForNextPoll() {
+                        pollFrame = null;
                         sleepTask(CLAIM_BUTTON_POLL_INTERVAL_MILLIS);
                     }
                 }, Duration.ofMillis(CLAIM_BUTTON_TIMEOUT_MILLIS), System::nanoTime);
@@ -455,17 +462,16 @@ public class StorehouseChestRoutine extends DelayedTask {
     }
 
     private ImageSearchResultData locateStaminaDialogTemplate(
-            TemplatesEnum template, AreaData area, int threshold) {
-        return templateSearchHelper.locatePattern(template, SearchConfig.builder()
-                .withArea(area)
-                .withThreshold(threshold)
-                .withMaxAttempts(1)
-                .withDelay(0)
-                .build());
+            RawImageData frame, TemplatesEnum template, AreaData area, int threshold) {
+        // All checks in one poll must use the exact same captured game state.
+        // Independently capturing for title, button, tooltip and city consumed
+        // the claim timeout on slow remote ADB before a valid Claim was acted on.
+        return emuManager.locatePattern(EMULATOR_NUMBER, frame, template,
+                area.topLeft(), area.bottomRight(), threshold);
     }
 
-    private boolean isStaminaTooltipVisible() {
-        ImageSearchResultData tooltipTitle = locateStaminaDialogTemplate(
+    private boolean isStaminaTooltipVisible(RawImageData frame) {
+        ImageSearchResultData tooltipTitle = locateStaminaDialogTemplate(frame,
                 TemplatesEnum.STOREHOUSE_STAMINA_TOOLTIP_TITLE,
                 STAMINA_TOOLTIP_TITLE_AREA,
                 TOOLTIP_TITLE_THRESHOLD);

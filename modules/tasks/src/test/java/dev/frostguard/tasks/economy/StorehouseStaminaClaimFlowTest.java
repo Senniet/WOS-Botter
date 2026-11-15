@@ -39,6 +39,7 @@ class StorehouseStaminaClaimFlowTest {
         assertEquals(1, actions.tooltipChecks);
         assertEquals(1, actions.waitsAfterBack);
         assertEquals(0, actions.regularWaits);
+        assertEquals(2, actions.observations);
     }
 
     @Test
@@ -51,6 +52,7 @@ class StorehouseStaminaClaimFlowTest {
         assertEquals(2, actions.cityChecks);
         assertEquals(0, actions.backPresses);
         assertEquals(1, actions.regularWaits);
+        assertEquals(2, actions.observations);
     }
 
     @Test
@@ -71,6 +73,7 @@ class StorehouseStaminaClaimFlowTest {
         assertEquals(3, actions.tooltipChecks);
         assertEquals(0, actions.waitsAfterBack);
         assertEquals(3, actions.regularWaits);
+        assertEquals(3, actions.observations);
     }
 
     @Test
@@ -89,6 +92,7 @@ class StorehouseStaminaClaimFlowTest {
         assertEquals(1, actions.tooltipChecks);
         assertEquals(1, actions.waitsAfterBack);
         assertEquals(3, actions.regularWaits);
+        assertEquals(4, actions.observations);
     }
 
     private static ImageSearchResultData missed() {
@@ -108,6 +112,12 @@ class StorehouseStaminaClaimFlowTest {
         private int backPresses;
         private int waitsAfterBack;
         private int regularWaits;
+        private int observations;
+
+        @Override
+        public void beginObservation() {
+            observations++;
+        }
 
         ScriptedActions rewardDialog(boolean... visible) {
             for (boolean value : visible) {
