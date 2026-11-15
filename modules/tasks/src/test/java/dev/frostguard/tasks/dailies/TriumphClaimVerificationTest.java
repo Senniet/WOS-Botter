@@ -25,8 +25,12 @@ class TriumphClaimVerificationTest {
     }
 
     @Test void realCurrentChestScreenshotReadsFiftyOfEightHundred() throws Exception {
-        BufferedImage png = ImageIO.read(Objects.requireNonNull(getClass().getResourceAsStream(
-                "/triumph/personal-chest-progress-50-of-800.jpg")));
+        byte[] snapshot = Objects.requireNonNull(getClass().getResourceAsStream(
+                "/triumph/personal-chest-progress-50-of-800.jpg")).readAllBytes();
+        assertTrue(snapshot.length > 100, "Fixture content missing");
+        assertTrue(ImageIO.getImageReadersByFormatName("JPEG").hasNext(), "JPEG reader missing");
+        BufferedImage png = ImageIO.read(new java.io.ByteArrayInputStream(snapshot));
+        assertNotNull(png, "Could not decode real-frame JPEG badge fixture");
         byte[] rgba = new byte[png.getWidth() * png.getHeight() * 4];
         for (int y = 0; y < png.getHeight(); y++) for (int x = 0; x < png.getWidth(); x++) {
             int color = png.getRGB(x, y), i = (y * png.getWidth() + x) * 4;
