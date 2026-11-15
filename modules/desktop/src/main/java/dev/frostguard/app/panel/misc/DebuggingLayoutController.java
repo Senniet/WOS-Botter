@@ -489,14 +489,15 @@ public class DebuggingLayoutController {
     }
 
     private void setupActions() {
-        actionComboBox.setItems(FXCollections.observableArrayList("Template Search", "OCR"));
+        actionComboBox.setItems(FXCollections.observableArrayList("Template Search", "OCR", "Scan Visible Templates"));
         actionComboBox.getSelectionModel().selectFirst();
         
         // pernerch/2026-07-02: Dynamic visibility control for template search UI elements
         // Template list and search field are only shown when "Template Search" action is selected
         // This prevents UI clutter when using OCR mode
         actionComboBox.valueProperty().addListener((observable, oldValue, newValue) -> {
-            boolean isTemplateSearch = "Template Search".equals(newValue);
+            boolean isTemplateSearch = "Template Search".equals(newValue)
+                    || "Scan Visible Templates".equals(newValue);
             searchTextField.setVisible(isTemplateSearch);
             searchTextField.setManaged(isTemplateSearch);
             templateListView.setVisible(isTemplateSearch);
@@ -517,6 +518,10 @@ public class DebuggingLayoutController {
 
         if ("OCR".equals(action)) {
             performOCROnSelection();
+            return;
+        }
+        if ("Scan Visible Templates".equals(action)) {
+            scanVisibleTemplates();
             return;
         }
 
@@ -567,6 +572,70 @@ public class DebuggingLayoutController {
             log("Error executing OpenCvPatternLocator: " + e.getMessage());
             e.printStackTrace();
         }
+    }
+
+    /** Non-destructive screenshot audit: absence on one frame is NOT a stale template. */
+    private void scanVisibleTemplates() {
+        if (currentScreenshotFile == null || screenshotImageView.getImage() == null) {
+            log("Capture or load a screenshot before scanning templates.");
+            return;
+        }
+        final File screenshot = currentScreenshotFile;
+        final int width = (int) screenshotImageView.getImage().getWidth();
+        final int height = (int) screenshotImageView.getImage().getHeight();
+        final List<File> candidates = new ArrayList<>(templateListView.getItems());
+        if (candidates.isEmpty()) {
+            log("No templates in the current filter.");
+            return;
+        }
+        btnRunAction.setDisable(true);
+        log("Scanning " + candidates.size() + " templates on one screenshot (no taps)...");
+        javafx.concurrent.Task<List<String>> task = new javafx.concurrent.Task<>() {
+            @Override
+            protected List<String> call() throws Exception {
+                byte[] capture = Files.readAllBytes(screenshot.toPath());
+                List<String> hits = new ArrayList<>();
+                int checked = 0;
+                int errors = 0;
+                for (File template : candidates) {
+                    if (isCancelled()) break;
+                    String path = template.getAbsolutePath().replace("\\", "/");
+                    int marker = path.indexOf("/templates/");
+                    if (marker < 0) { errors++; continue; }
+                    try {
+                        ImageSearchResultData result = OpenCvPatternLocator.locatePattern(
+                                capture, path.substring(marker), new PointData(0, 0),
+                                new PointData(width, height), 90.0);
+                        if (result != null && result.isFound()) {
+                            hits.add(String.format(java.util.Locale.ROOT,
+                                    "MATCH %s: %.1f%% at (%.0f, %.0f)", template.getName(),
+                                    result.getMatchPercentage(), result.getPoint().getX(),
+                                    result.getPoint().getY()));
+                        }
+                    } catch (RuntimeException ex) {
+                        errors++;
+                    }
+                    checked++;
+                    if (checked % 25 == 0) updateMessage("Scanned " + checked + "/" + candidates.size());
+                }
+                hits.add("Completed: " + checked + " checked, " + (hits.size())
+                        + " visible matches, " + errors + " errors. Non-matches are not necessarily outdated.");
+                return hits;
+            }
+        };
+        task.messageProperty().addListener((obs, oldValue, newValue) -> log(newValue));
+        task.setOnSucceeded(event -> {
+            for (String line : task.getValue()) log(line);
+            btnRunAction.setDisable(false);
+        });
+        task.setOnFailed(event -> {
+            log("Template scan failed: " + task.getException());
+            btnRunAction.setDisable(false);
+        });
+        task.setOnCancelled(event -> btnRunAction.setDisable(false));
+        Thread worker = new Thread(task, "survivalops-template-audit");
+        worker.setDaemon(true);
+        worker.start();
     }
 
     private boolean isCrosshairLocked = false;
