@@ -6,7 +6,9 @@
   <meta name="theme-color" content="#0b1325">
   <title>SurvivalOps · QA Dashboard</title>
   <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/live.css">
   <script defer src="/app.js"></script>
+  <script defer src="/live.js"></script>
 </head>
 <body>
 <div id="login" class="login-overlay" hidden>
@@ -25,7 +27,7 @@
 <header class="topbar">
  <div class="topbar-inner">
   <div class="brand"><div class="brand-logo small">S<span>O</span></div><div><strong>SurvivalOps</strong><div class="brand-sub">QA Control Center <span class="bullet">·</span> Gedeelde takenlijst</div></div></div>
-  <div class="top-actions"><span class="private"><span class="dot"></span> LAN · webserver</span><button id="system-view" class="ghost" type="button">Algemene meldingen</button><button id="refresh" class="ghost" type="button" title="Diagnostiek opnieuw inladen">↻ Vernieuwen</button><button id="logout" class="ghost" type="button">Uitloggen</button></div>
+  <div class="top-actions"><span class="private"><span class="dot"></span> LAN · webserver</span><button id="live-nav" class="ghost" type="button">◉ Live diagnostiek</button><button id="refresh" class="ghost" type="button" title="Diagnostiek opnieuw inladen">↻ Vernieuwen</button><button id="logout" class="ghost" type="button">Uitloggen</button></div>
  </div>
 </header>
 <main class="shell">
@@ -34,7 +36,7 @@
   <div class="hero-side"><span id="updated" class="muted">Status laden…</span><a href="https://github.com/Senniet/WOS-Botter/issues/35" target="_blank" rel="noopener noreferrer">Project op GitHub ↗</a></div>
  </div>
  <section class="stats" id="stats" aria-label="Voortgang"></section>
- <div class="workspace">
+ <div id="workspace" class="workspace">
   <section class="task-panel">
    <div class="panel-heading">
     <div><h2>Alle taken <span id="show-count" class="count"></span></h2><div class="muted">Kies een taak om de details en openstaande fouten te bekijken</div></div>
@@ -55,6 +57,37 @@
     <div id="detail" class="detail-inner"><div class="detail-placeholder">Selecteer een taak om verder te gaan.</div></div>
   </aside>
  </div>
+ <section id="live-section" class="live-dashboard" hidden>
+   <div class="live-header">
+     <div><div class="eyebrow">AUTOMATISCH UIT DE SURVIVALOPS DIAGNOSTIEK</div>
+       <h2>Live diagnostiek</h2>
+       <p>Inkomende gebeurtenissen, foutmeldingen, debugregels en screenshots. Alleen nieuwe uploads worden automatisch toegevoegd.</p>
+     </div>
+     <div class="live-header-actions">
+       <span id="live-indicator" class="live-indicator">Verbinding controleren…</span>
+       <button id="live-back" class="outline" type="button">← Terug naar taken</button>
+     </div>
+   </div>
+   <div id="live-overview" class="live-overview"></div>
+   <div id="live-connection" class="live-connection" role="status">Diagnostiek controleren…</div>
+   <div class="live-toolbar">
+     <div class="search-wrap"><span>⌕</span><input id="live-search" type="search" placeholder="Zoek in taak of soort melding…" aria-label="Zoek diagnostiek"></div>
+     <select id="live-task" aria-label="Filter op taak"><option value="all">Alle taken en systemen</option><option value="system">Algemene herkenning / systeem</option></select>
+     <select id="live-severity" aria-label="Ernst"><option value="all">Alle meldingen</option><option value="error">Fouten</option><option value="warning">Waarschuwingen</option><option value="notice">Overige / debug</option></select>
+     <select id="live-period" aria-label="Tijdsperiode"><option value="24">Afgelopen 24 uur</option><option value="72">Afgelopen 3 dagen</option><option value="168">Afgelopen 7 dagen</option><option value="336">Afgelopen 14 dagen</option><option value="0">Alle opgeslagen meldingen</option></select>
+     <button id="live-pause" class="outline" type="button" aria-pressed="false">⏸ Pauzeren</button>
+     <button id="live-refresh" class="outline" type="button">↻ Nu ophalen</button>
+   </div>
+   <div class="live-columns">
+     <div class="live-list-panel">
+       <div class="live-list-heading"><span>GEBEURTENISSEN</span><span id="live-results">—</span></div>
+       <div id="live-events" class="live-events" aria-live="polite"></div>
+       <div id="live-empty" class="empty" hidden>Geen meldingen voor deze filters.</div>
+       <button id="live-more" class="live-more" type="button" hidden>Oudere meldingen laden</button>
+     </div>
+     <aside class="live-detail-panel"><div id="live-detail" class="live-detail-inner"><div class="detail-placeholder">Selecteer een melding om de debuggegevens en screenshot te bekijken.</div></div></aside>
+   </div>
+ </section>
  <div class="footer">
   <span>Gegevens blijven op de eigen webserver. De broncode en automatisering staan op GitHub.</span>
   <span id="diagnostics-count" class="muted"></span>

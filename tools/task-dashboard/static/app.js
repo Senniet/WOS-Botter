@@ -92,9 +92,6 @@ async function reload({preserveSelection=true,quiet=false}={}){
  renderCategories();updateStats();renderList();
  $("diagnostics-count").textContent=data.unmapped_diagnostics+
   " algemene diagnostiekmeldingen (nog niet gekoppeld)";
- if(selected==="@system"){
-  await openSystem(true);return;
- }
  if(!preserveSelection||!selected||!tasks.some(t=>t.key===selected)){
   const first=[...tasks].sort((a,b)=>priority[a.status]-priority[b.status])[0];
   selected=first?.key||null;
@@ -102,32 +99,6 @@ async function reload({preserveSelection=true,quiet=false}={}){
  if(selected&&!notesDirty)await loadDetail(selected,quiet);
  if(!quiet)showToast("Takenlijst en diagnostiek bijgewerkt.");
 }
-async function openSystem(quiet=false){
- if(notesDirty&&!confirm("Niet opgeslagen notities verlaten?"))return;
- selected="@system";notesDirty=false;renderList();
- const d=await request("/api/system"),box=$("detail");box.replaceChildren();
- box.append(node("div","detail-category","OVERKOEPELENDE DIAGNOSTIEK"),node("h2","","Algemene meldingen"));
- box.append(node("p","detail-help","Automatisch uit de bestaande diagnostiek. Niet iedere herkenningsmelding is een fout. Deze meldingen zijn nog niet aan een specifieke taak gekoppeld."));
- const cnt=d.counts||{};
- box.append(node("div","verification",(cnt.error||0)+" foutmeldingen · "+(cnt.warning||0)+" waarschuwingen · "+(cnt.notice||0)+" overige observaties"),divider());
- for(const x of d.diagnostics){
-  const item=node("div","diag "+x.severity);
-  item.append(node("div","diag-title",x.kind.replaceAll("-"," ")),node("div","diag-meta",dateText(x.timestamp)+" · "+x.activity));
-  if(x.has_image){
-   const btn=node("a","","Screenshot bekijken");btn.href="#";
-   btn.addEventListener("click",e=>{
-    e.preventDefault();const old=item.querySelector("img");
-    if(old){old.remove();btn.textContent="Screenshot bekijken";return;}
-    const im=node("img","diag-img");im.alt="Diagnostische screenshot";
-    im.src="/api/diagnostic/image?path="+encodeURIComponent(x.path);
-    item.append(im);btn.textContent="Screenshot verbergen";
-   });item.append(btn);
-  }
-  box.append(item);
- }
- if(!quiet&&window.matchMedia("(max-width:900px)").matches){$("detail-panel").scrollIntoView({behavior:"smooth",block:"start"});}
-}
-
 async function selectTask(key){
  if(notesDirty && !confirm("Je notities zijn nog niet opgeslagen. Toch naar een andere taak?"))return;
  selected=key;notesDirty=false;renderList();
@@ -239,6 +210,8 @@ function renderDetail(){
  issueSection.append(newForm);wrap.append(issueSection,divider());
  const diag=section("Ontvangen diagnostiek ("+data.diagnostics.length+" recent)");
  diag.append(node("p","detail-help","Automatisch uit SurvivalOps. Dit zijn observaties; niet elke herkenningsmelding is een bewezen defect."));
+ const allDiag=node("button","outline","Alle debug en screenshots bekijken");
+ allDiag.type="button";allDiag.addEventListener("click",()=>window.LiveDiagnostics?.open(t.key));diag.append(allDiag);
  if(!data.diagnostics.length)diag.append(node("div","muted","Nog geen diagnostiek aan deze taak gekoppeld."));
  for(const d of data.diagnostics.slice(0,12)){
    const item=node("div","diag "+d.severity);
@@ -278,7 +251,7 @@ $("login-form").addEventListener("submit",async e=>{
   $("password").value="";showApp();await reload({preserveSelection:false,quiet:true});
  }catch(err){$("login-error").textContent=err.message;}
 });
-$("system-view").addEventListener("click",async()=>{try{await openSystem();}catch(e){showToast(e.message,true);}});
+
 $("logout").addEventListener("click",async()=>{
  try{await request("/api/logout",{method:"POST",body:"{}"});}catch{}
  showLogin();selected=null;tasks=[];details=null;

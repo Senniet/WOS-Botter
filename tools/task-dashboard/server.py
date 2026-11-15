@@ -190,7 +190,7 @@ class Board:
     def sync_diagnostics(self, force=False):
         now = time.monotonic()
         with self._lock:
-            if not force and now-self._last_sync < 50:
+            if not force and now-self._last_sync < 5:
                 return 0
             self._last_sync = now
         if not self.diagnostics_dir.is_dir():
@@ -261,6 +261,82 @@ class Board:
                 WHERE task_key IS NULL GROUP BY severity
             """)}
         return {"diagnostics":rows,"counts":counts}
+
+    def live_diagnostics(self, task="all", severity="all", query="", offset=0, limit=40, hours=24):
+        """Bounded, authenticated live feed. Never expose raw logs in list payloads."""
+        self.sync_diagnostics()
+        if task != "all" and task != "system" and not KEY_PATTERN.fullmatch(task):
+            raise ValueError("Invalid task filter")
+        if severity not in {"all", "error", "warning", "notice"}:
+            raise ValueError("Invalid severity")
+        if not 0 <= offset <= 3000 or not 1 <= limit <= 60 or len(query) > 100 or hours not in (0,24,72,168,336):
+            raise ValueError("Invalid pagination or query")
+        filters=[]
+        args=[]
+        if task == "system":
+            filters.append("d.task_key IS NULL")
+        elif task != "all":
+            filters.append("d.task_key=?")
+            args.append(task)
+        if severity != "all":
+            filters.append("d.severity=?")
+            args.append(severity)
+        if hours:
+            filters.append("d.timestamp>=?")
+            args.append((datetime.now(timezone.utc)-timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%S"))
+        if query:
+            filters.append("(instr(lower(d.activity),lower(?))>0 OR instr(lower(d.kind),lower(?))>0 OR instr(lower(t.label),lower(?))>0 OR instr(lower(d.task_key),lower(?))>0)")
+            args.extend([query]*4)
+        where=" WHERE "+" AND ".join(filters) if filters else ""
+        with connect(self.dbpath) as db:
+            count=db.execute("SELECT COUNT(*) FROM diagnostics d LEFT JOIN tasks t ON t.key=d.task_key"+where,args).fetchone()[0]
+            rows=[dict(x) for x in db.execute("""
+                SELECT d.path,d.task_key,t.label AS task_label,d.activity,d.kind,d.severity,
+                  d.timestamp,(d.image_file!='') AS has_image
+                FROM diagnostics d LEFT JOIN tasks t ON t.key=d.task_key
+            """+where+" ORDER BY d.timestamp DESC, d.path DESC LIMIT ? OFFSET ?",args+[limit,offset])]
+            latest=db.execute("SELECT MAX(timestamp) FROM diagnostics").fetchone()[0]
+            global_count=db.execute("SELECT COUNT(*) FROM diagnostics").fetchone()[0]
+        try:
+            last=datetime.fromisoformat(latest.replace("Z","+00:00"))
+            age=max(0,int((datetime.now(timezone.utc)-last).total_seconds()))
+        except (ValueError, AttributeError):age=None
+        return {"items":rows,"total":count,"global_total":global_count,
+                "latest_at":latest,"seconds_since_latest":age,"poll_seconds":8,
+                "server_time":iso_now(),"offset":offset,"limit":limit}
+
+    def diagnostic_detail(self, relative):
+        """Metadata and redacted log tail for a known indexed diagnostic only."""
+        if len(relative)>180 or not re.fullmatch(r"\d{4}-\d{2}-\d{2}/[A-Za-z0-9_-]+\.json",relative):
+            return None
+        with connect(self.dbpath) as db:
+            row=db.execute("""SELECT d.path,d.task_key,t.label AS task_label,
+                   d.activity,d.kind,d.severity,d.timestamp,d.image_file
+                   FROM diagnostics d LEFT JOIN tasks t ON t.key=d.task_key WHERE d.path=?""",
+                   (relative,)).fetchone()
+        if row is None:return None
+        file=self.diagnostics_dir/relative
+        try:
+            if not file.is_file() or file.stat().st_size>150000:return None
+            obj=json.loads(file.read_text(errors="replace"))
+        except (OSError,ValueError):return None
+        raw=obj.get("log_tail","")
+        if not isinstance(raw,str):raw=""
+        # Redact access material even from otherwise trusted local diagnostic uploads.
+        raw=raw[-20000:]
+        raw=re.sub(r"(?i)(\b(?:bearer|token|password|secret|api[_-]?key)\s*[:=]\s*)([\w./+~=-]{8,})",
+                   r"\1[REDACTED]",raw)
+        raw=re.sub(r"(?i)(Authorization\s*:\s*Bearer\s+)[^\s]+",r"\1[REDACTED]",raw)
+        lines=[]
+        for line in raw.splitlines()[-75:]:
+            m=re.search(r"\b(ERROR|WARN|INFO|DEBUG|TRACE)\b",line)
+            lines.append({"level":m.group(1) if m else "LOG","text":scrub(line,1100)})
+        d=dict(row)
+        d["has_image"]=bool(d.pop("image_file"))
+        d["platform"]=scrub(obj.get("platform",""),80)
+        d["log_lines"]=lines
+        d["debug_available"]=bool(lines)
+        return d
 
     def detail(self, key):
         self.sync_diagnostics()
@@ -427,13 +503,13 @@ class Handler(BaseHTTPRequestHandler):
         path=urlsplit(self.path).path
         if path=="/healthz":
             return self.reply(200,{"ok":True,"service":"SurvivalOps QA"})
-        if path in ("/","/index.html","/app.js","/style.css"):
+        if path in ("/","/index.html","/app.js","/live.js","/style.css","/live.css"):
             name = "index.html" if path=="/" else path.lstrip("/")
             target=HERE/"static"/name
-            if name not in {"index.html","app.js","style.css"} or not target.is_file():
+            if name not in {"index.html","app.js","live.js","style.css","live.css"} or not target.is_file():
                 return self.reply(404,{"error":"not_found"})
-            mime= {"index.html":"text/html; charset=utf-8","app.js":"text/javascript; charset=utf-8",
-                   "style.css":"text/css; charset=utf-8"}[name]
+            mime= {"index.html":"text/html; charset=utf-8","app.js":"text/javascript; charset=utf-8","live.js":"text/javascript; charset=utf-8",
+                   "style.css":"text/css; charset=utf-8","live.css":"text/css; charset=utf-8"}[name]
             return self.raw_reply(200,target.read_bytes(),mime)
         if not self.require_auth():return
         if path=="/api/session":return self.reply(200,{"authenticated":True})
@@ -443,6 +519,20 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200,self.board.summary())
         if path=="/api/system":
             return self.reply(200,self.board.system_diagnostics())
+        if path=="/api/diagnostics":
+            query=parse_qs(urlsplit(self.path).query)
+            try:
+                def param(name,default):return query.get(name,[default])[0]
+                result=self.board.live_diagnostics(
+                    task=param("task","all"),severity=param("severity","all"),
+                    query=param("q",""),offset=int(param("offset","0")),
+                    limit=int(param("limit","40")), hours=int(param("hours","24")))
+            except (ValueError,TypeError):return self.reply(400,{"error":"invalid_filters"})
+            return self.reply(200,result)
+        if path=="/api/diagnostics/detail":
+            query=parse_qs(urlsplit(self.path).query)
+            result=self.board.diagnostic_detail(query.get("path",[""])[0])
+            return self.reply(200,result) if result else self.reply(404,{"error":"diagnostic_missing"})
         if path.startswith("/api/tasks/") and path.endswith("/detail"):
             key=path.split("/")[3]
             if not KEY_PATTERN.fullmatch(key):return self.reply(400,{"error":"invalid_key"})

@@ -65,6 +65,40 @@ class BoardTests(unittest.TestCase):
         self.assertIsNone(self.board.diagnostic_image("../../etc/passwd"))
         self.assertEqual(0,self.board.sync_diagnostics(force=True))
 
+    def test_live_feed_filters_pagination_and_redacted_debug(self):
+        from server import iso_now
+        day=self.diags/iso_now()[:10]
+        day.mkdir()
+        for n,(activity,kind) in enumerate((("storehousechest","stamina-collection-unconfirmed"),
+                                            ("intel","task-error-homenotfoundexception"),
+                                            ("recognition","template-scan-not-found"))):
+            frame=day/("event-"+str(n)+".json")
+            frame.write_text(json.dumps({
+                "schema":1,"activity":activity,"kind":kind,
+                "timestamp":iso_now(),"platform":"Windows 11",
+                "log_tail":"2026-11-15T01:00:00+01:00 WARN - OCR failed\nAuthorization: Bearer mySecretToken123456\nDEBUG - candidate score=47"
+            }))
+        self.assertEqual(3,self.board.sync_diagnostics(force=True))
+        all_items=self.board.live_diagnostics(hours=0,limit=2)
+        self.assertEqual(3,all_items["total"])
+        self.assertEqual(2,len(all_items["items"]))
+        self.assertEqual(1,len(self.board.live_diagnostics(hours=0,offset=2)["items"]))
+        self.assertEqual(1,self.board.live_diagnostics(hours=0,task="STOREHOUSE_CHEST")["total"])
+        self.assertEqual(1,self.board.live_diagnostics(hours=0,task="system")["total"])
+        self.assertEqual(1,self.board.live_diagnostics(hours=0,severity="warning")["total"])
+        self.assertEqual(1,self.board.live_diagnostics(hours=0,query="storehouse")["total"])
+        self.assertEqual(0,self.board.live_diagnostics(hours=0,query="%_")["total"])
+        self.assertIsNotNone(all_items["seconds_since_latest"])
+        detail=self.board.diagnostic_detail(day.name+"/event-0.json")
+        self.assertEqual(3,len(detail["log_lines"]))
+        self.assertEqual("WARN",detail["log_lines"][0]["level"])
+        self.assertEqual("DEBUG",detail["log_lines"][2]["level"])
+        self.assertIn("[REDACTED]",detail["log_lines"][1]["text"])
+        self.assertNotIn("mySecretToken123456",str(detail))
+        self.assertIsNone(self.board.diagnostic_detail("../../private/auth.json"))
+        with self.assertRaises(ValueError):self.board.live_diagnostics(hours=55)
+        with self.assertRaises(ValueError):self.board.live_diagnostics(limit=800)
+
     def test_password_signed_cookie_and_http_protection(self):
         self.assertTrue(self.board.password_ok(self.password))
         self.assertFalse(self.board.password_ok("invalid"))
@@ -93,6 +127,11 @@ class BoardTests(unittest.TestCase):
             status,data,_=req("GET","/api/tasks",cookie=session)
             self.assertEqual(200,status);self.assertEqual(61,data["total"])
             self.assertEqual(403,req("POST","/api/sync",{},session,"https://evil.example")[0])
+            status,feed,_=req("GET","/api/diagnostics?hours=0&limit=10",cookie=session)
+            self.assertEqual(200,status)
+            self.assertIn("seconds_since_latest",feed)
+            self.assertEqual(400,req("GET","/api/diagnostics?severity=garbage",cookie=session)[0])
+            self.assertEqual(401,req("GET","/api/diagnostics/detail?path=bad",cookie=None)[0])
             row=self.board.detail("ARENA")["task"]
             status,data,_=req("PATCH","/api/tasks/ARENA",{"version":row["version"],"status":"testing"},session)
             self.assertEqual(200,status);self.assertEqual("testing",data["task"]["status"])

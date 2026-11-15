@@ -28,6 +28,42 @@ De statussen zijn:
 
 De gebruiker kan taken afvinken, notities opslaan, nieuwe fouten toevoegen, fouten sluiten/heropenen en de diagnostiek verversen. Iedere wijziging krijgt een actor en tijdstip. De per-taak versieteller voorkomt dat twee gebruikers elkaars wijzigingen onopgemerkt overschrijven.
 
+## Live diagnostiek — debug en screenshots
+
+Via **Live diagnostiek** boven in het dashboard zie je de inkomende
+SurvivalOps-meldingen als tijdlijn. De pagina controleert elke **8 seconden**
+via een geauthenticeerde HTTPS-aanvraag op nieuwe uploads (geen achtergrond-
+schermstream van de emulator). Er zijn filters voor taak, systeemmeldingen,
+foutniveau, trefwoord en periode (24 uur / 3 / 7 / 14 dagen / volledig archief).
+De knop **Pauzeren** zet automatische verversing uit; de taakstatussen en
+notities blijven onaangetast.
+
+Een klik op een melding toont het tijdstip, taak of systeem, ernst, platform,
+bijbehorende screenshot met vergroting en de werkelijk meegezonden debuglogregels
+(INFO/WARN/ERROR/DEBUG wanneer aanwezig). OCR-scores, klikroutes en redenen
+voor herpogingen worden zichtbaar als SurvivalOps die in `log_tail` heeft opgenomen.
+De upload bevat doorgaans een *fragment* van recente logs, niet het volledige
+proceslog; deze regels kunnen daarom ook eerdere taken betreffen.
+
+De pagina toont expliciet de leeftijd van de **laatst ontvangen** upload en
+waarschuwt als er langer dan twee minuten geen nieuwe gegevens zijn. Dat is geen
+bewijs dat de game gestopt is; alleen dat er geen diagnostische uploads binnenkomen.
+Wanneer de verzendende Windows-app geen nieuwe meldingen produceert, blijft het
+bestaande archief beschikbaar. Alleen nieuwe bestanden in de oorspronkelijke
+LAN-inbox worden in de dashboarddatabase geïndexeerd; het dashboard schrijft
+geen wijzigingen terug naar de diagnostische bron.
+
+APIs, uitsluitend met dezelfde HTTPS-sessiecookies:
+- `GET /api/diagnostics?task=all&severity=error&hours=24&offset=0&limit=40`
+- `GET /api/diagnostics/detail?path=YYYY-MM-DD/incident.json`
+- `GET /api/diagnostic/image?path=YYYY-MM-DD/incident.json`
+
+De lijst bevat alleen metadata; het logfragment en de afbeelding worden pas
+bij openen van een individuele diagnose opgevraagd. In gelogde toegangscodes
+worden wachtwoorden/tokens afgeschermd vóór verzending naar de browser.
+De data en account-screenshots zijn privé: deel geen openbare dashboardlinks,
+logs of screenshots met onbedoelde derden.
+
 **Automatische screenshots en unittests zetten nooit een taak op VERIFIED.** Een live-eindcontrole moet de actie, de resulterende spelstatus en de volgende planning bevestigen.
 
 ## Dezelfde database vanuit ChatGPT
