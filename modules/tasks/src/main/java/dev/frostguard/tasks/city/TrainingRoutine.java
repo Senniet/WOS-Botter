@@ -3,6 +3,7 @@ package dev.frostguard.tasks.city;
 import dev.frostguard.api.configs.TemplatesEnum;
 import dev.frostguard.api.configs.TpDailyTaskEnum;
 import dev.frostguard.api.domain.*;
+import dev.frostguard.engine.diagnostics.TrainingUnlockOverlay;
 import dev.frostguard.engine.nav.SearchConfigConstants;
 import dev.frostguard.engine.nav.SidebarFrameClassifier;
 import dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig;
@@ -831,6 +832,18 @@ private Integer extractMaxTroopCountFlow() {
             tapInside(collect);
             sleepTask(700);
             RawImageData screenshot = emuManager.captureScreen(EMULATOR_NUMBER);
+            if (TrainingUnlockOverlay.visible(screenshot)) {
+                if (!dismissConfirmedTroopUnlockOverlay()) {
+                    throw new IllegalStateException("Troop unlock blocked completed training collection");
+                }
+                List<QueueSlot> afterUnlock = inspectAllQueues();
+                if (wasCompletedQueueCollected(slot.type(), afterUnlock)) {
+                    logInfo(routineLogTrainingLine("Completed " + slot.type()
+                            + " verified after closing troop-unlock animation"));
+                    continue;
+                }
+                screenshot = emuManager.captureScreen(EMULATOR_NUMBER);
+            }
             PointData handTarget = completedTroopHandTarget(screenshot);
             if (handTarget == null) {
                 logWarning(routineLogTrainingLine("No verified completion bubble hand for " + slot.type()));
@@ -963,12 +976,59 @@ private boolean openUpTrainingInterface() {
         }
 
         tapInside(trainingButton.getPoint(), trainingButton.getPoint(), 1, 1000);
+        // A completed troop claim can trigger the full-screen "New Heroic
+        // Infantry" animation instead of opening the camp. Do not mistake
+        // that overlay for stale training tabs and attempt global navigation.
+        boolean unlocked = TrainingUnlockOverlay.visible(emuManager.captureScreen(EMULATOR_NUMBER));
+        if (unlocked && !dismissConfirmedTroopUnlockOverlay()) {
+            // Do not enter fallback navigation while a full-screen modal is
+            // still confirmed; navigation could hit Quit or an unrelated UI.
+            throw new IllegalStateException("Troop unlock was not dismissed; aborting unsafe navigation");
+        }
+        if (unlocked && !isTrainingCampInterfaceVisible()) {
+            // The unlock closes back to City on some clients. Re-open Train
+            // only after a fresh, verified building control is present.
+            ImageSearchResultData refreshed = templateSearchHelper.locatePattern(
+                    BUILDING_BUTTON_TRAIN, SearchConfigConstants.DEFAULT_SINGLE);
+            if (refreshed.isFound()) tapInside(refreshed.getPoint(), refreshed.getPoint(), 1, 800);
+        }
         if (!isTrainingCampInterfaceVisible()) {
             logWarning(routineLogTrainingLine("Train control was tapped, but troop panel tab "
                     + "was not confirmed; no tier scans or subsequent taps"));
             return false;
         }
         return true;
+    }
+
+/** A verified prompt plus a characteristic blue full-screen backdrop is
+ * required in TWO captures before any dismissal input is allowed.
+ * A tap is followed by another capture; at most two distinct unlock pages
+ * may be dismissed. Never click the normal game screen by assumption.
+ */
+private boolean dismissConfirmedTroopUnlockOverlay() {
+        for (int attempt = 0; attempt < 2; attempt++) {
+            RawImageData before = emuManager.captureScreen(EMULATOR_NUMBER);
+            if (!TrainingUnlockOverlay.visible(before)) return true;
+            sleepTask(250);
+            RawImageData confirmed = emuManager.captureScreen(EMULATOR_NUMBER);
+            if (!TrainingUnlockOverlay.visible(confirmed)) return true;
+            logInfo(routineLogTrainingLine("Confirmed troop-unlock animation (" + (attempt + 1)
+                    + "/2); dismissing explicit Tap anywhere prompt."));
+            // This blank blue area has no buttons, purchases or game UI while
+            // the prompt is visible. No tap if the visual gate is absent.
+            tapNear(new PointData(352, 1090));
+            sleepTask(650);
+            if (!TrainingUnlockOverlay.visible(emuManager.captureScreen(EMULATOR_NUMBER))) {
+                logInfo(routineLogTrainingLine("Troop-unlock animation dismissed; "
+                        + "verifying next game screen."));
+                return true;
+            }
+        }
+        logWarning(routineLogTrainingLine("Troop unlock still blocks the training interface; "
+                + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+                        "training", "troop-unlock-blocking")));
+        markWorkIncomplete("Training: troop-unlock animation could not be dismissed safely");
+        return false;
     }
 
 private boolean isTrainingCampInterfaceVisible() {

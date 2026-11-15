@@ -105,6 +105,8 @@ public final class TaskTemplateCoach {
         volatile boolean active;
         volatile Thread ownerThread;
         volatile String outcome = "UNKNOWN";
+        final java.util.concurrent.atomic.AtomicBoolean sawTroopUnlock = new java.util.concurrent.atomic.AtomicBoolean();
+        final AtomicInteger unlockBlockerChecks = new AtomicInteger();
         Session(long profileId, String device, TpDailyTaskEnum task, Path dir, boolean autoApply) {
             this.profileId = profileId; this.device = device; this.task = task; this.dir = dir;
             this.autoApply = autoApply;
@@ -233,6 +235,11 @@ public final class TaskTemplateCoach {
                         }
                     }
                 }
+                if (session.sawTroopUnlock.get()) {
+                    report.add("SCREEN_BLOCKER_TROOP_UNLOCK: explicit Tap anywhere animation detected "
+                            + session.unlockBlockerChecks.get() + " times during Training. "
+                            + "Ignore template misses on this overlay; verify dismissal before continuing.");
+                }
                 report.add("task=" + session.task.name() + " scheduler_outcome=" + result
                         + " (not proof of in-game completion)");
                 report.add("calls=" + session.checks + " hits=" + session.hits
@@ -280,6 +287,33 @@ public final class TaskTemplateCoach {
         if (session == null || !session.active || session.ownerThread != Thread.currentThread()
                 || !session.device.equals(device)
                 || frame == null || !frame.isValid() || template == null) return;
+        // Full-screen reward/cutscene overlays are not failures of the
+        // underlying tab templates. Diagnose the blocker instead of proposing
+        // new training tabs cropped from the unrelated animation screen.
+        if (session.task == TpDailyTaskEnum.TRAINING_TROOPS
+                && TrainingUnlockOverlay.visible(frame)) {
+            session.unlockBlockerChecks.incrementAndGet();
+            if (session.sawTroopUnlock.compareAndSet(false, true)) {
+                session.note = "Confirmed troop-unlock animation blocking Training tabs";
+                session.observations.addLast(Instant.now()
+                        + ",TRAINING_TROOP_UNLOCK_CONTINUE_2026,screen-blocker,92,100,true,-1,-1,-1,-1,-1,-1");
+                if (session.captures.get() < MAX_CAPTURES
+                        && session.writer.getQueue().remainingCapacity() > 0) {
+                    byte[] pixels = frame.getData().clone();
+                    int w = frame.getWidth(), h = frame.getHeight(), bpp = frame.getBpp();
+                    int number = session.captures.incrementAndGet();
+                    session.writer.execute(() -> {
+                        try {
+                            var image = ImageConverter.toBufferedImage(RawImageData.capture(pixels, w, h, bpp));
+                            ImageIO.write(image, "png", session.dir.resolve("captures")
+                                    .resolve(String.format(Locale.ROOT, "%03d-troop-unlock-screen-blocker.png", number))
+                                    .toFile());
+                        } catch (Exception ex) { session.drops.incrementAndGet(); }
+                    });
+                }
+            }
+            return;
+        }
         session.checks.incrementAndGet();
         boolean hit = result != null && result.isFound();
         int posX = hit && result.getPoint() != null ? result.getPoint().getX() : -1;

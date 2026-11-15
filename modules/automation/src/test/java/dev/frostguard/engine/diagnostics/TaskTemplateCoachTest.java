@@ -158,6 +158,50 @@ class TaskTemplateCoachTest {
         }
     }
 
+    @Test void knownTroopUnlockScreenIsReportedAsBlockerNotBadTemplate() throws Exception {
+        String old = System.getProperty("frostguard.workspace");
+        System.setProperty("frostguard.workspace", root.toString());
+        try {
+            dev.frostguard.vision.match.OpenCvPatternLocator.loadNativeLibrary();
+            BufferedImage image = new BufferedImage(720, 1280, BufferedImage.TYPE_INT_RGB);
+            var graphics = image.createGraphics();
+            graphics.setColor(new java.awt.Color(92, 147, 185));
+            graphics.fillRect(0, 0, 720, 1280);
+            try (var in = getClass().getResourceAsStream(
+                    TemplatesEnum.TRAINING_TROOP_UNLOCK_CONTINUE_2026.getTemplate())) {
+                assertNotNull(in);
+                graphics.drawImage(ImageIO.read(in), 145, 1205, null);
+            }
+            graphics.dispose();
+            RawImageData overlay = TaskTemplateCoach.asRaw(image);
+            assertTrue(TrainingUnlockOverlay.visible(overlay));
+            TaskTemplateCoach.arm(5050L, "emu0", TpDailyTaskEnum.TRAINING_TROOPS, false);
+            TaskTemplateCoach.taskStarted(5050L, "emu0", TpDailyTaskEnum.TRAINING_TROOPS);
+            for (int i = 0; i < 3; i++) {
+                TaskTemplateCoach.observe("emu0", TemplatesEnum.TRAINING_CAMP_INFANTRY_TAB_LABEL_2026,
+                        "color", 90, ImageSearchResultData.miss(), overlay);
+            }
+            assertEquals(0, TaskTemplateCoach.snapshot().checks(),
+                    "Template misses on the cutscene are not evidence of stale training tabs");
+            TaskTemplateCoach.taskFinished(5050L, "emu0", TpDailyTaskEnum.TRAINING_TROOPS, "FAILED");
+            for (int i = 0; i < 100 && !TaskTemplateCoach.snapshot().phase().equals("COMPLETED"); i++) {
+                Thread.sleep(50);
+            }
+            var status = TaskTemplateCoach.snapshot();
+            assertEquals("COMPLETED", status.phase(), status.note());
+            assertEquals(0, status.proposals());
+            String summary = Files.readString(Path.of(status.directory(), "summary.txt"));
+            assertTrue(summary.contains("SCREEN_BLOCKER_TROOP_UNLOCK"), summary);
+            assertTrue(summary.contains("detected 3 times"), summary);
+            assertTrue(Files.readString(Path.of(status.directory(), "recognition-events.csv"))
+                    .contains("TRAINING_TROOP_UNLOCK_CONTINUE_2026,screen-blocker"));
+        } finally {
+            TaskTemplateCoach.stop();
+            if (old == null) System.clearProperty("frostguard.workspace");
+            else System.setProperty("frostguard.workspace", old);
+        }
+    }
+
     @Test void screenContextValidationDistinguishesDifferentPages() {
         BufferedImage a = new BufferedImage(240, 360, BufferedImage.TYPE_INT_RGB);
         BufferedImage b = new BufferedImage(240, 360, BufferedImage.TYPE_INT_RGB);
