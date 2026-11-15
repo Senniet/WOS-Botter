@@ -1,0 +1,17 @@
+[Unit]
+Description=SurvivalOps Shared Task QA Dashboard (LAN HTTPS)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/michel/survivalops-qa-dashboard
+ExecStart=/usr/bin/python3 /home/michel/survivalops-qa-dashboard/server.py
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target
