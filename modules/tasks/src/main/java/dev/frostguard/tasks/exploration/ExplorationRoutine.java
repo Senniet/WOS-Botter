@@ -127,18 +127,13 @@ public class ExplorationRoutine extends DelayedTask {
 	}
 
     private boolean isExplorationMainScreenVisible() {
-        if (templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_EXPLORATION_TITLE_NOV_2026,
+        // One verified 2026 page heading instead of two known non-matching
+        // older title templates (confirmed by 20 Task Coach sessions).
+        return templateSearchHelper.locatePattern(
+                TemplatesEnum.SERVE_EMU_EXPLORATION_TITLE_NOV_2026,
                 dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig.builder()
-                    .withMaxAttempts(1).withThreshold(92)
-                    .withArea(AreaData.of(65, 0, 335, 115)).build()).isFound()) return true;
-        if (templateSearchHelper.locatePattern(TemplatesEnum.EXPLORATION_SCREEN_TITLE,
-                dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig.builder()
-                    .withMaxAttempts(1).withThreshold(90)
-                    .withArea(AreaData.of(70, 5, 365, 150)).build()).isFound()) return true;
-        return templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_EXPLORATION_TITLE,
-                dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig.builder()
-                    .withMaxAttempts(2).withDelay(100).withThreshold(90)
-                    .withArea(AreaData.of(50, 65, 330, 160)).build()).isFound();
+                        .withMaxAttempts(1).withThreshold(92)
+                        .withArea(AreaData.of(65, 0, 335, 115)).build()).isFound();
     }
 
     private boolean claimAvailableRewards() {
@@ -202,18 +197,14 @@ public class ExplorationRoutine extends DelayedTask {
     }
 
     private boolean idleIncomeVisible() {
-        // Captured at 23:55:19: the current game clearly shows Idle Income,
-        // but the older title templates scored only ~21% and blocked Claim.
-        if (templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_IDLE_INCOME_TITLE_NOV_2026,
+        // Live Income page: NOV_2026 matches 100% at the correct title ROI.
+        // EXPLORATION_IDLE_INCOME_TITLE and SERVE_EMU_IDLE_INCOME_TITLE were
+        // 21-29% on the same confirmed page, so scanning them only wastes time.
+        if (templateSearchHelper.locatePattern(
+                TemplatesEnum.SERVE_EMU_IDLE_INCOME_TITLE_NOV_2026,
                 dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig.builder()
                         .withMaxAttempts(1).withThreshold(90)
                         .withArea(AreaData.of(210, 233, 520, 330)).build()).isFound()) return true;
-        if (templateSearchHelper.locatePattern(TemplatesEnum.EXPLORATION_IDLE_INCOME_TITLE,
-                IDLE_INCOME_TITLE_SEARCH).isFound()) return true;
-        if (templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_IDLE_INCOME_TITLE,
-                dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig.builder()
-                        .withMaxAttempts(1).withDelay(0).withThreshold(90)
-                        .withArea(AreaData.of(235, 275, 555, 385)).build()).isFound()) return true;
         // The 13-Nov serve-emu frame clearly displays Idle Income, but its
         // newer title artwork fails both legacy templates. Confirm the text
         // in the narrow title strip; never treat a generic green button as proof.

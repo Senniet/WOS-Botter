@@ -42,8 +42,6 @@ final class KnownGameScreenResume {
                 new PointData(70, 70), new PointData(350, 165)),
         new PagePattern(Page.DAILY, TemplatesEnum.SERVE_EMU_DAILY_TITLE,
                 new PointData(170, 105), new PointData(545, 210)),
-        new PagePattern(Page.EXPLORATION, TemplatesEnum.SERVE_EMU_EXPLORATION_TITLE,
-                new PointData(50, 65), new PointData(330, 160)),
         new PagePattern(Page.EXPLORATION, TemplatesEnum.SERVE_EMU_EXPLORATION_TITLE_NOV_2026,
                 new PointData(65, 0), new PointData(335, 115)),
         new PagePattern(Page.MAIL, TemplatesEnum.SERVE_EMU_MAIL_TITLE,

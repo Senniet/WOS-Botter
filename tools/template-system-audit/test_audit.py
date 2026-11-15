@@ -39,6 +39,28 @@ class TemplateAuditTests(unittest.TestCase):
             self.assertEqual(['DAILY_MISSIONS'],records['DAILY_MISSION_CLAIM_BUTTON']['tasks'])
             self.assertNotIn('private', str(records))
 
+    def test_outdated_exploration_and_income_templates_stay_out_of_hot_paths(self):
+        # 20 real Task Coach sessions in Nov 2026 show the active 720x1280
+        # NOV_2026 titles with 100% matches, old same-screen alternatives
+        # with 20-50% misses. Do not reintroduce the retry cascade.
+        base=audit.ROOT/'modules/tasks/src/main/java/dev/frostguard/tasks'
+        files=[base/'exploration/DoExplorationRoutine.java',
+               base/'exploration/ExplorationRoutine.java',
+               base/'lifecycle/KnownGameScreenResume.java']
+        for path in files:
+            content=path.read_text(encoding='utf-8')
+            self.assertIn('TemplatesEnum.SERVE_EMU_EXPLORATION_TITLE_NOV_2026',
+                          content, path.name)
+            for legacy in ('SERVE_EMU_EXPLORATION_TITLE', 'EXPLORATION_SCREEN_TITLE',
+                           'SERVE_EMU_IDLE_INCOME_TITLE', 'EXPLORATION_IDLE_INCOME_TITLE'):
+                self.assertNotRegex(content,
+                    r'TemplatesEnum\.'+legacy+r'\b',
+                    'Old same-screen fallback was reintroduced in '+path.name)
+        # This change MUST NOT remove global safety checks for absent screens.
+        navigation=(audit.ROOT/'modules/automation/src/main/java/dev/frostguard/engine/helper/NavigationHelper.java').read_text()
+        self.assertIn('TemplatesEnum.GAME_HOME_RECONNECT',navigation)
+        self.assertIn('dismissVerifiedWelcomeBack',navigation)
+
     def test_upstream_blob_hash_matches_git_content_semantics(self):
         self.assertEqual('e69de29bb2d1d6434b8b29ae775ad8c2e48c5391', audit.git_hash(b''))
         self.assertNotEqual(audit.git_hash(b'a'),audit.git_hash(b'b'))
