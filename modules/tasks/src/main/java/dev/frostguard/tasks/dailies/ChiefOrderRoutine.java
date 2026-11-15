@@ -82,8 +82,25 @@ public ChiefOrderRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask, Chie
 			manageTaskFailure("Failed to enact order");
 			return;
 		}
-
+        // Do not let the generic HOME recovery scan Alliance/Offers/World
+        // while a known Rewards overlay is plainly waiting for one tap.
+        dismissVerifiedChiefOrderReward();
 	}
+
+    private void dismissVerifiedChiefOrderReward() {
+        ChiefOrderRewardFrame.Exit result=ChiefOrderRewardFrame.dismissIfVisible(
+                () -> {checkPreemption();return emuManager.captureScreen(EMULATOR_NUMBER);},
+                target -> {checkPreemption();tapNear(target);},
+                () -> sleepTask(430));
+        if (result==ChiefOrderRewardFrame.Exit.DISMISSED) {
+            logInfo(routineLogChiefOrderLine("Verified Rewards dismissed in one safe tap; "
+                    + "no unrelated global recovery scan needed"));
+        } else if (result==ChiefOrderRewardFrame.Exit.UNVERIFIED) {
+            logWarning(routineLogChiefOrderLine("Rewards changed or did not close after one tap; "
+                    + "no repeat input"));
+            markWorkIncomplete("Chief Order: reward overlay exit not confirmed");
+        }
+    }
 
 private String routineLogChiefOrderLine(String note) {
         return "ChiefOrderRoutine | " + note;

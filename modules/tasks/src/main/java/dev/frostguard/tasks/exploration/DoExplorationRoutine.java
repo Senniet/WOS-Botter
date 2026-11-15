@@ -9,6 +9,7 @@ import dev.frostguard.api.domain.PointData;
 import dev.frostguard.api.domain.OcrSettingsData;
 import dev.frostguard.api.domain.AreaData;
 import dev.frostguard.api.domain.SizeData;
+import dev.frostguard.api.domain.RawImageData;
 import dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig;
 import dev.frostguard.engine.helper.BlueLabelActionDetector;
 import dev.frostguard.engine.helper.RecognitionConsensus;
@@ -69,6 +70,7 @@ public class DoExplorationRoutine extends DelayedTask {
                 logInfo("Resumed Quick Exploration confirmed; skipping all regular battle taps");
                 rescheduleInOneHour();
             } else {
+                markWorkIncomplete("Exploration: pending Quick Exploration confirmation not verified");
                 logWarning("Pending Quick Exploration modal is unresolved; "
                         + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
                                 "exploration", "quick-confirm-unresolved"));
@@ -79,6 +81,7 @@ public class DoExplorationRoutine extends DelayedTask {
         logInfo("Opening exploration screen...");
         if (!explorationTitleVisible()) navigationHelper.ensureCorrectScreenLocation(LaunchPoint.WORLD);
         if (!openExplorationScreen()) {
+            markWorkIncomplete("Exploration: page not opened or title unverified");
             logWarning("Exploration page could not be verified; " + TaskDiagnosticSnapshots.capture(
                     emuManager, EMULATOR_NUMBER, "exploration", "entry-unverified"));
             reschedule(LocalDateTime.now().plusMinutes(5));
@@ -88,6 +91,7 @@ public class DoExplorationRoutine extends DelayedTask {
         logInfo("Searching exploration button...");
         ImageSearchResultData exploreButton = detectExploreButton();
         if (exploreButton == null || !exploreButton.isFound()) {
+            markWorkIncomplete("Exploration: Explore button not verified");
             logWarning("Exploration button not found");
             rescheduleInOneHour();
             return;
@@ -105,6 +109,7 @@ public class DoExplorationRoutine extends DelayedTask {
             return;
         }
         if (afterExplore == QuickDialogOutcome.UNRESOLVED) {
+            markWorkIncomplete("Exploration: Quick confirmation unverified, Fight not started");
             logWarning("Explore opened an unverified confirmation; no battle input sent; "
                     + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
                             "exploration", "quick-confirm-unresolved"));
@@ -118,6 +123,7 @@ public class DoExplorationRoutine extends DelayedTask {
         }
 
         if (battleOutcomeUnknown) {
+            markWorkIncomplete("Exploration: Fight or game result not confirmed; must retry");
             logWarning("Exploration outcome remains unknown. Retrying in 10 minutes, not recording completion.");
             reschedule(LocalDateTime.now().plusMinutes(10));
         } else {
@@ -306,7 +312,17 @@ public class DoExplorationRoutine extends DelayedTask {
      * Never confirm any other orange/blue modal without matching its text.
      */
     QuickDialogOutcome inspectQuickExplorationConfirmation() {
-        BufferedImage first = ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER));
+        RawImageData captured = emuManager.captureScreen(EMULATOR_NUMBER);
+        // Latest Task Coach: the Squad Settings heroes and badges form an
+        // orange/blue false-positive for the quick-modal geometry (y~=1025).
+        // Two precise known templates confirm this is NOT a confirmation:
+        // the Squad Settings header and the independently visible Fight CTA.
+        // The actual Fight action still goes through its two-frame gate.
+        if (ExplorationSquadFrame.isSquadReady(captured)) {
+            logDebug("Squad Settings and Fight CTA confirmed; skipping false Quick modal OCR");
+            return QuickDialogOutcome.NOT_PRESENT;
+        }
+        BufferedImage first = ImageConverter.toBufferedImage(captured);
         PointData target = quickConfirmationButton(first);
         if (target == null) return QuickDialogOutcome.NOT_PRESENT;
         sleepTask(180);
@@ -388,6 +404,11 @@ public class DoExplorationRoutine extends DelayedTask {
             }
         }
         if (bestY < 0) return null;
+        // The real 2026 quick-confirm modal buttons are around y=820/1280.
+        // Squad Settings hero cards incorrectly create paired orange/blue
+        // stripes around y=1025. The confirm button can never be that low on
+        // the known modal; reject that geometry before costly OCR or a tap.
+        if (bestY < h * 55 / 100 || bestY > h * 74 / 100) return null;
         // Prefer the visual centre, not the highest-scoring line near a rounded
         // border. The verified live button is centred around (512, 822) on 720x1280.
         int minY = bestY, maxY = bestY;
