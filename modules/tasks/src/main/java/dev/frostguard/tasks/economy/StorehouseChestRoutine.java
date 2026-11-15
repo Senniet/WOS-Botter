@@ -410,12 +410,23 @@ public class StorehouseChestRoutine extends DelayedTask {
     }
 
     private boolean isStaminaCapacityBlocked() {
-        RawImageData frame = emuManager.captureScreen(EMULATOR_NUMBER);
-        ImageSearchResultData notice = emuManager.locatePattern(EMULATOR_NUMBER, frame,
-                TemplatesEnum.STOREHOUSE_STAMINA_CAPACITY_MAXED,
-                STAMINA_CAPACITY_NOTICE_AREA.topLeft(),
-                STAMINA_CAPACITY_NOTICE_AREA.bottomRight(), STAMINA_CAPACITY_NOTICE_THRESHOLD);
-        return notice != null && notice.isFound();
+        for (int attempt = 0; attempt < 2; attempt++) {
+            RawImageData frame = emuManager.captureScreen(EMULATOR_NUMBER);
+            ImageSearchResultData notice = emuManager.locatePattern(EMULATOR_NUMBER, frame,
+                    TemplatesEnum.STOREHOUSE_STAMINA_CAPACITY_MAXED,
+                    STAMINA_CAPACITY_NOTICE_AREA.topLeft(),
+                    STAMINA_CAPACITY_NOTICE_AREA.bottomRight(), STAMINA_CAPACITY_NOTICE_THRESHOLD);
+            if (notice != null && notice.isFound()) return true;
+            // If the dialog already disappeared, do not spend a second capture
+            // seeking a toast: the normal post-claim check will verify it.
+            ImageSearchResultData title = emuManager.locatePattern(EMULATOR_NUMBER, frame,
+                    TemplatesEnum.STOREHOUSE_STAMINA_REWARD_TITLE,
+                    STAMINA_REWARD_TITLE_AREA.topLeft(),
+                    STAMINA_REWARD_TITLE_AREA.bottomRight(), REWARD_TITLE_THRESHOLD);
+            if (title == null || !title.isFound()) return false;
+            if (attempt == 0) sleepTask(250);
+        }
+        return false;
     }
 
     private boolean closeCapacityBlockedRewardDialog() {
@@ -428,7 +439,9 @@ public class StorehouseChestRoutine extends DelayedTask {
             logWarning("Stamina full, but the reward dialog's close icon was not verified.");
             return false;
         }
-        tapInside(close);
+        // The detected X has transparent corners; tap its narrow center,
+        // not a randomized point anywhere in its full template rectangle.
+        tapNear(close.getPoint(), 3);
         sleepTask(CLAIM_CLOSE_SETTLE_MILLIS);
         for (int attempt = 0; attempt < 2; attempt++) {
             RawImageData after = emuManager.captureScreen(EMULATOR_NUMBER);
