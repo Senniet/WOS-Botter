@@ -316,11 +316,56 @@ public class StorehouseChestRoutine extends DelayedTask {
                 logInfo("Storehouse Claim responded with a full Chief Stamina capacity notice;"
                         + " reward was not collected.");
                 pendingAgnesStamina = null;
-                if (!closeCapacityBlockedRewardDialog()) {
+                if (!closeStaminaRewardDialog()) {
                     captureInterfaceFailure("stamina-full-dialog-close-unverified");
                     return StorehouseVisitFlow.CollectionState.UNKNOWN;
                 }
                 return StorehouseVisitFlow.CollectionState.BLOCKED_CAPACITY;
+            }
+            // Reuse the existing verified 2026 close control even when the
+            // max-capacity toast was absent or disappeared too quickly to scan.
+            // An unaccepted Claim is not a collected stamina reward.
+            RawImageData postClaim = emuManager.captureScreen(EMULATOR_NUMBER);
+            StorehouseStaminaClaimRecovery.Outcome rejection =
+                    StorehouseStaminaClaimRecovery.dismissUnacceptedClaim(
+                            new StorehouseStaminaClaimRecovery.Actions() {
+                                private boolean closeVerified;
+
+                                @Override
+                                public boolean rewardTitleVisible() {
+                                    return matchesPostClaim(postClaim,
+                                            TemplatesEnum.STOREHOUSE_STAMINA_REWARD_TITLE,
+                                            STAMINA_REWARD_TITLE_AREA, REWARD_TITLE_THRESHOLD);
+                                }
+
+                                @Override
+                                public boolean claimButtonVisible() {
+                                    return matchesPostClaim(postClaim,
+                                            TemplatesEnum.STOREHOUSE_STAMINA_CLAIM_TEXT,
+                                            STAMINA_CLAIM_BUTTON_AREA, CLAIM_BUTTON_THRESHOLD);
+                                }
+
+                                @Override
+                                public void dismiss() {
+                                    logWarning("Storehouse stamina Claim was not accepted; "
+                                            + "closing the identified reward overlay without crediting stamina.");
+                                    captureInterfaceFailure("stamina-claim-not-accepted");
+                                    closeVerified = closeStaminaRewardDialog();
+                                }
+
+                                @Override
+                                public boolean cityVisible() {
+                                    // Dialog disappearance is the actual postcondition.
+                                    // The city HUD anchor may be hidden or delayed.
+                                    return closeVerified;
+                                }
+                            });
+            if (rejection != StorehouseStaminaClaimRecovery.Outcome.NOT_PRESENT) {
+                if (rejection == StorehouseStaminaClaimRecovery.Outcome.CLOSE_UNCONFIRMED) {
+                    captureInterfaceFailure("stamina-claim-dialog-close-unconfirmed");
+                }
+                pendingAgnesStamina = null;
+                return StorehouseVisitFlow.CollectionState.UNCONFIRMED;
             }
             StorehouseVisitFlow.CollectionState confirmation = confirmBubbleDisappeared(
                     candidate, StorehouseBubbleDetector.Kind.STAMINA);
@@ -429,14 +474,20 @@ public class StorehouseChestRoutine extends DelayedTask {
         return false;
     }
 
-    private boolean closeCapacityBlockedRewardDialog() {
+    private boolean matchesPostClaim(
+            RawImageData frame, TemplatesEnum template, AreaData area, int threshold) {
+        ImageSearchResultData result = locateStaminaDialogTemplate(frame, template, area, threshold);
+        return result != null && result.isFound();
+    }
+
+    private boolean closeStaminaRewardDialog() {
         RawImageData frame = emuManager.captureScreen(EMULATOR_NUMBER);
         ImageSearchResultData close = emuManager.locatePattern(EMULATOR_NUMBER, frame,
                 TemplatesEnum.STOREHOUSE_STAMINA_REWARD_CLOSE,
                 STAMINA_DIALOG_CLOSE_AREA.topLeft(),
                 STAMINA_DIALOG_CLOSE_AREA.bottomRight(), STAMINA_DIALOG_CLOSE_THRESHOLD);
         if (close == null || !close.isFound()) {
-            logWarning("Stamina full, but the reward dialog's close icon was not verified.");
+            logWarning("Stamina reward dialog close icon was not verified.");
             return false;
         }
         // The detected X has transparent corners; tap its narrow center,
@@ -455,7 +506,7 @@ public class StorehouseChestRoutine extends DelayedTask {
             }
             if (attempt == 0) sleepTask(150);
         }
-        logInfo("Full-capacity Storehouse reward dialog closed and title disappearance verified.");
+        logInfo("Storehouse reward dialog closed and title disappearance verified.");
         return true;
     }
 

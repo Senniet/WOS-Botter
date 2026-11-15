@@ -1045,6 +1045,20 @@ private Attempt<QueueHandlingResult> handleQueueAttempt(QueueReadout queueResult
             if (upgrade != null && upgrade.isFound()) {
                 return buildingAttempt(startBuildingAction("upgrade", upgrade));
             }
+            // In current 720x1280 game artwork the guidance hand covers the
+            // white Upgrade arrow, reducing template score below recognition.
+            // Require both a precisely located Details control and the hand
+            // pointing at its adjacent Upgrade before attempting this tap.
+            if (!info.isFound()) {
+                CityUpgradeGuidanceDetector.Evidence guided = CityUpgradeGuidanceDetector.inspect(
+                        (template, area, threshold) -> locateOnFrame(frame, template, area, threshold));
+                diagnostics.decision(frame, "tutorial-hand upgrade=" + guided);
+                if (guided.actionable()) {
+                    logInfo(routineLogUpgradeBuildingsLine(
+                            "Selected building Upgrade guided by confirmed hand+Details; " + guided));
+                    return buildingAttempt(startBuildingAction("upgrade", guided.upgrade()));
+                }
+            }
             if (poll < BUILDING_CONTROL_CHECKS - 1) sleepTask(BUILDING_CONTROL_POLL_MS);
         }
 
