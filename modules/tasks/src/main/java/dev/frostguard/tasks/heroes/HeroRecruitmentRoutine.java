@@ -394,14 +394,10 @@ public class HeroRecruitmentRoutine extends DelayedTask {
                 sleepTask(600);
                 continue;
             }
-            var exit = templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_HERO_REWARD_EXIT,
-                    TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
-                            .withThreshold(89).withArea(AreaData.of(190, 1140, 530, 1240)).build());
+            var exit = locateFreeRewardExit();
             if (!exit.isFound()) continue;
             sleepTask(150);
-            var confirmed = templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_HERO_REWARD_EXIT,
-                    TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
-                            .withThreshold(89).withArea(AreaData.of(190, 1140, 530, 1240)).build());
+            var confirmed = locateFreeRewardExit();
             if (!RecognitionConsensus.agrees(exit, confirmed, 12)) continue;
             tapInside(confirmed);
             // Rendering may lag after the verified exit tap on gfxstream.
@@ -414,6 +410,15 @@ public class HeroRecruitmentRoutine extends DelayedTask {
             return false;
         }
         return false;
+    }
+
+    private dev.frostguard.api.domain.ImageSearchResultData locateFreeRewardExit() {
+        var config = TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
+                .withThreshold(89).withArea(AreaData.of(190, 1135, 530, 1240)).build();
+        var live = templateSearchHelper.locatePattern(
+                TemplatesEnum.SERVE_EMU_HERO_REWARD_EXIT_LIVE_2026, config);
+        return live.isFound() ? live : templateSearchHelper.locatePattern(
+                TemplatesEnum.SERVE_EMU_HERO_REWARD_EXIT, config);
     }
 
     private boolean confirmFreeChestCutscene() {
