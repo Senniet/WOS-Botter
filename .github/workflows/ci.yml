@@ -33,6 +33,9 @@ jobs:
       - name: Audit all recognition template resources
         run: python3 tools/audit-template-assets.py --baseline tools/template-missing-baseline.json
 
+      - name: Test complete template inventory and evidence parser
+        run: python3 -m unittest discover -s tools/template-system-audit -p 'test_*.py' -v
+
       - name: Verify shipped binaries are real files
         run: build-support/verification/check_lfs_assets.sh
 

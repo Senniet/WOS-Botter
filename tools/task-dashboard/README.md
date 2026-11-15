@@ -102,3 +102,19 @@ node --check static/app.js
 ```
 
 De HTTP-API vereist authenticatie, server-side gesigneerde cookies en HTTPS. De server weigert cross-origin schrijfacties en gebruikt invoervalidatie, een login-rate-limit en parametrische SQL. Wachtwoord en session key blijven buiten Git; het diagnostische uploadtoken wordt niet hergebruikt.
+
+## Volledig templateoverzicht
+
+De knop **Templates** opent een beveiligd, uitsluitend leesbaar overzicht van
+alle `TemplatesEnum`-verwijzingen en hun bijbehorende PNG-bestanden. Het toont
+herkomst ten opzichte van de lokaal beschikbare upstream-revisie, gedeelde
+bestandspaden, direct codegebruik en alleen de geaggregeerde Task Coach
+scores. De inhoud komt uit
+`~/.local/share/survivalops-template-audit/report.json`.
+
+Op de webserver ververst een aparte lokale systemd-timer die gegevens iedere
+tien minuten met `tools/template-system-audit/audit.py`. De audit heeft geen
+ADB-toegang en ontvangt geen gebruikersafbeeldingen in het browserantwoord.
+Het dashboard toont **nooit** een misser als bewezen defect of een hit als
+bewezen geslaagde game-actie. De bestaande handmatige QA-statussen blijven
+ongewijzigd.

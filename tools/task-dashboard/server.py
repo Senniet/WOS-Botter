@@ -22,6 +22,24 @@ import time
 from urllib.parse import urlsplit, parse_qs
 
 HERE = Path(__file__).resolve().parent
+TEMPLATE_AUDIT_PATH = Path.home()/'.local/share/survivalops-template-audit/report.json'
+
+
+def read_template_audit(path=None):
+    """Return only offline aggregated template metadata, never screenshot files."""
+    target = path or TEMPLATE_AUDIT_PATH
+    try:
+        if not target.is_file() or target.stat().st_size > 2_000_000:
+            return None
+        data = json.loads(target.read_text(encoding='utf-8'))
+        if (not isinstance(data,dict) or data.get('schema')!=1 or
+                not isinstance(data.get('summary'),dict) or
+                not isinstance(data.get('templates'),list) or
+                len(data['templates'])<500):
+            return None
+        return data
+    except (OSError, ValueError, UnicodeError):
+        return None
 STATUS_VALUES = {"not_tested", "testing", "working", "broken", "blocked", "verified"}
 ISSUE_SEVERITIES = {"low", "medium", "high", "critical"}
 MAX_BODY = 12000
@@ -503,16 +521,19 @@ class Handler(BaseHTTPRequestHandler):
         path=urlsplit(self.path).path
         if path=="/healthz":
             return self.reply(200,{"ok":True,"service":"SurvivalOps QA"})
-        if path in ("/","/index.html","/app.js","/live.js","/style.css","/live.css"):
+        if path in ("/","/index.html","/app.js","/live.js","/style.css","/live.css","/templates.js","/templates.css"):
             name = "index.html" if path=="/" else path.lstrip("/")
             target=HERE/"static"/name
-            if name not in {"index.html","app.js","live.js","style.css","live.css"} or not target.is_file():
+            if name not in {"index.html","app.js","live.js","style.css","live.css","templates.js","templates.css"} or not target.is_file():
                 return self.reply(404,{"error":"not_found"})
             mime= {"index.html":"text/html; charset=utf-8","app.js":"text/javascript; charset=utf-8","live.js":"text/javascript; charset=utf-8",
-                   "style.css":"text/css; charset=utf-8","live.css":"text/css; charset=utf-8"}[name]
+                   "style.css":"text/css; charset=utf-8","live.css":"text/css; charset=utf-8","templates.js":"text/javascript; charset=utf-8","templates.css":"text/css; charset=utf-8"}[name]
             return self.raw_reply(200,target.read_bytes(),mime)
         if not self.require_auth():return
         if path=="/api/session":return self.reply(200,{"authenticated":True})
+        if path=="/api/template-audit":
+            audit=read_template_audit()
+            return self.reply(200,audit) if audit else self.reply(503,{"error":"audit_not_ready"})
         if path=="/api/tasks":
             return self.reply(200,self.board.summary())
         if path=="/api/overview":

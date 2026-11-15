@@ -5,10 +5,11 @@ import hashlib
 from http.server import ThreadingHTTPServer
 import json
 from pathlib import Path
+from unittest.mock import patch
 import tempfile
 import threading
 import unittest
-from server import Board, Handler
+from server import Board, Handler, read_template_audit
 
 ROOT=Path(__file__).resolve().parent
 class BoardTests(unittest.TestCase):
@@ -99,6 +100,17 @@ class BoardTests(unittest.TestCase):
         with self.assertRaises(ValueError):self.board.live_diagnostics(hours=55)
         with self.assertRaises(ValueError):self.board.live_diagnostics(limit=800)
 
+
+    def test_template_audit_requires_schema_and_limited_file_size(self):
+        report=self.root/'report.json'
+        self.assertIsNone(read_template_audit(report))
+        report.write_text('{ invalid json')
+        self.assertIsNone(read_template_audit(report))
+        report.write_text(json.dumps({'schema':1,'templates':[{'name':'A'}]*523,'summary':{'registered':523}}))
+        self.assertEqual(523,len(read_template_audit(report)['templates']))
+        report.write_bytes(b' '*2_000_001)
+        self.assertIsNone(read_template_audit(report))
+
     def test_password_signed_cookie_and_http_protection(self):
         self.assertTrue(self.board.password_ok(self.password))
         self.assertFalse(self.board.password_ok("invalid"))
@@ -119,6 +131,7 @@ class BoardTests(unittest.TestCase):
             return status,json.loads(content) if head.get("Content-Type","").startswith("application/json") else content,head
         try:
             self.assertEqual(401,req("GET","/api/tasks")[0])
+            self.assertEqual(401,req("GET","/api/template-audit")[0])
             self.assertEqual(401,req("POST","/api/login",{"password":"bad"})[0])
             status,_,headers=req("POST","/api/login",{"password":self.password})
             self.assertEqual(200,status)
@@ -126,6 +139,8 @@ class BoardTests(unittest.TestCase):
             session=headers["Set-Cookie"].split(";",1)[0].split("=",1)[1]
             status,data,_=req("GET","/api/tasks",cookie=session)
             self.assertEqual(200,status);self.assertEqual(61,data["total"])
+            with patch('server.TEMPLATE_AUDIT_PATH', self.root/'missing-audit.json'):
+                self.assertEqual(503,req("GET","/api/template-audit",cookie=session)[0])
             self.assertEqual(403,req("POST","/api/sync",{},session,"https://evil.example")[0])
             status,feed,_=req("GET","/api/diagnostics?hours=0&limit=10",cookie=session)
             self.assertEqual(200,status)

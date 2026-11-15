@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh read-only SurvivalOps template quality inventory every ten minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=10min
+Persistent=true
+Unit=survivalops-template-audit.service
+
+[Install]
+WantedBy=timers.target
