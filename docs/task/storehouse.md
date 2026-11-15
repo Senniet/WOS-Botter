@@ -82,3 +82,20 @@ at least one chest or stamina collection. If the visit ends in RETRY_ON_ERROR
 without any confirmed collection, the bounded retry is persisted and an
 unknown-outcome failure is propagated to the scheduler. A confirmed collection
 is retained as partial progress if a later action in the same visit is unknown.
+
+## Known full-stamina capacity state
+
+A confirmed live `A Warm Welcome` Claim tap can display the toast
+`Chief Stamina is maxed at 500` without dismissing the reward dialog. This is a
+game capacity block, not a missing Claim button. A saved, redacted 2026-11-15
+post-tap frame now anchors a specific capacity-notice template. After positively
+identifying this toast, close the reward dialog through its verified close icon
+and verify the dialog title disappears. Defer another capacity-dependent claim
+for 30 minutes without crediting stamina or daily-mission progress. If the
+notice or close action is uncertain, retain the five-minute unknown retry;
+never silently record a successful claim.
+
+The numeric stamina cap varies by account and Furnace progression, so future
+independent live captures must extend the detector when different values are
+seen. Avoid relying on a single generic `Chief Stamina` string, since an
+unrelated tooltip can contain that title.
