@@ -118,3 +118,44 @@ ADB-toegang en ontvangt geen gebruikersafbeeldingen in het browserantwoord.
 Het dashboard toont **nooit** een misser als bewezen defect of een hit als
 bewezen geslaagde game-actie. De bestaande handmatige QA-statussen blijven
 ongewijzigd.
+
+## Gezamenlijke testronde per taak (operator + ChatGPT)
+
+Onder elke taak staat **Gezamenlijke testronde**. Start met de werkelijk
+geïnstalleerde Windows-appversie; daarmee begint een nieuwe, onafhankelijke
+controle en wordt de taak `testing`. Start daarna één Task Coach-run voor
+precies die taak. Koppel de nieuwe run-ID na de upload; het dashboard toetst
+of het bewijs bij deze taak en deze ronde hoort. De appversie wordt momenteel
+handmatig opgegeven en is nog niet door de uploader bewezen.
+
+Zeven controlepunten worden met een concrete waarneming gemarkeerd als `pass`,
+`fail` of `blocked`:
+
+1. Emulator, resolutie/DPI en spelinstellingen gecontroleerd.
+2. Startscherm, navigatie en pop-ups correct afgehandeld.
+3. Juiste knop op het juiste scherm herkend.
+4. Correcte, veilige actie uitgevoerd.
+5. Spelresultaat na de actie onafhankelijk bevestigd.
+6. Terugkeer en volgende taakplanning kloppen.
+7. Regressietest en nieuwe live-run na een codewijziging geslaagd.
+
+Er is **geen succes-vinkje op basis van alleen templates of een klik**. Bij
+wijzigen van een controlepunt vervallen de bestaande goedkeuringen. Openstaande
+issues blokkeren de definitieve bevestiging; een nieuw issue maakt een
+lopende testronde onvolledig. Alleen wanneer alle zeven punten geslaagd zijn,
+een nieuwe Task Coach-run gekoppeld is, de operator zijn gamecontrole
+bevestigt en ChatGPT het bewijs en de code heeft beoordeeld, markeert de
+server `verified`. Een nieuwe ronde moet alle stappen opnieuw bewijzen.
+
+ChatGPT bedient via SSH dezelfde gegevens met:
+
+```bash
+python3 qa_ctl.py qa-start TRAINING_TROOPS 1.1.66
+python3 qa_ctl.py qa-evidence TRAINING_TROOPS 20261115-194511-wi5khp
+python3 qa_ctl.py qa-check TRAINING_TROOPS recognition fail "De zichtbare knop werd niet herkend"
+python3 qa_ctl.py qa-approve TRAINING_TROOPS "Screenshots en nieuwe live-resultaten onafhankelijk beoordeeld"
+```
+
+De `qa-approve`-opdracht kan alleen na de echte, nieuwe run en alle zeven
+geslaagde stappen. De web-UI kan niet namens ChatGPT goedkeuren en kan nooit
+de emulator bedienen, geld uitgeven of templates vervangen.

@@ -136,11 +136,76 @@ async function patchTask(key,changes){
  finally{busy=false;}
 }
 async function verify(task){
- if(task.status!=="verified"&&!confirm('Bevestig je dat "'+task.label+'" echt volledig werkt in de emulator?')){
-  return;
- }
  if(selected!==task.key){selected=task.key;await loadDetail(selected,true);}
- return patchTask(task.key,{status:task.status==="verified"?"working":"verified"});
+ const panel=$('qa-panel');
+ if(panel){panel.scrollIntoView({behavior:'smooth',block:'start'});}
+ showToast('Afvinken kan pas na de gezamenlijke testronde en twee bevestigingen.');
+}
+async function updateQa(key, action, payload){
+ try{
+  await request('/api/tasks/'+encodeURIComponent(key)+'/qa/'+action,
+   {method:'POST',body:JSON.stringify(payload)});
+  notesDirty=false;await reload({quiet:true});
+  showToast('Testronde bijgewerkt.');
+ }catch(e){showToast(e.message,true);}
+}
+function renderQa(t,qa){
+ const sectionBox=section('Gezamenlijke testronde');
+ sectionBox.id='qa-panel';
+ sectionBox.append(node('p','detail-help',
+  'Eén testversie en één nieuwe Task Coach-run. Per stap vastleggen wat het spel werkelijk deed. Alleen jij bevestigt de gamekant; ChatGPT controleert de logs, screenshotregressie en code. Beide goedkeuringen zijn verplicht.'));
+ if(!qa){
+  sectionBox.append(node('p','detail-help','Nog geen testronde voor deze taak geregistreerd. De oude vinkjes zijn historische vermeldingen, geen gezamenlijke verificatie.'));
+ }else{
+  const r=qa.round;
+  sectionBox.append(node('div','qa-run-head','Ronde '+r.id+' · versie '+r.build+' · '+dateText(r.started_at)));
+  sectionBox.append(node('p','detail-help','Task Coach-bewijs: '+(r.coach_run||'nog niet gekoppeld')));
+  if(r.completed_at)sectionBox.append(node('div','verification','✓ Door jou én ChatGPT geverifieerd op '+dateText(r.completed_at)));
+  if(r.superseded_at)sectionBox.append(node('div','detail-help','Deze ronde is vervangen door een nieuwe.'));
+  const checks=new Map(qa.checks.map(c=>[c.step,c]));
+  for(const spec of qa.steps){
+   const c=checks.get(spec.id)||{result:'pending',note:'',actor:''};
+   const wrap=node('div','qa-step');
+   wrap.append(node('div','qa-step-title',spec.label));
+   const sel=node('select','field-input');
+   for(const [value,label] of [['pending','Nog niet gecontroleerd'],['pass','Werkt'],['fail','Werkt niet'],['blocked','Nu niet mogelijk']]){
+    const opt=node('option','',label);opt.value=value;sel.append(opt);
+   }
+   sel.value=c.result;
+   const note=formInput('textarea','Wat zag je? Welke stap/screenshot bewijst dit?','qa-step-note');
+   note.value=c.note;note.maxLength=1200;
+   const save=node('button','outline','Stap vastleggen');save.type='button';
+   save.disabled=!!r.completed_at;
+   save.addEventListener('click',()=>updateQa(t.key,'check',{step:spec.id,result:sel.value,note:note.value}));
+   wrap.append(sel,note,save);
+   if(c.actor)wrap.append(node('div','muted',c.actor+' · '+dateText(c.updated_at)));
+   sectionBox.append(wrap);
+  }
+  if(!r.completed_at){
+   const evidence=formInput('input','Bijv. 20261115-194511-wi5khp');
+   evidence.value=r.coach_run||'';evidence.maxLength=64;
+   const attach=node('button','outline','Task Coach-run koppelen');attach.type='button';
+   attach.addEventListener('click',()=>updateQa(t.key,'attach',{coach_run:evidence.value.trim()}));
+   sectionBox.append(node('div','field-label','Nieuwe Task Coach-run (na start van deze testronde)'),evidence,attach);
+   const opNote=formInput('textarea','Welke acties en resultaten heb je zelf in de game gecontroleerd?','qa-step-note');
+   opNote.value=r.operator_note||'';opNote.maxLength=1200;
+   const sign=node('button','primary',r.operator_signed_at?'✓ Jij hebt bevestigd':'Mijn test bevestigen');
+   sign.type='button';sign.disabled=!!r.operator_signed_at;
+   sign.addEventListener('click',()=>updateQa(t.key,'operator-sign',{note:opNote.value}));
+   sectionBox.append(node('div','field-label','Jouw bevestiging (na alle zeven werkende stappen)'),opNote,sign);
+   sectionBox.append(node('p','detail-help','Bevestiging door ChatGPT: '+(r.reviewer_signed_at?dateText(r.reviewer_signed_at):'nog niet gegeven')));
+  }
+ }
+ const form=node('div','qa-start');
+ const build=formInput('input','Appversie, bijvoorbeeld 1.1.66');build.maxLength=40;
+ const start=node('button','outline','Nieuwe testronde starten');start.type='button';
+ start.addEventListener('click',()=>{
+  if(qa&&!confirm('Dit vervangt de openstaande testronde. Alle controlepunten moeten opnieuw worden getest. Doorgaan?'))return;
+  updateQa(t.key,'start',{build:build.value.trim()});
+ });
+ form.append(node('div','field-label','Versioneer iedere hercontrole'),build,start);
+ sectionBox.append(form);
+ return sectionBox;
 }
 function renderDetail(){
  const wrap=$("detail"),data=details;if(!data)return;
@@ -155,8 +220,10 @@ function renderDetail(){
  for(const [k,v] of Object.entries(labels)){const option=node("option","",v);option.value=k;select.append(option);}
  select.value=t.status;
  select.addEventListener("change",async ()=>{
-  if(select.value==="verified"&&t.status!=="verified"&&!confirm("Is deze taak daadwerkelijk volledig werkend getest?")){
-    select.value=t.status;return;
+  if(select.value==="verified"&&t.status!=="verified"){
+    select.value=t.status;
+    verify(t);
+    return;
   }
   await patchTask(t.key,{status:select.value,notes:textarea.value});
  });
@@ -166,7 +233,7 @@ function renderDetail(){
  textarea.addEventListener("input",()=>{notesDirty=true;});
  const save=node("button","primary","Notities opslaan");save.type="button";
  save.addEventListener("click",()=>patchTask(t.key,{notes:textarea.value,status:select.value}));
- const verifyBtn=node("button","outline verify-btn",t.status==="verified"?"✓ Werkt — afgevinkt":"✓ Markeer als volledig werkend");
+ const verifyBtn=node("button","outline verify-btn",t.status==="verified"?"✓ Eerder afgevinkt":"Samen testen en afvinken");
  verifyBtn.type="button";verifyBtn.setAttribute("aria-pressed",String(t.status==="verified"));
  verifyBtn.addEventListener("click",()=>verify(t));
  edit.append(label,select,noteLabel,textarea,save,verifyBtn);
@@ -176,6 +243,7 @@ function renderDetail(){
  }else edit.append(node("p","detail-help","Vink pas af na een echte test. Code- of screenshottests alleen zijn geen bewijs van volledige werking."));
  edit.append(node("div","detail-help","Laatst aangepast: "+dateText(t.updated_at)+" · versie "+t.version));
  wrap.append(edit,divider());
+ wrap.append(renderQa(t,data.qa),divider());
  const issueSection=section("Openstaande fouten ("+data.issues.filter(i=>i.state==="open").length+")");
  const issues=data.issues.sort((a,b)=>(a.state==="open"?-1:1)-(b.state==="open"?-1:1)||b.id-a.id);
  if(!issues.length)issueSection.append(node("div","muted","Nog geen handmatige foutmeldingen."));
