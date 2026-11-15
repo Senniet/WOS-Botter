@@ -534,7 +534,30 @@ public class DebuggingLayoutController {
     }
 
     @FXML
+    private void handleAssignAuditTemplate(ActionEvent event) {
+        File selected = templateListView.getSelectionModel().getSelectedItem();
+        String group = auditGroupComboBox.getValue();
+        if (selected == null || group == null) {
+            log("Select both a template and the screen group where it SHOULD appear.");
+            return;
+        }
+        String resource = ScreenTemplateAudit.resourceForTemplate(selected.toPath());
+        try {
+            Path root = WorkspacePaths.current().cache().resolve("template-screen-library");
+            ScreenTemplateAudit.assign(root, resource, group);
+            log("Expected context assigned: " + resource + " -> " + group
+                    + ". Kept locally; it does NOT modify in-game recognition rules.");
+        } catch (Exception ex) {
+            log("Could not save expected screen: " + ex.getMessage());
+        }
+    }
+
+    @FXML
     private void handleAuditLibrary(ActionEvent event) {
+        if (btnRunAction.isDisabled()) {
+            log("A screenshot scan is already running; finish it before auditing a group.");
+            return;
+        }
         String group = auditGroupComboBox.getValue();
         if (group == null || group.isBlank()) {
             log("Choose a screen group first.");
@@ -555,8 +578,15 @@ public class DebuggingLayoutController {
             return;
         }
         List<Path> negatives = ScreenTemplateAudit.negativeScreens(screenGroups, group);
+        final Map<String, String> assignments;
+        try {
+            assignments = ScreenTemplateAudit.loadAssignments(root);
+        } catch (java.io.IOException ex) {
+            log("Could not load saved template assignments: " + ex.getMessage());
+            return;
+        }
         List<File> candidates = allTemplates.stream()
-                .filter(file -> ScreenTemplateAudit.groupForTemplate(file.toPath()).equals(group)).toList();
+                .filter(file -> ScreenTemplateAudit.assignedGroup(file.toPath(), assignments).equals(group)).toList();
         if (candidates.isEmpty()) {
             log("No templates assigned to group " + group + ".");
             return;
@@ -564,6 +594,7 @@ public class DebuggingLayoutController {
         log("Auditing " + candidates.size() + " " + group + " templates against "
                 + positives.size() + " positive and " + negatives.size() + " other-screen captures.");
         btnAuditLibrary.setDisable(true);
+        btnRunAction.setDisable(true);
         javafx.concurrent.Task<List<String>> task = new javafx.concurrent.Task<>() {
             @Override
             protected List<String> call() throws Exception {
@@ -609,6 +640,8 @@ public class DebuggingLayoutController {
                             .filter(Double::isFinite).max().orElse(0);
                     ScreenTemplateAudit.Verdict verdict = ScreenTemplateAudit.classify(positiveScores,
                             negativeScores, negativeFrames.size(), sprite.getWidth(), sprite.getHeight());
+                    verdict = ScreenTemplateAudit.restrictSharedGroup(group,
+                            assignments.containsKey(resource), verdict);
                     counts.merge(verdict, 1, Integer::sum);
                     rows.add(ScreenTemplateAudit.csvEscape(group) + ","
                             + ScreenTemplateAudit.csvEscape(resource) + "," + positiveScores.size() + ","
@@ -638,12 +671,17 @@ public class DebuggingLayoutController {
         task.setOnSucceeded(done -> {
             for (String line : task.getValue()) log(line);
             btnAuditLibrary.setDisable(false);
+            btnRunAction.setDisable(false);
         });
         task.setOnFailed(failed -> {
             log("Screen library audit failed: " + task.getException());
             btnAuditLibrary.setDisable(false);
+            btnRunAction.setDisable(false);
         });
-        task.setOnCancelled(cancelled -> btnAuditLibrary.setDisable(false));
+        task.setOnCancelled(cancelled -> {
+            btnAuditLibrary.setDisable(false);
+            btnRunAction.setDisable(false);
+        });
         Thread worker = new Thread(task, "survivalops-context-template-audit");
         worker.setDaemon(true);
         worker.start();
@@ -766,6 +804,10 @@ public class DebuggingLayoutController {
 
     /** Non-destructive screenshot audit: absence on one frame is NOT a stale template. */
     private void scanVisibleTemplates() {
+        if (btnAuditLibrary.isDisabled()) {
+            log("A screen-library audit is already running.");
+            return;
+        }
         if (currentScreenshotFile == null || screenshotImageView.getImage() == null) {
             log("Capture or load a screenshot before scanning templates.");
             return;
@@ -779,6 +821,7 @@ public class DebuggingLayoutController {
             return;
         }
         btnRunAction.setDisable(true);
+        btnAuditLibrary.setDisable(true);
         log("Scanning " + candidates.size() + " templates on one screenshot (no taps)...");
         javafx.concurrent.Task<List<String>> task = new javafx.concurrent.Task<>() {
             @Override
@@ -853,12 +896,17 @@ public class DebuggingLayoutController {
         task.setOnSucceeded(event -> {
             for (String line : task.getValue()) log(line);
             btnRunAction.setDisable(false);
+            btnAuditLibrary.setDisable(false);
         });
         task.setOnFailed(event -> {
             log("Template scan failed: " + task.getException());
             btnRunAction.setDisable(false);
+            btnAuditLibrary.setDisable(false);
         });
-        task.setOnCancelled(event -> btnRunAction.setDisable(false));
+        task.setOnCancelled(event -> {
+            btnRunAction.setDisable(false);
+            btnAuditLibrary.setDisable(false);
+        });
         Thread worker = new Thread(task, "survivalops-template-audit");
         worker.setDaemon(true);
         worker.start();

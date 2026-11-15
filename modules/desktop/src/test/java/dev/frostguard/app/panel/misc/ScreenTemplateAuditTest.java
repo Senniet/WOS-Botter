@@ -34,6 +34,25 @@ class ScreenTemplateAuditTest {
                 classify(List.of(new Match(50, -1, -1), positive.get(0)), List.of(), 2, 40, 40));
     }
 
+    @Test void confidenceNeedsMajorityNotJustAnyTwoMatches() {
+        List<Match> observations = List.of(new Match(99, 100, 100),
+                new Match(98, 101, 102), new Match(96, 400, 500), new Match(95, 400, 501));
+        assertEquals(Verdict.POSITION_INCONSISTENT,
+                classify(observations, List.of(), 2, 45, 45));
+        assertEquals(Verdict.NOT_CONFIRMED,
+                classify(List.of(new Match(98, 100, 100), new Match(98, 101, 100),
+                        new Match(30, -1, -1)), List.of(), 2, 45, 45));
+    }
+
+    @Test void genericTemplateFoldersNeverVerifyWithoutAssignment() {
+        assertEquals(Verdict.GENERIC_GROUP_REVIEW,
+                restrictSharedGroup("serveemu", false, Verdict.VERIFIED_CONTEXT));
+        assertEquals(Verdict.VERIFIED_CONTEXT,
+                restrictSharedGroup("serveemu", true, Verdict.VERIFIED_CONTEXT));
+        assertEquals(Verdict.VERIFIED_CONTEXT,
+                restrictSharedGroup("home", false, Verdict.VERIFIED_CONTEXT));
+    }
+
     @Test void labelsAndStoresScreensInOwnWorkspace() throws Exception {
         Path screenshot = tmp.resolve("example.png");
         ImageIO.write(new BufferedImage(72, 128, BufferedImage.TYPE_INT_RGB), "png", screenshot.toFile());
@@ -43,6 +62,13 @@ class ScreenTemplateAuditTest {
         assertThrows(java.io.IOException.class, () -> save(tmp, "home", screenshot));
         assertEquals(1, loadScreens(tmp).get("home").size());
         assertThrows(IllegalArgumentException.class, () -> save(tmp, "../../private", screenshot));
+        assertThrows(java.io.IOException.class, () -> save(tmp, "alliance", screenshot));
+        var other = tmp.resolve("different.png");
+        ImageIO.write(new BufferedImage(40, 60, BufferedImage.TYPE_INT_RGB), "png", other.toFile());
+        assertThrows(java.io.IOException.class, () -> save(tmp, "alliance", other));
+        assign(tmp, "/templates/serveemu/allianceHeader.png", "alliance");
+        assertEquals("alliance", assignedGroup(Path.of("/x/templates/serveemu/allianceHeader.png"),
+                loadAssignments(tmp)));
         assertEquals("home", groupForTemplate(Path.of("/x/templates/home/newSurvivors.png")));
         assertEquals("world", groupForTemplate(Path.of("/x/templates/world.png")));
         assertEquals("unclassified", groupForTemplate(Path.of("/x/random/image.png")));

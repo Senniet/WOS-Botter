@@ -62,6 +62,7 @@
                     <Button text="Save screen" onAction="#handleSaveAuditScreen" styleClass="compact-button"/>
                     <Button fx:id="btnAuditLibrary" text="Audit group" onAction="#handleAuditLibrary" styleClass="compact-button"/>
                 </HBox>
+                <Button text="Assign selected template to screen group" onAction="#handleAssignAuditTemplate" styleClass="compact-button" maxWidth="Infinity"/>
                 <HBox spacing="10" alignment="CENTER_LEFT">
                     <ComboBox fx:id="actionComboBox" maxWidth="Infinity" promptText="Choose Action" styleClass="combo-box" HBox.hgrow="ALWAYS"/>
                     <Button fx:id="btnRunAction" mnemonicParsing="false" text="Run" onAction="#handleRunAction" styleClass="compact-button"/>

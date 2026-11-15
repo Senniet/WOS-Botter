@@ -3,6 +3,7 @@ package dev.frostguard.app.panel.misc;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -12,6 +13,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Properties;
 import java.util.UUID;
 import javax.imageio.ImageIO;
 
@@ -42,30 +44,41 @@ public final class ScreenTemplateAudit {
         POSITION_INCONSISTENT,
         NOT_CONFIRMED,
         NEEDS_TWO_FRAMES,
-        SMALL_TEMPLATE_REVIEW
+        SMALL_TEMPLATE_REVIEW,
+        GENERIC_GROUP_REVIEW
     }
 
     public static Verdict classify(List<Match> positive, List<Match> negative,
                                    int independentNegativeGroups, int templateWidth, int templateHeight) {
         if (positive.size() < 2) return Verdict.NEEDS_TWO_FRAMES;
+        int required = Math.max(2, (positive.size() * 3 + 3) / 4); // at least 75% strong
         List<Match> strong = positive.stream().filter(Match::strong).toList();
-        if (strong.size() < 2) return Verdict.NOT_CONFIRMED;
-        boolean stable = false;
-        for (int i = 0; i < strong.size() && !stable; i++) {
-            for (int j = i + 1; j < strong.size(); j++) {
-                if (Math.abs(strong.get(i).x() - strong.get(j).x())
-                        + Math.abs(strong.get(i).y() - strong.get(j).y()) <= POSITION_TOLERANCE) {
-                    stable = true;
-                    break;
-                }
+        if (strong.size() < required) return Verdict.NOT_CONFIRMED;
+        int cluster = 0;
+        for (Match candidate : strong) {
+            int near = 0;
+            for (Match other : strong) {
+                if (Math.abs(candidate.x() - other.x())
+                        + Math.abs(candidate.y() - other.y()) <= POSITION_TOLERANCE) near++;
             }
+            cluster = Math.max(cluster, near);
         }
-        if (!stable) return Verdict.POSITION_INCONSISTENT;
+        if (cluster < required) return Verdict.POSITION_INCONSISTENT;
         // Small symbols (digits, plus/minus, etc.) can match unrelated UI.
         if (templateWidth < 18 || templateHeight < 18) return Verdict.SMALL_TEMPLATE_REVIEW;
         if (negative.stream().anyMatch(Match::strong)) return Verdict.CROSS_SCREEN_COLLISION;
         if (independentNegativeGroups < 2) return Verdict.CONSISTENT_NEEDS_NEGATIVES;
         return Verdict.VERIFIED_CONTEXT;
+    }
+
+    /** A resource folder like serveemu contains templates from many real screens. */
+    public static Verdict restrictSharedGroup(String group, boolean explicitlyAssigned, Verdict verdict) {
+        if (!explicitlyAssigned && verdict == Verdict.VERIFIED_CONTEXT
+                && java.util.Set.of("serveemu", "common", "numbers", "navigation", "validation",
+                        "shortcuts", "sidebar", "leftmenu", "skip").contains(group)) {
+            return Verdict.GENERIC_GROUP_REVIEW;
+        }
+        return verdict;
     }
 
     public static String groupForTemplate(Path file) {
@@ -80,6 +93,60 @@ public final class ScreenTemplateAudit {
         return "unclassified";
     }
 
+    /** Map legacy/shared image paths to the screen where they are expected. */
+    public static Map<String, String> loadAssignments(Path root) throws IOException {
+        Properties props = new Properties();
+        Path path = root.resolve("template-groups.properties");
+        if (Files.isRegularFile(path)) {
+            try (var reader = Files.newBufferedReader(path)) { props.load(reader); }
+        }
+        Map<String, String> result = new LinkedHashMap<>();
+        for (String name : props.stringPropertyNames()) {
+            String group = props.getProperty(name);
+            if (name.startsWith("/templates/") && group.matches("[a-z0-9_-]{2,40}")) {
+                result.put(name, group);
+            }
+        }
+        return result;
+    }
+
+    public static void assign(Path root, String resource, String group) throws IOException {
+        if (resource == null || !resource.startsWith("/templates/")
+                || group == null || !group.matches("[a-z0-9_-]{2,40}")) {
+            throw new IllegalArgumentException("Invalid template or screen label");
+        }
+        Map<String, String> assignments = loadAssignments(root);
+        assignments.put(resource, group);
+        Properties props = new Properties();
+        props.putAll(assignments);
+        Files.createDirectories(root);
+        Path staged = Files.createTempFile(root, "groups", ".tmp");
+        try {
+            try (var writer = Files.newBufferedWriter(staged)) {
+                props.store(writer, "Local-only screen labels for template auditing");
+            }
+            try {
+                Files.move(staged, root.resolve("template-groups.properties"),
+                        StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (java.nio.file.AtomicMoveNotSupportedException ex) {
+                Files.move(staged, root.resolve("template-groups.properties"),
+                        StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            Files.deleteIfExists(staged);
+        }
+    }
+
+    public static String resourceForTemplate(Path template) {
+        String path = template.toAbsolutePath().normalize().toString().replace('\\', '/');
+        int marker = path.lastIndexOf("/templates/");
+        return marker < 0 ? "" : path.substring(marker);
+    }
+
+    public static String assignedGroup(Path template, Map<String, String> assignments) {
+        return assignments.getOrDefault(resourceForTemplate(template), groupForTemplate(template));
+    }
+
     public static Path save(Path root, String group, Path screenshot) throws IOException {
         if (group == null || !group.matches("[a-z0-9_-]{2,40}")) {
             throw new IllegalArgumentException("Select a valid screen group");
@@ -87,6 +154,15 @@ public final class ScreenTemplateAudit {
         BufferedImage image = ImageIO.read(screenshot.toFile());
         if (image == null || image.getWidth() <= 0 || image.getHeight() <= 0) {
             throw new IOException("Screenshot is not a valid image");
+        }
+        // Avoid comparing matches from emulators with incompatible resolutions.
+        for (List<Path> existing : loadScreens(root).values()) {
+            if (existing.isEmpty()) continue;
+            BufferedImage prior = ImageIO.read(existing.get(0).toFile());
+            if (prior == null || image.getWidth() != prior.getWidth()
+                    || image.getHeight() != prior.getHeight()) {
+                throw new IOException("Different screenshot resolution; use one resolution per library");
+            }
         }
         Path directory = root.resolve("screens").resolve(group);
         Files.createDirectories(directory);
@@ -103,6 +179,16 @@ public final class ScreenTemplateAudit {
                 if (Files.size(existing) == Files.size(target) && Files.mismatch(existing, target) == -1) {
                     Files.deleteIfExists(target);
                     throw new IOException("Identical screenshot already saved. Capture a changed frame.");
+                }
+            }
+        }
+        // The same image cannot be evidence for two DIFFERENT screen labels.
+        for (Map.Entry<String, List<Path>> entry : loadScreens(root).entrySet()) {
+            if (entry.getKey().equals(group)) continue;
+            for (Path existing : entry.getValue()) {
+                if (Files.size(existing) == Files.size(target) && Files.mismatch(existing, target) == -1) {
+                    Files.deleteIfExists(target);
+                    throw new IOException("Identical screen already labelled as " + entry.getKey());
                 }
             }
         }
