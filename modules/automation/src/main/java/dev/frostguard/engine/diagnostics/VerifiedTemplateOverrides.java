@@ -80,10 +80,10 @@ public final class VerifiedTemplateOverrides {
     /** Only accept very strong matches near a pre-validated spot at the same resolution. */
     public static ImageSearchResultData tryMatch(RawImageData frame, String resource, double threshold,
                                                    PointData searchTopLeft, PointData searchBottomRight) {
+        if (resource == null || !isActive(resource) || frame == null || !frame.isValid()) return null;
         Path target;
         try { target = pathFor(resource); }
         catch (IllegalArgumentException ex) { return null; }
-        if (!isActive(resource) || frame == null || !frame.isValid()) return null;
         if (!Files.isRegularFile(target)) { ACTIVE.put(resource, false); return null; }
         try {
             Properties props = new Properties();

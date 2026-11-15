@@ -560,16 +560,18 @@ public class DebuggingLayoutController {
             log("Another task is executing. Try again when it has completed.");
             return;
         }
+        boolean newlyArmed = false;
         try {
             var status = TaskTemplateCoach.arm(profile.getId(), profile.getEmulatorNumber(), task,
                     coachAutoRepairCheckBox.isSelected());
+            newlyArmed = true;
             queue.runNow(task, false);
             log("Task Coach armed: " + task.getName() + " for selected profile."
                     + " The routine will execute once via the existing queue.");
             log("Evidence will be saved locally in: " + status.directory());
             refreshTaskCoachStatus(false);
         } catch (Exception ex) {
-            TaskTemplateCoach.stop();
+            if (newlyArmed) TaskTemplateCoach.stop();
             log("Could not start Task Coach: " + ex.getMessage());
         }
     }
