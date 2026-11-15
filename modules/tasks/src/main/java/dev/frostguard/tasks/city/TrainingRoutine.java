@@ -89,13 +89,16 @@ private static final PointData TAB_SWIPE_LEFT_START_VALUE = new PointData(500, 1
 
 private static final PointData TAB_SWIPE_LEFT_END_VALUE = new PointData(630, 143);
 
-private static final PointData TROOP_LIST_LEFT_VALUE = new PointData(73, 785);
+// Edge-origin gestures on Serve-EMU can trigger Android BACK. Task Coach
+// captured City immediately after the old x=690/y=785 tier drag.
+// Keep tier-carousel drags safely inside the actual card strip (y~=710).
+private static final PointData TROOP_LIST_LEFT_VALUE = new PointData(165, 710);
 
-private static final PointData TROOP_LIST_RIGHT_VALUE = new PointData(690, 785);
+private static final PointData TROOP_LIST_RIGHT_VALUE = new PointData(555, 710);
 
-private static final PointData TROOP_SCROLL_START_VALUE = new PointData(530, 773);
+private static final PointData TROOP_SCROLL_START_VALUE = new PointData(545, 710);
 
-private static final PointData TROOP_SCROLL_END_VALUE = new PointData(490, 773);
+private static final PointData TROOP_SCROLL_END_VALUE = new PointData(185, 710);
 
 private static final PointData PROMOTION_CONFIRM_POINT_VALUE = new PointData(523, 900);
 
@@ -117,6 +120,14 @@ private static final int MINISTRY_PROTECTION_WINDOW_MINUTES_VALUE = 30;
 private static final int MAX_SUNFIRE_TAB_SWIPES_LIMIT = 3;
 
 private static final int TAB_RESET_SWIPES_VALUE = 2;
+
+private static final int MAX_VERIFIED_CAROUSEL_SWIPES = 3;
+
+private static final int MAX_SEQUENTIAL_UNLOCK_PAGES = 6;
+
+private static final PointData VERIFIED_BLUE_TRAIN_POINT = new PointData(525, 1108);
+
+private int carouselSwipesRemaining;
 
 private List<AreaData> queuesToCheck;
 
@@ -313,7 +324,8 @@ private boolean performLimitedTrainingForAppointment(QueueSlot queue) {
                 neededTime.toSecondsPart())));
 
 
-        if (selectHighestUnlockedTroopLevel(troopTypeBeingTrained) == -1) {
+        if (!isVerifiedPreselectedHighestTier()
+                && selectHighestUnlockedTroopLevel(troopTypeBeingTrained) == -1) {
             logWarning(routineLogTrainingLine("No unlocked troop level confirmed. Skipping limited training."));
             return false;
         }
@@ -327,9 +339,9 @@ private boolean performLimitedTrainingForAppointment(QueueSlot queue) {
             logWarning(routineLogTrainingLine("Could not read training data. Training maximum as fallback."));
 
 
-            pressTrainButton();
-            isPromotionTraining = true;
-            return true;
+            boolean submitted = pressTrainButton();
+            isPromotionTraining = submitted;
+            return submitted;
         }
 
         if (maxTroops == 0) {
@@ -337,8 +349,7 @@ private boolean performLimitedTrainingForAppointment(QueueSlot queue) {
             return false;
         }
 
-        trainOptimalTroopCountFlow(trainTime, maxTroops, neededTime);
-        return true;
+        return trainOptimalTroopCountFlow(trainTime, maxTroops, neededTime);
     }
 
 private void refreshMinistryAppointmentIfNeeded() {
@@ -442,6 +453,20 @@ private LocalDateTime extractTrainingCompletionTimeFlow() {
 private boolean performPromotionPriorityTraining(QueueSlot queue) {
         logInfo(routineLogTrainingLine("Executing promotion-priority training for " + queue.type().name()));
 
+        // On the new Serve-EMU layout, the game already highlights the
+        // highest trainable card; VI is selected, VII is visibly locked.
+        // The legacy tier templates never match this screen. Fall back to
+        // normal training only when TWO fresh frames verify the selected
+        // top tier plus the actual BLUE Train button. This preserves the
+        // task's basic training goal without guessing a promotion level.
+        if (isVerifiedPreselectedHighestTier()) {
+            logWarning(routineLogTrainingLine("Promotion tiers are not safely mapped on this "
+                    + "2026 panel; training the independently confirmed highest "
+                    + "unlocked selected tier instead of blindly swiping"));
+            isPromotionTraining = false;
+            return pressTrainButton();
+        }
+
         int maxLevel = selectHighestUnlockedTroopLevel(queue.type());
 
         if (maxLevel == -1) {
@@ -465,8 +490,7 @@ private boolean performPromotionPriorityTraining(QueueSlot queue) {
                 return false;
             }
             logInfo(routineLogTrainingLine("Reselected level " + selectedLevel + " for normal training."));
-            pressTrainButton();
-            return true;
+            return pressTrainButton();
         }
     }
 
@@ -584,7 +608,7 @@ private LocalDateTime manageTrainingButtonNotFound(QueueSlot queue) {
         return null;
     }
 
-private void trainOptimalTroopCountFlow(Duration trainTime, int maxTroops, Duration neededTime) {
+private boolean trainOptimalTroopCountFlow(Duration trainTime, int maxTroops, Duration neededTime) {
         String trainTimeStr = formatDurationFlow(trainTime);
         String neededTimeStr = formatDurationFlow(neededTime);
 
@@ -592,10 +616,9 @@ private void trainOptimalTroopCountFlow(Duration trainTime, int maxTroops, Durat
                 maxTroops, trainTimeStr, neededTimeStr)));
 
         if (trainTime.compareTo(neededTime) <= 0) {
-            trainMaximumTroopsFlow(trainTimeStr, neededTimeStr, maxTroops);
-        } else {
-            trainCalculatedTroopsFlow(trainTime, maxTroops, neededTime, trainTimeStr, neededTimeStr);
+            return trainMaximumTroopsFlow(trainTimeStr, neededTimeStr, maxTroops);
         }
+        return trainCalculatedTroopsFlow(trainTime, maxTroops, neededTime, trainTimeStr, neededTimeStr);
     }
 
 private boolean seekSunfireCastleWithSwipe() {
@@ -695,7 +718,7 @@ private boolean attemptTroopPromotionsFlow(TroopTypeShape troopType, int maxLeve
         return false;
     }
 
-private void trainCalculatedTroopsFlow(
+private boolean trainCalculatedTroopsFlow(
             Duration trainTime,
             int maxTroops,
             Duration neededTime,
@@ -703,6 +726,10 @@ private void trainCalculatedTroopsFlow(
             String neededTimeStr) {
 
         long secondsPerTroop = trainTime.getSeconds() / maxTroops;
+        if (secondsPerTroop <= 0) {
+            logWarning(routineLogTrainingLine("Invalid training time per troop. Refusing count division."));
+            return false;
+        }
         int troopsToTrain = (int) (neededTime.getSeconds() / secondsPerTroop);
 
         if (troopsToTrain > maxTroops) {
@@ -711,7 +738,7 @@ private void trainCalculatedTroopsFlow(
 
         if (troopsToTrain <= 0) {
             logWarning(routineLogTrainingLine("Calculated troops is zero or negative. Skipping training."));
-            return;
+            return false;
         }
 
         Duration calculatedTrainTime = Duration.ofSeconds(secondsPerTroop * troopsToTrain);
@@ -723,22 +750,17 @@ private void trainCalculatedTroopsFlow(
                 troopsToTrain, (double) secondsPerTroop, calculatedTimeStr)));
 
         inputTroopCountFlow(troopsToTrain);
-        pressTrainButton();
+        return pressTrainButton();
     }
 
 private void scrollToNextTroopTypeFlow() {
-        swipe(TROOP_SCROLL_START_VALUE, TROOP_SCROLL_END_VALUE);
-        sleepTask(200);
-
-        emuManager.captureScreen(EMULATOR_NUMBER);
+        safeTroopCarouselSwipe(TROOP_SCROLL_START_VALUE, TROOP_SCROLL_END_VALUE);
     }
 
 private void resetTroopListToStartFlow() {
-        logDebug(routineLogTrainingLine("Resetting troop list to the start."));
-        swipe(TROOP_LIST_LEFT_VALUE, TROOP_LIST_RIGHT_VALUE);
-        swipe(TROOP_LIST_LEFT_VALUE, TROOP_LIST_RIGHT_VALUE);
-        sleepTask(200);
-
+        logDebug(routineLogTrainingLine("Returning through verified troop carousel."));
+        safeTroopCarouselSwipe(TROOP_LIST_LEFT_VALUE, TROOP_LIST_RIGHT_VALUE);
+        safeTroopCarouselSwipe(TROOP_LIST_LEFT_VALUE, TROOP_LIST_RIGHT_VALUE);
     }
 
 private List<Integer> locateUnknownQueueIndices(List<QueueSlot> results) {
@@ -906,9 +928,20 @@ private Integer extractMaxTroopCountFlow() {
                     inTrainingInterface = true;
                 }
             } else {
-                logInfo(routineLogTrainingLine("Switching to tab: " + queue.type().name()));
-                switchTrainingTab(queue.type());
-                sleepTask(500); // UI transition delay
+                if (!isTrainingCampInterfaceVisible()) {
+                    logWarning(routineLogTrainingLine("Troop panel closed after previous queue; "
+                            + "reopening from verified City state rather than tapping City footer"));
+                    inTrainingInterface = false;
+                } else {
+                    logInfo(routineLogTrainingLine("Switching to tab: " + queue.type().name()));
+                    switchTrainingTab(queue.type());
+                    sleepTask(600); // UI transition delay
+                    if (!isTrainingCampInterfaceVisible()) {
+                        logWarning(routineLogTrainingLine("Training tab switch not verified; "
+                                + "refusing another blind footer tap"));
+                        inTrainingInterface = false;
+                    }
+                }
             }
 
             if (inTrainingInterface) {
@@ -959,11 +992,41 @@ private Integer extractMaxTroopCountFlow() {
     }
 
 private void resetTroopListToEndFlow() {
-        logDebug(routineLogTrainingLine("Resetting troop list to the end."));
-        swipe(TROOP_LIST_RIGHT_VALUE, TROOP_LIST_LEFT_VALUE);
-        swipe(TROOP_LIST_RIGHT_VALUE, TROOP_LIST_LEFT_VALUE);
-        sleepTask(200);
+        logDebug(routineLogTrainingLine("Moving within verified troop carousel (not screen edge)."));
+        carouselSwipesRemaining = MAX_VERIFIED_CAROUSEL_SWIPES;
+        if (carouselSwipesRemaining > 0) {
+            carouselSwipesRemaining--;
+            safeTroopCarouselSwipe(TROOP_LIST_RIGHT_VALUE, TROOP_LIST_LEFT_VALUE);
+        }
+    }
 
+    /** Prevent further drags as soon as the task exits the troop panel. */
+    static boolean insideTroopCarouselGesture(PointData from, PointData to) {
+        return from.getX() >= 100 && from.getX() <= 620
+                && to.getX() >= 100 && to.getX() <= 620
+                && from.getY() >= 640 && from.getY() <= 755
+                && to.getY() >= 640 && to.getY() <= 755
+                && Math.abs(from.getX() - to.getX()) >= 200
+                && Math.abs(from.getY() - to.getY()) <= 30;
+    }
+
+    private void safeTroopCarouselSwipe(PointData from, PointData to) {
+        if (!insideTroopCarouselGesture(from,to)) {
+            throw new IllegalArgumentException("Training carousel swipe unsafe near screen edge or outside tier row");
+        }
+        if (!isTrainingCampInterfaceVisible()) {
+            markWorkIncomplete("Training: carousel move refused outside confirmed training panel");
+            throw new IllegalStateException("Refusing tier swipe on City or unknown screen");
+        }
+        swipe(from, to, 330);
+        sleepTask(450);
+        if (!isTrainingCampInterfaceVisible()) {
+            logWarning(routineLogTrainingLine("Tier swipe left training panel; "
+                    + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+                            "training", "tier-swipe-left-panel")));
+            markWorkIncomplete("Training: tier carousel did not stay in training panel");
+            throw new IllegalStateException("Tier carousel swipe lost training panel; stop safely");
+        }
     }
 
 private boolean openUpTrainingInterface() {
@@ -1006,18 +1069,20 @@ private boolean openUpTrainingInterface() {
  * may be dismissed. Never click the normal game screen by assumption.
  */
 private boolean dismissConfirmedTroopUnlockOverlay() {
-        for (int attempt = 0; attempt < 2; attempt++) {
+        for (int attempt = 0; attempt < MAX_SEQUENTIAL_UNLOCK_PAGES; attempt++) {
             RawImageData before = emuManager.captureScreen(EMULATOR_NUMBER);
             if (!TrainingUnlockOverlay.visible(before)) return true;
             sleepTask(250);
             RawImageData confirmed = emuManager.captureScreen(EMULATOR_NUMBER);
             if (!TrainingUnlockOverlay.visible(confirmed)) return true;
             logInfo(routineLogTrainingLine("Confirmed troop-unlock animation (" + (attempt + 1)
-                    + "/2); dismissing explicit Tap anywhere prompt."));
+                    + "/" + MAX_SEQUENTIAL_UNLOCK_PAGES + "); dismissing explicit Tap anywhere prompt."));
             // This blank blue area has no buttons, purchases or game UI while
             // the prompt is visible. No tap if the visual gate is absent.
-            tapNear(new PointData(352, 1090));
-            sleepTask(650);
+            tapNear(new PointData(352, attempt % 2 == 0 ? 1090 : 1215));
+            // Sequential unlock animations (Infantry -> Lancer -> Marksman)
+            // need longer than the prior 650ms before the next frame.
+            sleepTask(1200);
             if (!TrainingUnlockOverlay.visible(emuManager.captureScreen(EMULATOR_NUMBER))) {
                 logInfo(routineLogTrainingLine("Troop-unlock animation dismissed; "
                         + "verifying next game screen."));
@@ -1140,6 +1205,16 @@ private QueueSlot inspectForStateKeywords(
         return null;
     }
 
+/** Use a stable game-selected highest unlocked tier before legacy template search. */
+private boolean isVerifiedPreselectedHighestTier() {
+        if (!isTrainingCampInterfaceVisible()) return false;
+        RawImageData first = emuManager.captureScreen(EMULATOR_NUMBER);
+        if (!TrainingPanelFrameEvidence.currentTopUnlockedTierIsTrainable(first)) return false;
+        sleepTask(240);
+        RawImageData next = emuManager.captureScreen(EMULATOR_NUMBER);
+        return TrainingPanelFrameEvidence.currentTopUnlockedTierIsTrainable(next);
+    }
+
 private int selectHighestUnlockedTroopLevel(TroopTypeShape troopType) {
         // 14:07 logs show 11 tier templates scanned on City after the
         // previous Train tap failed to open the troop interface. Never swipe
@@ -1175,9 +1250,10 @@ private TrainingTierSelector.TierState probeTroopTier(TemplatesEnum template) {
                 SearchConfigConstants.STRICT_MATCHING);
 
         if (!troop.isFound()) {
-            swipe(TROOP_SCROLL_END_VALUE, TROOP_SCROLL_START_VALUE);
-            sleepTask(200);
-            emuManager.captureScreen(EMULATOR_NUMBER);
+            if (carouselSwipesRemaining > 0) {
+                carouselSwipesRemaining--;
+                safeTroopCarouselSwipe(TROOP_SCROLL_START_VALUE, TROOP_SCROLL_END_VALUE);
+            }
             return TrainingTierSelector.TierState.NOT_VISIBLE;
         }
 
@@ -1195,11 +1271,11 @@ private TrainingTierSelector.TierState probeTroopTier(TemplatesEnum template) {
         return TrainingTierSelector.TierState.UNLOCKED;
     }
 
-private void trainMaximumTroopsFlow(String trainTimeStr, String neededTimeStr, int maxTroops) {
+private boolean trainMaximumTroopsFlow(String trainTimeStr, String neededTimeStr, int maxTroops) {
         logInfo(routineLogTrainingLine(String.format("Train time (%s) fits within available time (%s). Training MAX: %d",
                 trainTimeStr, neededTimeStr, maxTroops)));
 
-        pressTrainButton();
+        return pressTrainButton();
     }
 
 private String routineLogTrainingLine(String note) {
@@ -1285,11 +1361,14 @@ private List<TemplatesEnum> resolveTroopsTemplates(TroopTypeShape type) {
 
         if (!ministryAppointmentEnabled && prioritizePromotion) {
             return performPromotionPriorityTraining(queue);
-        } else {
-            if (selectHighestUnlockedTroopLevel(troopTypeBeingTrained) != -1) {
-                pressTrainButton();
-                return true;
-            }
+        }
+        if (isVerifiedPreselectedHighestTier()) {
+            logInfo(routineLogTrainingLine("Detected game's preselected highest unlocked tier "
+                    + "and BLUE Train button on two frames; no legacy-tier swipes needed"));
+            return pressTrainButton();
+        }
+        if (selectHighestUnlockedTroopLevel(troopTypeBeingTrained) != -1) {
+            return pressTrainButton();
         }
         return false;
     }
@@ -1625,61 +1704,59 @@ private void dismissPopupsFlow() {
         tapInside(POPUP_DISMISS_MIN_VALUE, POPUP_DISMISS_MAX_VALUE, 5, 200);
     }
 
-private void pressTrainButton() {
+private boolean pressTrainButton() {
+        // A fallback location is only allowed when the correct selected tier
+        // and the blue Train CTA were independently verified on two frames.
+        boolean verifiedSelected = isVerifiedPreselectedHighestTier();
         ImageSearchResultData trainButton = templateSearchHelper.locatePattern(
-                TRAINING_TRAIN_BUTTON,
-                SearchConfigConstants.DEFAULT_SINGLE);
+                TRAINING_TRAIN_BUTTON, SearchConfigConstants.DEFAULT_SINGLE);
 
         if (!trainButton.isFound()) {
-            // A stale screenshot after selecting the highest tier can miss the
-            // Train control. Refresh once; do not scan all tiers again.
             emuManager.captureScreen(EMULATOR_NUMBER);
             trainButton = templateSearchHelper.locatePattern(
                     TRAINING_TRAIN_BUTTON, SearchConfigConstants.DEFAULT_SINGLE);
         }
-        if (trainButton.isFound()) {
-            logInfo(routineLogTrainingLine("Train button located; submitting selected troop level."));
-            tapInside(trainButton.getPoint(), trainButton.getPoint(), 1, 500);
-
-            emuManager.captureScreen(EMULATOR_NUMBER);
-            ImageSearchResultData replenishAll = templateSearchHelper.locatePattern(
-                    REPLENISH_ALL_BUTTON,
-                    SearchConfigConstants.DEFAULT_SINGLE);
-
-            if (replenishAll.isFound()) {
-                logInfo(routineLogTrainingLine("Filling resources."));
-                tapInside(replenishAll.getPoint(), replenishAll.getPoint(), 1, 300);
-                sleepTask(300);
-                PointData replenishConfirm = new PointData(442, 1064);
-                // Do not repeat a purchase/resource confirmation three times.
-                // One tap has an uncertain outcome until the dialog disappears.
-                tapInside(replenishConfirm, replenishConfirm, 1, 300);
-                emuManager.captureScreen(EMULATOR_NUMBER);
-                ImageSearchResultData replenishStillOpen = templateSearchHelper.locatePattern(
-                        REPLENISH_ALL_BUTTON, SearchConfigConstants.DEFAULT_SINGLE);
-                if (replenishStillOpen.isFound()) {
-                    logWarning(routineLogTrainingLine("Replenish dialog still visible; "
-                            + "refusing to submit Train through the overlay"));
-                    return;
-                }
-                // The earlier Train coordinate belongs to a previous frame.
-                // Re-locate the control after the overlay has closed.
-                ImageSearchResultData freshTrain = templateSearchHelper.locatePattern(
-                        TRAINING_TRAIN_BUTTON, SearchConfigConstants.DEFAULT_SINGLE);
-                if (freshTrain.isFound()) {
-                    tapInside(freshTrain.getPoint(), freshTrain.getPoint(), 1, 500);
-                } else {
-                    logWarning(routineLogTrainingLine("Train control missing after replenishment; "
-                            + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
-                                    "training", "post-replenish-train-missing")));
-                }
-            }
-        } else {
-            logWarning(routineLogTrainingLine("Train button not detected after fresh capture; "
-                    + "not tapping an unverified position. "
-                    + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
-                            "training", "train-button-missing")));
+        if (!isTrainingCampInterfaceVisible()) {
+            logWarning(routineLogTrainingLine("Train refused: training panel no longer verified"));
+            return false;
         }
+        if (verifiedSelected) {
+            // Prevent a stale two-frame decision from turning into a tap if
+            // the panel or button changed during the template lookup.
+            if (!TrainingPanelFrameEvidence.currentTopUnlockedTierIsTrainable(
+                    emuManager.captureScreen(EMULATOR_NUMBER))) {
+                logWarning(routineLogTrainingLine("Selected tier or blue Train CTA "
+                        + "changed before input; refusing stale coordinate"));
+                return false;
+            }
+            logInfo(routineLogTrainingLine("Submitting confirmed 2026 blue Train button on "
+                    + "preselected highest available tier (final queue check still required)"));
+            tapNear(VERIFIED_BLUE_TRAIN_POINT, 7);
+        } else if (trainButton.isFound()) {
+            logInfo(routineLogTrainingLine("Train template located on confirmed panel; "
+                    + "submitting selected tier (final queue check still required)"));
+            tapInside(trainButton.getPoint(), trainButton.getPoint(), 1, 500);
+        } else {
+            logWarning(routineLogTrainingLine("No safe Train target; "
+                    + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+                            "training", "train-button-unverified")));
+            return false;
+        }
+
+        // Do not auto-consent to resource top-ups or currency dialogs: even
+        // a previously located button cannot be safely reused under a popup.
+        emuManager.captureScreen(EMULATOR_NUMBER);
+        ImageSearchResultData replenishAll = templateSearchHelper.locatePattern(
+                REPLENISH_ALL_BUTTON, SearchConfigConstants.DEFAULT_SINGLE);
+        if (replenishAll.isFound()) {
+            logWarning(routineLogTrainingLine("Resource replenishment required; "
+                    + "no automatic purchase or resource spend"));
+            markWorkIncomplete("Training: replenish dialog blocks verified start");
+            return false;
+        }
+        // True game completion is only established by subsequent sidebar
+        // queue IDLE -> TRAINING transition, not by this tap.
+        return true;
     }
 
 private boolean performPromotion(TemplatesEnum template, ImageSearchResultData promoteButton) {
