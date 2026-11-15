@@ -19,6 +19,10 @@ ls=sub.add_parser("list");ls.add_argument("--status",choices=sorted(STATUS_VALUE
 upd=sub.add_parser("mark");upd.add_argument("task");upd.add_argument("status",choices=sorted(STATUS_VALUES));upd.add_argument("--notes");upd.add_argument("--evidence",help="Mandatory before marking VERIFIED in a CLI")
 issue=sub.add_parser("issue");issue.add_argument("task");issue.add_argument("title");issue.add_argument("--detail",default="");issue.add_argument("--severity",choices=["low","medium","high","critical"],default="medium")
 fix=sub.add_parser("resolve");fix.add_argument("issue_id",type=int)
+qa_start=sub.add_parser('qa-start');qa_start.add_argument('task');qa_start.add_argument('build')
+qa_attach=sub.add_parser('qa-evidence');qa_attach.add_argument('task');qa_attach.add_argument('run_id')
+qa_check=sub.add_parser('qa-check');qa_check.add_argument('task');qa_check.add_argument('step');qa_check.add_argument('result',choices=['pending','pass','fail','blocked']);qa_check.add_argument('note')
+qa_approve=sub.add_parser('qa-approve');qa_approve.add_argument('task');qa_approve.add_argument('note')
 sub.add_parser("sync")
 args=p.parse_args()
 board=Board(args.db,args.catalog,args.diagnostics,args.auth)
@@ -56,5 +60,12 @@ elif args.action=="resolve":
  if not board.edit_issue(args.issue_id,{"state":"closed"},"ChatGPT"):
   raise SystemExit("Unknown issue")
  print("Closed issue",args.issue_id)
+elif args.action in ('qa-start','qa-evidence','qa-check','qa-approve'):
+ if args.action=='qa-start': status,result=board.protocol.begin(args.task,args.build,'ChatGPT')
+ elif args.action=='qa-evidence': status,result=board.protocol.attach(args.task,args.run_id,'ChatGPT')
+ elif args.action=='qa-check': status,result=board.protocol.check(args.task,args.step,args.result,args.note,'ChatGPT')
+ else: status,result=board.protocol.sign(args.task,'reviewer',args.note)
+ print(json.dumps({'status':status,'qa':result},ensure_ascii=False,indent=2))
+ if status!='ok':raise SystemExit(1)
 elif args.action=="sync":
  print("New diagnostics:",board.sync_diagnostics(force=True))

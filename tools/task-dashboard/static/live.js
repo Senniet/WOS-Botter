@@ -240,6 +240,7 @@
   }
   async function open(task="all"){
     if(notesDirty&&!confirm("Je niet-opgeslagen notities verlaten?"))return;
+    window.TemplateAudit?.close();
     notesDirty=false;
     state.visible=true;
     state.selected=null;state.detail=null;

@@ -7,8 +7,11 @@
   <title>SurvivalOps · QA Dashboard</title>
   <link rel="stylesheet" href="/style.css">
   <link rel="stylesheet" href="/live.css">
-  <script defer src="/app.js"></script>
+  <link rel="stylesheet" href="/templates.css">
+  <link rel="stylesheet" href="/qa.css">
+  <script defer src="/app.js?v=qa-save-20261115b"></script>
   <script defer src="/live.js"></script>
+  <script defer src="/templates.js"></script>
 </head>
 <body>
 <div id="login" class="login-overlay" hidden>
@@ -27,7 +30,7 @@
 <header class="topbar">
  <div class="topbar-inner">
   <div class="brand"><div class="brand-logo small">S<span>O</span></div><div><strong>SurvivalOps</strong><div class="brand-sub">QA Control Center <span class="bullet">·</span> Gedeelde takenlijst</div></div></div>
-  <div class="top-actions"><span class="private"><span class="dot"></span> LAN · webserver</span><button id="live-nav" class="ghost" type="button">◉ Live diagnostiek</button><button id="refresh" class="ghost" type="button" title="Diagnostiek opnieuw inladen">↻ Vernieuwen</button><button id="logout" class="ghost" type="button">Uitloggen</button></div>
+  <div class="top-actions"><span class="private"><span class="dot"></span> LAN · webserver</span><button id="template-nav" class="ghost" type="button">▧ Templates</button><button id="live-nav" class="ghost" type="button">◉ Live diagnostiek</button><button id="refresh" class="ghost" type="button" title="Diagnostiek opnieuw inladen">↻ Vernieuwen</button><button id="logout" class="ghost" type="button">Uitloggen</button></div>
  </div>
 </header>
 <main class="shell">
@@ -87,6 +90,28 @@
      </div>
      <aside class="live-detail-panel"><div id="live-detail" class="live-detail-inner"><div class="detail-placeholder">Selecteer een melding om de debuggegevens en screenshot te bekijken.</div></div></aside>
    </div>
+ </section>
+ <section id="template-section" class="audit-dashboard" hidden>
+   <div class="audit-heading">
+     <div><div class="eyebrow">VOLLEDIGE INVENTARIS · ALLE MEEGELEVERDE TEMPLATES</div>
+       <h2>Templatecontrole</h2>
+       <p>Vergelijk originele Frostguard-afbeeldingen, ontbrekende bestanden, werkelijk waargenomen herkenning en codegebruik. Alleen-lezen: geen automatische klikken of templatevervanging.</p>
+     </div><button id="template-back" class="outline" type="button">← Terug naar taken</button>
+   </div>
+   <div id="template-summary" class="audit-summary"></div>
+   <p class="audit-help">Geen match betekent niet dat een template kapot is. Een geslaagde match betekent niet dat de spelactie werkt. Controleer altijd het juiste scherm en de toestand ná de klik.</p>
+   <div class="audit-filters">
+     <input id="template-query" type="search" placeholder="Zoek naam, scherm of gebruikte taak…" aria-label="Zoek templates">
+     <select id="template-area" aria-label="Filter categorie"><option value="">Alle categorieën</option></select>
+     <select id="template-status" aria-label="Filter bewijsstatus">
+       <option value="">Alle bewijsstatussen</option><option value="missing_asset">Ontbrekend</option><option value="invalid_png">Ongeldig bestand</option>
+       <option value="review_observed_misses">Alleen missers in steekproef</option>
+       <option value="observed_hit">Minstens één herkenning</option><option value="not_observed">Nog geen runbewijs</option>
+     </select><button id="template-refresh" class="outline" type="button">↻ Ophalen</button>
+   </div>
+   <div id="template-count" class="muted"></div>
+   <div id="template-list" class="audit-list" aria-live="polite"></div>
+   <button id="template-more" class="outline" type="button" hidden>Meer templates tonen</button>
  </section>
  <div class="footer">
   <span>Gegevens blijven op de eigen webserver. De broncode en automatisering staan op GitHub.</span>

@@ -20,8 +20,27 @@ import ssl
 import threading
 import time
 from urllib.parse import urlsplit, parse_qs
+from qa_protocol import Protocol
 
 HERE = Path(__file__).resolve().parent
+TEMPLATE_AUDIT_PATH = Path.home()/'.local/share/survivalops-template-audit/report.json'
+
+
+def read_template_audit(path=None):
+    """Return only offline aggregated template metadata, never screenshot files."""
+    target = path or TEMPLATE_AUDIT_PATH
+    try:
+        if not target.is_file() or target.stat().st_size > 2_000_000:
+            return None
+        data = json.loads(target.read_text(encoding='utf-8'))
+        if (not isinstance(data,dict) or data.get('schema')!=1 or
+                not isinstance(data.get('summary'),dict) or
+                not isinstance(data.get('templates'),list) or
+                len(data['templates'])<500):
+            return None
+        return data
+    except (OSError, ValueError, UnicodeError):
+        return None
 STATUS_VALUES = {"not_tested", "testing", "working", "broken", "blocked", "verified"}
 ISSUE_SEVERITIES = {"low", "medium", "high", "critical"}
 MAX_BODY = 12000
@@ -149,6 +168,8 @@ class Board:
         self.auth = json.loads(self.auth_path.read_text())
         self.secret = base64.urlsafe_b64decode(self.auth["session_key"])
         init_db(self.dbpath)
+        self.protocol=Protocol(self.dbpath)
+        self.protocol.install()
         with connect(self.dbpath) as db:
             upsert_catalog(db, catalog_path)
         self.sync_diagnostics(force=True)
@@ -351,7 +372,8 @@ class Board:
                     """,(key,))],
                     "events":[dict(x) for x in db.execute("""
                         SELECT * FROM events WHERE task_key=? ORDER BY id DESC LIMIT 30
-                    """,(key,))]}
+                    """,(key,))],
+                    "qa":self.protocol.snapshot(key)}
 
     def edit_task(self, key, payload, actor):
         allowed = {"status", "notes", "version"}
@@ -367,6 +389,8 @@ class Board:
             if row is None: return "missing", None
             if row["version"] != payload["version"]: return "conflict", dict(row)
             state = payload.get("status", row["status"])
+            if state == "verified" and row["status"] != "verified":
+                return "needs_joint_qa",dict(row)
             notes = scrub(payload.get("notes", row["notes"]), 5000)
             verified_by = (actor if state == "verified" and row["status"] != "verified"
                            else (row["verified_by"] if state == "verified" else ""))
@@ -402,6 +426,19 @@ class Board:
                VALUES(?,?,?,?,'open',?,?,?)""",(key,scrub(title,160),scrub(detail,3000),severity,now,now,actor))
             db.execute("INSERT INTO events(task_key,kind,detail,actor,occurred_at) VALUES(?,?,?,?,?)",
                        (key,"issue_created",str(cur.lastrowid)+" "+scrub(title,160),actor,now))
+            # A newly discovered regression invalidates an in-flight joint
+            # approval and a previously VERIFIED status, but preserves history.
+            current=self.protocol.latest_row(db,key)
+            if current is not None and not current['completed_at']:
+                db.execute("""UPDATE qa_rounds SET operator_signed_at='',operator_note='',
+                            reviewer_signed_at='',reviewer_note='' WHERE id=?""",(current['id'],))
+                db.execute("""UPDATE qa_checks SET result='fail',note=?,actor=?,updated_at=?
+                            WHERE round_id=? AND step='postcondition'""",
+                           ('New open issue #'+str(cur.lastrowid)+': '+scrub(title,160),'System',now,current['id']))
+            current_status=db.execute('SELECT status FROM tasks WHERE key=?',(key,)).fetchone()[0]
+            if current_status in ('verified','working') or (current is not None and not current['completed_at']):
+                db.execute("""UPDATE tasks SET status='broken',verified_by='',verified_at='',
+                            updated_at=?,version=version+1 WHERE key=?""",(now,key))
             return cur.lastrowid
 
     def edit_issue(self, issue_id, payload, actor):
@@ -503,16 +540,19 @@ class Handler(BaseHTTPRequestHandler):
         path=urlsplit(self.path).path
         if path=="/healthz":
             return self.reply(200,{"ok":True,"service":"SurvivalOps QA"})
-        if path in ("/","/index.html","/app.js","/live.js","/style.css","/live.css"):
+        if path in ("/","/index.html","/app.js","/live.js","/style.css","/live.css","/templates.js","/templates.css","/qa.css"):
             name = "index.html" if path=="/" else path.lstrip("/")
             target=HERE/"static"/name
-            if name not in {"index.html","app.js","live.js","style.css","live.css"} or not target.is_file():
+            if name not in {"index.html","app.js","live.js","style.css","live.css","templates.js","templates.css","qa.css"} or not target.is_file():
                 return self.reply(404,{"error":"not_found"})
             mime= {"index.html":"text/html; charset=utf-8","app.js":"text/javascript; charset=utf-8","live.js":"text/javascript; charset=utf-8",
-                   "style.css":"text/css; charset=utf-8","live.css":"text/css; charset=utf-8"}[name]
+                   "style.css":"text/css; charset=utf-8","live.css":"text/css; charset=utf-8","templates.js":"text/javascript; charset=utf-8","templates.css":"text/css; charset=utf-8","qa.css":"text/css; charset=utf-8"}[name]
             return self.raw_reply(200,target.read_bytes(),mime)
         if not self.require_auth():return
         if path=="/api/session":return self.reply(200,{"authenticated":True})
+        if path=="/api/template-audit":
+            audit=read_template_audit()
+            return self.reply(200,audit) if audit else self.reply(503,{"error":"audit_not_ready"})
         if path=="/api/tasks":
             return self.reply(200,self.board.summary())
         if path=="/api/overview":
@@ -565,6 +605,15 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200,{"ok":True},{"Set-Cookie":"qa_session=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Strict"})
         if path=="/api/sync":
             return self.reply(200,{"imported":self.board.sync_diagnostics(force=True)})
+        match=re.fullmatch(r"/api/tasks/([A-Z][A-Z0-9_]{1,79})/qa/(start|attach|check|operator-note|operator-sign)",path)
+        if match:
+            key,action=match.groups()
+            if action=='start':state,data=self.board.protocol.begin(key,payload.get('build'),'Operator')
+            elif action=='attach':state,data=self.board.protocol.attach(key,payload.get('coach_run'),'Operator')
+            elif action=='check':state,data=self.board.protocol.check(key,payload.get('step'),payload.get('result'),payload.get('note'),'Operator')
+            elif action=='operator-note':state,data=self.board.protocol.save_operator_note(key,payload.get('note'),'Operator')
+            else:state,data=self.board.protocol.sign(key,'operator',payload.get('note'))
+            return self.reply(200,{"result":state,"qa":data}) if state=='ok' else self.reply(400,{"error":state})
         if path.startswith("/api/tasks/") and path.endswith("/issues"):
             key=path.split("/")[3]
             if not KEY_PATTERN.fullmatch(key):return self.reply(400,{"error":"invalid_key"})
@@ -581,7 +630,7 @@ class Handler(BaseHTTPRequestHandler):
             key=path.split("/")[3]
             if not KEY_PATTERN.fullmatch(key):return self.reply(400,{"error":"invalid_key"})
             state, result=self.board.edit_task(key,payload,"Operator")
-            status={"ok":200,"conflict":409,"missing":404,"invalid":400}[state]
+            status={"ok":200,"conflict":409,"missing":404,"invalid":400,"needs_joint_qa":400}[state]
             return self.reply(status,{"result":state,"task":result})
         if re.fullmatch(r"/api/issues/\d{1,12}",path):
             num=int(path.rsplit("/",1)[1])

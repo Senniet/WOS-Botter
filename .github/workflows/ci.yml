@@ -33,6 +33,17 @@ jobs:
       - name: Audit all recognition template resources
         run: python3 tools/audit-template-assets.py --baseline tools/template-missing-baseline.json
 
+      - name: Test complete template inventory and evidence parser
+        run: python3 -m unittest discover -s tools/template-system-audit -p 'test_*.py' -v
+
+      - name: Test shared QA dashboard and two-party acceptance protocol
+        run: python3 -m unittest discover -s tools/task-dashboard -p 'test_*.py' -v
+
+      - name: Test QA browser draft preservation and syntax
+        run: |
+          node --check tools/task-dashboard/static/app.js
+          node tools/task-dashboard/test_ui_drafts.cjs
+
       - name: Verify shipped binaries are real files
         run: build-support/verification/check_lfs_assets.sh
 

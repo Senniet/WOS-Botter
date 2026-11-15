@@ -1,0 +1,9 @@
+[Unit]
+Description=SurvivalOps read-only full template and Task Coach evidence inventory
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/survivalops-qa-dashboard/template-audit.py --root %h/projects/WOS-Botter --upstream upstream/main --evidence %h/survivalops-diagnostics/taskcoach --output %h/.local/share/survivalops-template-audit
+NoNewPrivileges=true
+UMask=0077
+PrivateTmp=true
