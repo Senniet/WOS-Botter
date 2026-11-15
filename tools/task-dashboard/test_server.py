@@ -59,7 +59,7 @@ class BoardTests(unittest.TestCase):
         task='TRAINING_TROOPS'
         self.assertEqual('ok',self.board.protocol.begin(task,'1.1.66','Operator')[0])
         self.assertEqual('invalid_evidence',self.board.protocol.attach(task,'fake-claim','Operator')[0])
-        self.assertEqual('needs_evidence_note',self.board.protocol.sign(task,'operator','too short')[0])
+        self.assertEqual('missing_coach_evidence',self.board.protocol.sign(task,'operator','too short')[0])
         self.assertEqual('missing_coach_evidence',self.board.protocol.sign(task,'operator','I saw full game result on screen.')[0])
         bad=self.coach_receipt('STOREHOUSE_CHEST')
         self.assertEqual('invalid_evidence',self.board.protocol.attach(task,bad,'Operator')[0])
@@ -75,6 +75,32 @@ class BoardTests(unittest.TestCase):
         self.assertEqual('blocked',self.board.detail(task)['task']['status'])
         self.assertEqual('incomplete_checks',self.board.protocol.sign(task,'reviewer','Reviewed production logs and screenshots.')[0])
         self.assertFalse(self.board.detail(task)['qa']['round']['operator_signed_at'])
+
+    def test_saved_step_evidence_replaces_duplicate_operator_note(self):
+        task='STOREHOUSE_CHEST'
+        self.assertEqual('ok',self.board.protocol.begin(task,'1.1.66','Operator')[0])
+        self.assertEqual('ok',self.board.protocol.attach(task,self.coach_receipt(task),'Operator')[0])
+        for step,_ in STAGES:
+            self.assertEqual('ok',self.board.protocol.check(task,step,'pass','Tested on current emulator at '+step,'Operator')[0])
+        # No second free-text form is needed when the seven stage notes exist.
+        self.assertEqual('ok',self.board.protocol.sign(task,'operator','')[0])
+        note=self.board.detail(task)['qa']['round']['operator_note']
+        self.assertIn('postcondition',note)
+        self.assertIn('interaction',note)
+        self.assertEqual('working',self.board.detail(task)['task']['status'])
+        # Reviewer still needs an actual independent review note.
+        self.assertEqual('needs_evidence_note',self.board.protocol.sign(task,'reviewer','')[0])
+        self.assertEqual('ok',self.board.protocol.sign(task,'reviewer','Independent logs and saved frame checked.')[0])
+        self.assertEqual('verified',self.board.detail(task)['task']['status'])
+
+    def test_incomplete_checks_take_precedence_over_optional_operator_note(self):
+        task='TRAINING_TROOPS'
+        self.board.protocol.begin(task,'1.1.66','Operator')
+        self.assertEqual('missing_coach_evidence',self.board.protocol.sign(task,'operator','')[0])
+        self.board.protocol.attach(task,self.coach_receipt(task),'Operator')
+        self.assertEqual('incomplete_checks',self.board.protocol.sign(task,'operator','')[0])
+        self.board.protocol.check(task,'postcondition','fail','Train never started','Operator')
+        self.assertEqual('incomplete_checks',self.board.protocol.sign(task,'operator','')[0])
 
     def test_open_issue_invalidates_earlier_joint_approval(self):
         task='TRAINING_TROOPS'

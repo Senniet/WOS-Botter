@@ -8,3 +8,6 @@
  border-radius:7px;min-height:64px;resize:vertical;padding:9px;font-size:12px;display:block;margin:7px 0}
 .qa-start{border-top:1px solid #32445a;padding-top:15px;margin-top:18px}
 .qa-start input{width:100%;background:#091827;border:1px solid #374d62;color:white;border-radius:7px;padding:9px;margin:8px 0}
+
+.qa-save-status{color:#8198af;font-size:11px;margin-top:7px}
+.qa-save-status.dirty{color:#f0c98b}

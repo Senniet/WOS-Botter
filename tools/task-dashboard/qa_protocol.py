@@ -152,7 +152,7 @@ class Protocol:
         return 'ok',self.snapshot(key)
 
     def sign(self,key,role,note):
-        if role not in {'operator','reviewer'} or not isinstance(note,str) or not 12<=len(note.strip())<=1200:
+        if role not in {'operator','reviewer'} or not isinstance(note,str) or len(note.strip())>1200:
             return 'needs_evidence_note',None
         with self.connection() as db:
             db.execute('BEGIN IMMEDIATE')
@@ -161,10 +161,22 @@ class Protocol:
             if row['completed_at']:return 'finalized',None
             if not row['coach_run'] or not self.validate_run(key,row['coach_run'],row['started_at']):
                 return 'missing_coach_evidence',None
-            checks=[r['result'] for r in db.execute('SELECT result FROM qa_checks WHERE round_id=?',(row['id'],))]
-            if len(checks)!=len(STAGES) or not all(c=='pass' for c in checks):return 'incomplete_checks',None
+            checks=[dict(r) for r in db.execute('SELECT step,result,note FROM qa_checks WHERE round_id=?',(row['id'],))]
+            if len(checks)!=len(STAGES) or not all(c['result']=='pass' for c in checks):
+                return 'incomplete_checks',None
             if db.execute('SELECT 1 FROM issues WHERE task_key=? AND state=\'open\' LIMIT 1',(key,)).fetchone():
                 return 'open_issues',None
+            # The seven individually saved observations ARE the evidence note.
+            # Do not demand the operator type an eighth, duplicated account.
+            # Their explicit confirmation button is still required, as are the
+            # new coach run, positive checks and independent reviewer signoff.
+            if role=='operator' and len(note.strip())<12:
+                details={c['step']:c['note'].strip() for c in checks}
+                observed=details['postcondition']
+                action=details['interaction']
+                note=('Live resultaat: '+observed+'; uitgevoerde actie: '+action)[:1200]
+            if len(note.strip())<12:
+                return 'needs_evidence_note',None
             at=timestamp()
             if role=='operator':
                 db.execute('UPDATE qa_rounds SET operator_signed_at=?,operator_note=? WHERE id=?',

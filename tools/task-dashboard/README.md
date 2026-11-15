@@ -159,3 +159,20 @@ python3 qa_ctl.py qa-approve TRAINING_TROOPS "Screenshots en nieuwe live-resulta
 De `qa-approve`-opdracht kan alleen na de echte, nieuwe run en alle zeven
 geslaagde stappen. De web-UI kan niet namens ChatGPT goedkeuren en kan nooit
 de emulator bedienen, geld uitgeven of templates vervangen.
+
+### Invoervelden bewaren en bevestigen
+
+Het volledige taakdetail wordt **niet meer iedere minuut opnieuw getekend**.
+De takenlijst blijft periodiek verversen, maar een ingevoerd controlepunt of
+Task Coach-run blijft lokaal staan totdat de operator die opslaat of bewust
+weggooit. Ook bij het opslaan van één controlepunt blijven alle andere
+ingevoerde controlepunten staan. Het dashboard meldt per stap of die al
+opgeslagen is. Bij **Teststappen opslaan en bevestigen** worden alle ingevulde
+controlepunten opgeslagen, daarna wordt de gezamenlijke QA-handtekening
+geverifieerd. Omdat de opgeslagen stappen al apart bewijsnotities bevatten,
+is een aanvullende operatornotitie optioneel; het systeem maakt dan de
+samenvatting uit `interaction` en `postcondition`. De reviewer moet zijn
+onafhankelijke bevinding nog wel zelf uitschrijven. Ontbrekende Task Coach-
+bewijzen, mislukte controlepunten en openstaande bugs blijven blokkeren.
+Een handmatige browserrefresh vereist nog steeds opnieuw laden van de pagina;
+onopgeslagen invoer moet daarvoor bewust bewaard worden.
