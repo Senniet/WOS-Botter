@@ -11,6 +11,7 @@ import csv
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import struct
@@ -209,10 +210,13 @@ def main():
     result=audit(args.root.resolve(),args.evidence,args.upstream)
     if args.output:
         args.output.mkdir(parents=True,exist_ok=True,mode=0o700)
-        (args.output/'report.json').write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n')
-        (args.output/'report.md').write_text(markdown(result))
-        (args.output/'report.json').chmod(0o600)
-        (args.output/'report.md').chmod(0o600)
+        for name, body in (('report.json', json.dumps(result,ensure_ascii=False,indent=2)+'\n'),
+                           ('report.md', markdown(result))):
+            # The dashboard can read at any moment; never expose half a JSON file.
+            pending = args.output / (name + '.tmp')
+            pending.write_text(body, encoding='utf-8')
+            pending.chmod(0o600)
+            os.replace(pending, args.output / name)
     print(json.dumps(result['summary'],indent=2))
 
 if __name__=='__main__':main()
