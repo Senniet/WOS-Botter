@@ -118,7 +118,9 @@ public class TaskDispatcher implements PreemptionListener, StaminaChangeListener
         monitor.registerRule(new dev.frostguard.engine.schedule.preempt.BearTrapPreemptionRule());
         monitor.registerRule(new dev.frostguard.engine.schedule.preempt.GatherDeployPreemptionRule());
         monitor.registerRule(new dev.frostguard.engine.schedule.preempt.ManualRallyJoinPreemptionRule());
-        monitor.registerInjectionRule(new dev.frostguard.engine.schedule.inject.HelpAllianceInjectionRule());
+        // Alliance Help now has its own scheduled ALLIANCE_HELP_REQUEST task.
+        // Do not inject the same tap mid-way through an unrelated task: the
+        // dedicated routine owns all click verification and QA evidence.
         monitor.registerInjectionRule(new dev.frostguard.engine.schedule.inject.FurnaceUpgradeInjectionRule());
 
         LoggingService.obtain().emit(TpMessageSeverityEnum.INFO, "TaskDispatcher", "-", "Launching all queues");

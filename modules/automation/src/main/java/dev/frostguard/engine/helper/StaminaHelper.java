@@ -235,7 +235,6 @@ public class StaminaHelper {
         AreaData anchor = AreaData.of(590, 1145, 715, 1275);
         for (TemplatesEnum template : new TemplatesEnum[] {
                 TemplatesEnum.SERVE_EMU_CITY_ANCHOR,
-                TemplatesEnum.SERVE_EMU_WORLD_ANCHOR,
                 TemplatesEnum.SERVE_EMU_WORLD_ANCHOR_CURRENT,
                 TemplatesEnum.GAME_HOME_FURNACE,
                 TemplatesEnum.GAME_HOME_WORLD }) {

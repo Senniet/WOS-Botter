@@ -91,6 +91,7 @@ public class TaskRegistrations {
 
             // Alliance
             case ALLIANCE_AUTOJOIN -> new AllianceAutojoinRoutine(profile, type);
+            case ALLIANCE_HELP_REQUEST -> new AllianceHelpRoutine(profile, type);
             case ALLIANCE_TECH -> new AllianceTechRoutine(profile, type);
             case ALLIANCE_SHOP -> new AllianceShopRoutine(profile, type);
             case ALLIANCE_PET_TREASURE -> new PetAllianceTreasuresRoutine(profile, type);

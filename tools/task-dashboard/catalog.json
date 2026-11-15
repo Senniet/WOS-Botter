@@ -35,6 +35,13 @@
     "factory": "AllianceChestRoutine"
   },
   {
+    "key": "ALLIANCE_HELP_REQUEST",
+    "code": 41,
+    "label": "Alliance Help Request",
+    "category": "ALLIANCE",
+    "factory": "AllianceHelpRoutine"
+  },
+  {
     "key": "ALLIANCE_MOBILIZATION",
     "code": 46,
     "label": "Alliance Mobilization",

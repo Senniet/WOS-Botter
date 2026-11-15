@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "source": "20 Task Coach sessions (1358 method measurements), 2026-11-15; confirmed 720x1280 Serve-EMU UI plus in-repository screenshot regressions",
+  "retired": {
+    "SERVE_EMU_EXPLORATION_TITLE": "Outdated page title: 0/24 method hits, best miss 38.76% on observed 2026 Exploration, while NOV_2026 reached 100%",
+    "EXPLORATION_SCREEN_TITLE": "Earlier Frostguard title: 0/22 method hits in current sessions, best miss 50.18%; NOV_2026 reached 100% on matching page",
+    "SERVE_EMU_IDLE_INCOME_TITLE": "Earlier Income title: 0/15 method hits, best miss 28.61%; NOV_2026 reached 100% on actual Income window",
+    "EXPLORATION_IDLE_INCOME_TITLE": "Original Income title failed in same current UI; NOV_2026 is used and OCR remains as fallback",
+    "SERVE_EMU_WORLD_ANCHOR": "Old Serve-EMU World HUD: 0/21 methods in the original 20-run baseline; one later match in 23 runs but CURRENT also matched that same World session and has many more confirmed hits. Prefer CURRENT (live screenshot fixture passes)"
+  },
+  "protected": {
+    "GAME_HOME_RECONNECT": "Safety check; zero hits during healthy gameplay are expected and must not trigger deletion",
+    "GAME_START_WELCOME_BACK_TITLE": "Rare welcome-back dialog safety check; zero hits are not a defect",
+    "GAME_START_MANDATORY_UPDATE_TITLE": "Rare mandatory-update dialog guard, not a duplicate screen fallback",
+    "SERVE_EMU_OFFER_RESPLENDENT_TITLE_2026": "Optional blocking offer screen; absence in sampled sessions not proof of obsolescence",
+    "SERVE_EMU_RESOURCES_OVERVIEW_TITLE_2026": "Optional overlay guard, absence in sampled sessions not proof of obsolescence",
+    "SHARED_REWARDS_BANNER_CURRENT": "Used for alternate 2026 Rewards layout; still positive in other game frames",
+    "SHARED_REWARDS_BANNER": "Used for older/alternate Rewards layout with 98.85% positive in Rush Job"
+  }
+}

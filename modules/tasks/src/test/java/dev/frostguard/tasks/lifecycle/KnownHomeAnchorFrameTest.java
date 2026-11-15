@@ -27,9 +27,7 @@ class KnownHomeAnchorFrameTest {
     }
 
     private static boolean world(RawImageData f) throws Exception {
-        return OpenCvPatternLocator.locatePattern(f,TemplatesEnum.SERVE_EMU_WORLD_ANCHOR.getTemplate(),
-                new PointData(590,1145),new PointData(715,1275),90).isFound()
-                || OpenCvPatternLocator.locatePattern(f,TemplatesEnum.SERVE_EMU_WORLD_ANCHOR_CURRENT.getTemplate(),
+        return OpenCvPatternLocator.locatePattern(f,TemplatesEnum.SERVE_EMU_WORLD_ANCHOR_CURRENT.getTemplate(),
                 new PointData(590,1145),new PointData(715,1275),90).isFound();
     }
 

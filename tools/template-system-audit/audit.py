@@ -24,6 +24,8 @@ ENUM = Path('modules/api/src/main/java/dev/frostguard/api/configs/TemplatesEnum.
 IMAGE_EXT = {'.png'}
 PNG_SIG = b'\x89PNG\r\n\x1a\n'
 REFERENCE = re.compile(r'\bTemplatesEnum\.([A-Z][A-Z0-9_]+)\b')
+DECISIONS=Path('tools/template-system-audit/template-decisions.json')
+
 
 
 def manifest_entries(content: str) -> dict[str, str]:
@@ -116,6 +118,9 @@ def audit(root: Path, evidence: Path, upstream: str='upstream/main') -> dict:
     mapping = manifest_entries((root/MANIFEST).read_text(encoding='utf-8'))
     names = enum_names((root/ENUM).read_text(encoding='utf-8'))
     uses = production_uses(root)
+    decisions=json.loads((root/DECISIONS).read_text(encoding='utf-8'))
+    retired=decisions['retired']
+    protected=decisions['protected']
     originals = git_upstream(root, upstream)
     sightings, session_count, checks = coach_observations(evidence)
     entries=[]
@@ -136,12 +141,22 @@ def audit(root: Path, evidence: Path, upstream: str='upstream/main') -> dict:
         state = ('missing_asset' if data is None else 'invalid_png' if dims is None else
                  'observed_hit' if obs['hits'] else 'review_observed_misses' if obs['checks'] else
                  'not_observed')
+        role = ('retired' if key in retired else
+                'protected_guard' if key in protected else
+                'active' if uses.get(key) else 'registered_unused')
         entries.append(dict(name=key, area=ref.split('/')[2] if ref.count('/') >= 3 else 'root',
                             resource=ref, status=state, upstream=baseline,
                             dimensions=list(dims) if dims else None,
                             size=len(data) if data else 0,
-                            source_uses=uses.get(key,[]),
+                            source_uses=uses.get(key,[]), runtime_role=role,
+                            decision_note=retired.get(key,protected.get(key,'')),
                             observations=obs))
+    unknown=set(retired)|set(protected)
+    unknown.difference_update(names)
+    if unknown:raise ValueError('Unknown decision template keys: '+','.join(sorted(unknown)))
+    for key in retired:
+        if uses.get(key):
+            raise ValueError('Retired template has become active again: '+key)
     for e in entries:
         e['shared_with'] = [k for k in by_path[e['resource']] if k != e['name']]
     all_assets={p.relative_to(root).as_posix() for p in (root/ASSETS).rglob('*.png')}
@@ -162,6 +177,10 @@ def audit(root: Path, evidence: Path, upstream: str='upstream/main') -> dict:
             'extra_png_files':len(extras),'unreferenced_manifest_keys':len(set(mapping)-set(names)),
             'shared_resource_alias_groups':sum(len(v)>1 for v in by_path.values()),
             'source_unused':sum(not e['source_uses'] for e in entries),
+            'retired_from_runtime':sum(e['runtime_role']=='retired' for e in entries),
+            'protected_safety_guards':sum(e['runtime_role']=='protected_guard' for e in entries),
+            'active_source_referenced':sum(e['runtime_role']=='active' for e in entries),
+            'registered_unused_review':sum(e['runtime_role']=='registered_unused' for e in entries),
             'coach_sessions':session_count,'coach_checks':checks,
             'coach_templates_seen':len(set(sightings)&mapped_names),
             'templates_with_positive_hits':sum(e['observations']['hits']>0 for e in entries),
@@ -184,11 +203,16 @@ def markdown(result: dict) -> str:
         f"- Missing PNG: **{s['missing']}**; invalid PNG: **{s['invalid']}**; extra unregistered PNGs: **{s['extra_png_files']}**.",
         f"- Upstream comparison: {s['registered_unchanged_original']} unchanged, {s['registered_modified']} modified, {s['registered_new']} new referenced images.",
         f"- Source-unused constants (direct Java enum references only): **{s['source_unused']}**. May be dynamically used.",
+        f"- Confirmed retired from live runtime: **{s['retired_from_runtime']}**; safety guard exceptions **{s['protected_safety_guards']}**; remaining unreferenced under review **{s['registered_unused_review']}**.",
         f"- Real Task Coach sample: **{s['coach_sessions']} sessions**, **{s['coach_checks']} method observations**; {s['templates_with_positive_hits']} template keys with hits; {s['templates_only_observed_misses']} only misses. Most templates have NO runtime evidence.",
         '', '## Missing assets', '' ]
     for e in result['templates']:
         if e['status'] in ('missing_asset','invalid_png'):
             lines.append(f"- `{e['name']}` — `{e['resource']}` (used by: {', '.join(e['source_uses']) or 'no direct Java references'})")
+    lines += ['', '## Deliberately retired active probes (image assets retained)', '']
+    for e in result['templates']:
+        if e['runtime_role']=='retired':
+            lines.append(f"- `{e['name']}` — {e['decision_note']}")
     lines += ['', '## Observed without positive match (review, NOT proved broken)', '']
     seen=sorted((e for e in result['templates'] if e['status']=='review_observed_misses'),
                 key=lambda e:-e['observations']['checks'])

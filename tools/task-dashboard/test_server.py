@@ -37,8 +37,20 @@ class BoardTests(unittest.TestCase):
         (folder/'recognition-events.csv').write_text('time_utc,template,method,threshold,score,hit\n')
         return run_id
 
-    def test_61_tasks_and_restarts_preserve_joint_verified(self):
-        self.assertEqual(61,self.board.summary()["total"])
+    def test_alliance_help_is_independent_unverified_qa_task(self):
+        detail=self.board.detail('ALLIANCE_HELP_REQUEST')
+        self.assertEqual('Alliance Help Request',detail['task']['label'])
+        self.assertEqual('AllianceHelpRoutine',detail['task']['factory'])
+        self.assertEqual('ALLIANCE',detail['task']['category'])
+        self.assertNotEqual('verified',detail['task']['status'])
+        state,qa=self.board.protocol.begin('ALLIANCE_HELP_REQUEST','1.1.69','Operator')
+        self.assertEqual('ok',state)
+        self.assertEqual(7,len(qa['checks']))
+        self.assertEqual('missing_coach_evidence',self.board.protocol.sign(
+            'ALLIANCE_HELP_REQUEST','operator','No game reward is yet proved.')[0])
+
+    def test_62_tasks_and_restarts_preserve_joint_verified(self):
+        self.assertEqual(62,self.board.summary()["total"])
         row=self.board.detail("STOREHOUSE_CHEST")["task"]
         state,new=self.board.edit_task('STOREHOUSE_CHEST',{'version':row['version'],'status':'verified'},'Operator')
         self.assertEqual('needs_joint_qa',state)
@@ -277,7 +289,7 @@ class BoardTests(unittest.TestCase):
             self.assertIn("HttpOnly",headers["Set-Cookie"]);self.assertIn("Secure",headers["Set-Cookie"])
             session=headers["Set-Cookie"].split(";",1)[0].split("=",1)[1]
             status,data,_=req("GET","/api/tasks",cookie=session)
-            self.assertEqual(200,status);self.assertEqual(61,data["total"])
+            self.assertEqual(200,status);self.assertEqual(62,data["total"])
             self.assertEqual(401,req("POST","/api/tasks/ARENA/qa/start",{"build":"1.1.66"})[0])
             status,new,_=req("POST","/api/tasks/ARENA/qa/start",{"build":"1.1.66"},session)
             self.assertEqual(200,status)
