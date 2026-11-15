@@ -111,14 +111,17 @@ private void returnToHomeAfterAllianceContributions() {
         try {
             OcrSettingsData titleOcr = OcrSettingsData.configurator()
                     .textLayout(OcrSettingsData.TextLayout.SINGLE_LINE).build();
-            PointData topLeft = new PointData(145, 20);
-            PointData bottomRight = new PointData(600, 105);
+            // Live 720x1280 emulator: modal title is at y=178..221,
+            // not in the underlying page header at y=20..105.
+            PointData topLeft = new PointData(175, 174);
+            PointData bottomRight = new PointData(555, 225);
             String first = emuManager.readText(EMULATOR_NUMBER, topLeft, bottomRight, titleOcr, false);
             sleepTask(160);
             String second = emuManager.readText(EMULATOR_NUMBER, topLeft, bottomRight, titleOcr, false);
             if (AllianceContributionExitPolicy.isVerifiedContributionTitle(first, second)) {
                 logInfo("Alliance donation pop-up title verified; closing it once");
-                tapInside(AreaData.of(640, 15, 705, 90));
+                // The modal close X is at (639, 198), not the page header.
+                tapInside(AreaData.of(626, 183, 653, 213));
                 sleepTask(550);
                 String after = emuManager.readText(EMULATOR_NUMBER, topLeft, bottomRight, titleOcr, false);
                 if (AllianceContributionExitPolicy.isVerifiedContributionTitle(after, after)) {
