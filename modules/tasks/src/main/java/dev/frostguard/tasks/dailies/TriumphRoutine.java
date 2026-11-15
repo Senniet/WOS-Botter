@@ -5,6 +5,12 @@ import dev.frostguard.api.configs.TemplatesEnum;
 import dev.frostguard.api.configs.TpDailyTaskEnum;
 import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.api.domain.ImageSearchResultData;
+import dev.frostguard.api.domain.PointData;
+import dev.frostguard.api.domain.OcrSettingsData;
+import dev.frostguard.vision.ocr.OcrEngine;
+import dev.frostguard.vision.ocr.OcrException;
+import dev.frostguard.tasks.dailies.TriumphClaimVerification.ChestProgress;
+import dev.frostguard.tasks.dailies.TriumphClaimVerification.DailyState;
 import dev.frostguard.engine.nav.SearchConfigConstants;
 import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.schedule.LaunchPoint;
@@ -14,6 +20,15 @@ import java.time.LocalDateTime;
 
 /** Alliance Triumph: read and verify daily claims before reporting success. */
 public class TriumphRoutine extends DelayedTask {
+    // 720x1280 Activity Triumph personal-chest counter (e.g. 50/800).
+    // This region deliberately excludes the weekly total and reset countdown.
+    private static final PointData CHEST_COUNTER_TOP_LEFT = new PointData(85, 900);
+    private static final PointData CHEST_COUNTER_BOTTOM_RIGHT = new PointData(230, 949);
+    private static final OcrSettingsData CHEST_COUNTER_OCR = OcrSettingsData.configurator()
+            .textLayout(OcrSettingsData.TextLayout.SINGLE_LINE)
+            .allowedGlyphs("0123456789/")
+            .build();
+    private static final int UNVERIFIED_RETRY_MINUTES = 10;
     public TriumphRoutine(AccountDescriptor profile, TpDailyTaskEnum task) {
         super(profile, task);
     }
@@ -48,6 +63,7 @@ public class TriumphRoutine extends DelayedTask {
         boolean available = false;
         boolean tapped = false;
         boolean claimedAfter = false;
+        ChestProgress progress = null;
         if (!claimedBefore) {
             ImageSearchResultData claim = templateSearchHelper.locatePattern(
                     TemplatesEnum.ALLIANCE_TRIUMPH_DAILY, SearchConfigConstants.DEFAULT_SINGLE);
@@ -64,19 +80,28 @@ public class TriumphRoutine extends DelayedTask {
                     logWarning(line("Daily claim was tapped, but Claimed state was not recognized"));
                 }
             } else {
-                logWarning(line("Neither daily Claimed nor daily Claim control recognized; "
-                        + "possible outdated Triumph template or screen context"));
+                progress = readStableChestProgress();
             }
         }
 
-        boolean dailyVerified = TriumphClaimVerification.dailyVerified(
-                claimedBefore, available, tapped, claimedAfter);
-        if (dailyVerified) {
-            logInfo(line("Daily Triumph is confirmed claimed"));
-            reschedule(GameTimeUtils.dailyResetTime());
-        } else {
-            markWorkIncomplete("Alliance Triumph: daily reward unresolved; claim and claimed states not verified");
-            scheduleUnverifiedRetry();
+        DailyState daily = TriumphClaimVerification.dailyState(
+                claimedBefore, available, tapped, claimedAfter, progress);
+        switch (daily) {
+            case CLAIMED -> {
+                logInfo(line("Daily Triumph reward confirmed claimed"));
+                reschedule(GameTimeUtils.dailyResetTime());
+            }
+            case NOT_READY -> {
+                logInfo(line("Personal daily chest is not claimable yet: " + progress.current()
+                        + "/" + progress.required() + " points; no reward collected"));
+                scheduleProgressReview();
+            }
+            case UNVERIFIED -> {
+                logWarning(line("Daily claim unresolved: neither a verified Claimed state nor a "
+                        + "stable not-ready counter was detected"));
+                markWorkIncomplete("Alliance Triumph: daily reward status unverified");
+                scheduleUnverifiedRetry();
+            }
         }
 
         // Weekly claims are optional; an absent weekly claim must not override
@@ -113,12 +138,43 @@ public class TriumphRoutine extends DelayedTask {
         navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME, this::checkPreemption);
     }
 
-    private void scheduleUnverifiedRetry() {
+    private ChestProgress readStableChestProgress() {
+        try {
+            String first = OcrEngine.recognizeText(emuManager.captureScreen(EMULATOR_NUMBER),
+                    CHEST_COUNTER_TOP_LEFT, CHEST_COUNTER_BOTTOM_RIGHT, CHEST_COUNTER_OCR);
+            ChestProgress a = TriumphClaimVerification.parseChestProgress(first);
+            if (a == null) {
+                logWarning(line("Personal chest progress could not be read: '" + first + "'"));
+                return null;
+            }
+            sleepTask(200);
+            String second = OcrEngine.recognizeText(emuManager.captureScreen(EMULATOR_NUMBER),
+                    CHEST_COUNTER_TOP_LEFT, CHEST_COUNTER_BOTTOM_RIGHT, CHEST_COUNTER_OCR);
+            ChestProgress b = TriumphClaimVerification.parseChestProgress(second);
+            if (!a.equals(b)) {
+                logWarning(line("Personal chest progress not stable across two captures: '"
+                        + first + "' versus '" + second + "'"));
+                return null;
+            }
+            return a;
+        } catch (OcrException failed) {
+            logWarning(line("Personal chest OCR unavailable: " + failed.getClass().getSimpleName()));
+            return null;
+        }
+    }
+
+    private void scheduleProgressReview() {
         Integer configured = profile.getConfig(ConfigurationKeyEnum.ALLIANCE_TRIUMPH_OFFSET_INT,
                 Integer.class);
-        int minutes = Math.max(10, configured == null ? 10 : configured);
-        LocalDateTime proposed = LocalDateTime.now().plusMinutes(minutes);
-        LocalDateTime next = GameTimeUtils.clampToResetWindow(proposed);
+        LocalDateTime next = TriumphClaimVerification.nextProgressReview(
+                LocalDateTime.now(), GameTimeUtils.dailyResetTime(),
+                configured == null ? 240 : configured);
+        logInfo(line("Chest not unlocked; next progress review at " + next));
+        reschedule(next);
+    }
+
+    private void scheduleUnverifiedRetry() {
+        LocalDateTime next = LocalDateTime.now().plusMinutes(UNVERIFIED_RETRY_MINUTES);
         logInfo(line("Unverified rewards; next review scheduled at " + next));
         reschedule(next);
     }
