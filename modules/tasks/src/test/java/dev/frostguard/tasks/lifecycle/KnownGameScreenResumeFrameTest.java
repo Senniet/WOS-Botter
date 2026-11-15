@@ -24,6 +24,14 @@ class KnownGameScreenResumeFrameTest {
                 KnownGameScreenResume.findSafeBackPage(frame("hero-recruitment-cooldown-20261115.png")));
     }
 
+    @Test void recognizesBothRealAlliancePagesWithoutConfusingTheirTitles() throws Exception {
+        assertEquals(KnownGameScreenResume.Page.ALLIANCE,
+                KnownGameScreenResume.findSafeBackPage(frame("alliance-live-20261115.png")));
+        assertEquals(KnownGameScreenResume.Page.ALLIANCE_TECH,
+                KnownGameScreenResume.findSafeBackPage(frame("alliance-tech-live-20261115.png")));
+        assertNull(KnownGameScreenResume.findSafeBackPage(frame("recruit-city-redacted.png")));
+    }
+
     @Test void recognizesLiveSquadSettingsScreenFromSecondStartWithoutSendingInput() throws Exception {
         assertEquals(KnownGameScreenResume.Page.SQUAD_SETTINGS,
                 KnownGameScreenResume.findSafeBackPage(frame("squad-settings-page-redacted.png")));

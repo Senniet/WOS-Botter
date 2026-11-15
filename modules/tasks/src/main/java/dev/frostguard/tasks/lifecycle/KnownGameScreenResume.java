@@ -17,7 +17,7 @@ import java.util.function.Supplier;
  */
 final class KnownGameScreenResume {
     enum Page {
-        HERO_RECRUITMENT, HEROES, SQUAD_SETTINGS, DAILY, EXPLORATION, MAIL, VIP, ARENA, RESEARCH
+        HERO_RECRUITMENT, HEROES, SQUAD_SETTINGS, DAILY, EXPLORATION, MAIL, VIP, ARENA, RESEARCH, ALLIANCE, ALLIANCE_TECH
     }
 
     record PagePattern(Page page, TemplatesEnum template, PointData topLeft, PointData bottomRight) { }
@@ -28,6 +28,10 @@ final class KnownGameScreenResume {
     private static final PointData BACK_BOTTOM_RIGHT = new PointData(110, 155);
 
     private static final PagePattern[] PAGES = {
+        new PagePattern(Page.ALLIANCE_TECH, TemplatesEnum.SERVE_EMU_ALLIANCE_TECH_HEADER_LIVE_2026,
+                new PointData(85, 10), new PointData(245, 75)),
+        new PagePattern(Page.ALLIANCE, TemplatesEnum.SERVE_EMU_ALLIANCE_HEADER_LIVE_2026,
+                new PointData(85, 10), new PointData(270, 75)),
         new PagePattern(Page.HERO_RECRUITMENT, TemplatesEnum.SERVE_EMU_HERO_RECRUIT_TITLE,
                 new PointData(390, 130), new PointData(710, 315)),
         new PagePattern(Page.HERO_RECRUITMENT, TemplatesEnum.SERVE_EMU_HERO_MODERN_RECRUIT_TITLE,
@@ -61,6 +65,13 @@ final class KnownGameScreenResume {
         // Cooldown Hero Recruitment is a known page, but its arrow is higher
         // than the original generic Back-header search window.
         if (isModernHeroRecruitmentPage(frame)) return Page.HERO_RECRUITMENT;
+        // Alliance and Alliance Tech use a higher arrow than the generic
+        // header ROI. Require both their exact title and the top-left arrow.
+        if (isAlliancePage(frame)) {
+            if (matches(frame, TemplatesEnum.SERVE_EMU_ALLIANCE_TECH_HEADER_LIVE_2026,
+                    new PointData(85, 10), new PointData(245, 75))) return Page.ALLIANCE_TECH;
+            return Page.ALLIANCE;
+        }
 
         boolean headerBack = OpenCvPatternLocator.locatePattern(frame,
                 TemplatesEnum.SERVE_EMU_HEADER_BACK.getTemplate(), BACK_TOP_LEFT,
@@ -108,6 +119,21 @@ final class KnownGameScreenResume {
             }
         }
         return new ResumeOutcome(false, maxBackActions, "bounded Back limit reached");
+    }
+
+    private static boolean isAlliancePage(RawImageData frame) {
+        if (!matches(frame, TemplatesEnum.SERVE_EMU_ALLIANCE_BACK_LIVE_2026,
+                new PointData(0, 0), new PointData(110, 105))) return false;
+        return matches(frame, TemplatesEnum.SERVE_EMU_ALLIANCE_HEADER_LIVE_2026,
+                new PointData(85, 10), new PointData(270, 75))
+                || matches(frame, TemplatesEnum.SERVE_EMU_ALLIANCE_TECH_HEADER_LIVE_2026,
+                        new PointData(85, 10), new PointData(245, 75));
+    }
+
+    private static boolean matches(RawImageData frame, TemplatesEnum template,
+                                   PointData topLeft, PointData bottomRight) {
+        return OpenCvPatternLocator.locatePattern(frame, template.getTemplate(),
+                topLeft, bottomRight, PAGE_THRESHOLD).isFound();
     }
 
     private static boolean isModernHeroRecruitmentPage(RawImageData frame) {
