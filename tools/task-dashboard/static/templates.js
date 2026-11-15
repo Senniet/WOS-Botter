@@ -47,6 +47,8 @@
    info.append(node("div","","Pad: "+t.resource),
      node("div","","Codegebruik: "+((t.source_uses||[]).join(", ")||"geen directe enum-verwijzing")),
      node("div","","Gedeelde afbeelding: "+((t.shared_with||[]).join(", ")||"geen andere template-ID")),
+     node("div","","Runtime-keuze: "+({retired:"Uitgeschakeld (oude vervangbare herkenning)",protected_guard:"Behouden (veiligheidscontrole)",active:"Actief",registered_unused:"Niet rechtstreeks gebruikt; controleren"}[t.runtime_role]||"Niet beoordeeld")),
+     node("div","",t.decision_note||"Geen bevestigde vervangingsreden; niet automatisch uitschakelen"),
      node("div","","Herkomst: "+({original_unchanged:"origineel, ongewijzigd",modified:"aangepast",new:"nieuwe afbeelding"}[t.upstream]||t.upstream)),
      node("div","","Afmetingen: "+(t.dimensions?t.dimensions.join(" × "):"niet beschikbaar")),
      node("div","","Task Coach: "+(obs.hits||0)+" herkenningen / "+(obs.checks||0)+" methodemetingen in "+(obs.sessions||0)+" sessies"),
@@ -57,7 +59,7 @@
    const data=state.data;if(!data)return;
    const s=data.summary;
    el("template-summary").replaceChildren(
-     summary("Geregistreerd",s.registered),summary("Ontbrekende afbeeldingen",s.missing),
+     summary("Geregistreerd",s.registered),summary("Uitgeschakelde oude varianten",s.retired_from_runtime||0),
      summary("Origineel, ongewijzigd",s.registered_unchanged_original),
      summary("Met herkenning",s.templates_with_positive_hits),
      summary("Alleen missers in sample",s.templates_only_observed_misses),
@@ -66,7 +68,8 @@
    const area=el("template-area").value,status=el("template-status").value;
    const priority={missing_asset:0,invalid_png:0,review_observed_misses:1,not_observed:2,observed_hit:3};
    const filtered=data.templates.filter(t=>
-     (!area||t.area===area)&&(!status||t.status===status)&&
+     (!area||t.area===area)&&(!status||(status==="retired"?t.runtime_role==="retired":
+     status==="protected_guard"?t.runtime_role==="protected_guard":t.status===status))&&
      (!query||(t.name+" "+t.resource+" "+(t.source_uses||[]).join(" ")).toLowerCase().includes(query)));
    filtered.sort((a,b)=>(priority[a.status]??4)-(priority[b.status]??4)||a.name.localeCompare(b.name));
    el("template-count").textContent=filtered.length+" templates gevonden · overzicht " +
@@ -75,7 +78,7 @@
    for(const t of filtered.slice(0,state.shown)){
      const wrap=node("div","audit-entry");
      const button=node("button","audit-row");button.type="button";
-     button.append(node("span","audit-name",t.name),
+     button.append(node("span","audit-name",t.name+(t.runtime_role==="retired"?" (uitgeschakeld)":"")),
                    node("span","audit-area",t.area),
                    node("span","audit-status "+t.status,statuses[t.status]||"Onbekend"),
                    node("span","audit-hits",(t.observations?.hits||0)+" / "+(t.observations?.checks||0)));

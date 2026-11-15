@@ -817,14 +817,9 @@ public class InitializeRoutine extends DelayedTask {
                     TemplatesEnum.SERVE_EMU_CITY_ANCHOR.getTemplate(), rootMin, rootMax,
                     STARTUP_PATTERN_THRESHOLD);
             if (!currentCity.isFound()) {
-                currentWorld = OpenCvPatternLocator.locatePattern(frame,
-                        TemplatesEnum.SERVE_EMU_WORLD_ANCHOR.getTemplate(), rootMin, rootMax,
+                world2026 = OpenCvPatternLocator.locatePattern(frame,
+                        TemplatesEnum.SERVE_EMU_WORLD_ANCHOR_CURRENT.getTemplate(), rootMin, rootMax,
                         STARTUP_PATTERN_THRESHOLD);
-                if (!currentWorld.isFound()) {
-                    world2026 = OpenCvPatternLocator.locatePattern(frame,
-                            TemplatesEnum.SERVE_EMU_WORLD_ANCHOR_CURRENT.getTemplate(), rootMin, rootMax,
-                            STARTUP_PATTERN_THRESHOLD);
-                }
             }
         }
 		lastHomePatternEvidence = "capture=" + frame.getWidth() + "x" + frame.getHeight()

@@ -993,10 +993,6 @@ public class NavigationHelper {
                 ? searcher.locatePatternFast(TemplatesEnum.SERVE_EMU_WORLD_ANCHOR_CURRENT, config)
                 : searcher.locatePattern(TemplatesEnum.SERVE_EMU_WORLD_ANCHOR_CURRENT, config);
         if (current.isFound()) return current;
-        current = fast
-                ? searcher.locatePatternFast(TemplatesEnum.SERVE_EMU_WORLD_ANCHOR, config)
-                : searcher.locatePattern(TemplatesEnum.SERVE_EMU_WORLD_ANCHOR, config);
-        if (current.isFound()) return current;
         return fast
                 ? searcher.locatePatternFast(TemplatesEnum.GAME_HOME_WORLD, config)
                 : searcher.locatePattern(TemplatesEnum.GAME_HOME_WORLD, config);

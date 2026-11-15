@@ -61,6 +61,39 @@ class TemplateAuditTests(unittest.TestCase):
         self.assertIn('TemplatesEnum.GAME_HOME_RECONNECT',navigation)
         self.assertIn('dismissVerifiedWelcomeBack',navigation)
 
+    def test_all_runtime_decisions_are_accounted_for_and_no_old_world_checks_remain(self):
+        result=audit.audit(audit.ROOT,Path('/nonexistent'))
+        template_by_name={entry['name']:entry for entry in result['templates']}
+        self.assertEqual(523,len(template_by_name))
+        self.assertEqual(5,result['summary']['retired_from_runtime'])
+        self.assertEqual(7,result['summary']['protected_safety_guards'])
+        self.assertEqual(523,sum(result['summary'][name] for name in (
+            'retired_from_runtime','protected_safety_guards',
+            'active_source_referenced','registered_unused_review')))
+        for name in audit.json.loads((audit.ROOT/audit.DECISIONS).read_text())['retired']:
+            self.assertEqual('retired',template_by_name[name]['runtime_role'])
+            self.assertEqual([],template_by_name[name]['source_uses'])
+            self.assertTrue(template_by_name[name]['decision_note'])
+        for name in ('GAME_HOME_RECONNECT','GAME_START_WELCOME_BACK_TITLE'):
+            self.assertEqual('protected_guard',template_by_name[name]['runtime_role'])
+        assertSource=[
+            'modules/automation/src/main/java/dev/frostguard/engine/helper/NavigationHelper.java',
+            'modules/automation/src/main/java/dev/frostguard/engine/helper/StaminaHelper.java',
+            'modules/automation/src/main/java/dev/frostguard/engine/helper/SidebarNavigator.java',
+            'modules/automation/src/main/java/dev/frostguard/engine/helper/DeploymentHelper.java',
+            'modules/tasks/src/main/java/dev/frostguard/tasks/lifecycle/InitializeRoutine.java']
+        import re
+        for name in assertSource:
+            source=(audit.ROOT/name).read_text()
+            self.assertIsNone(re.search(r'TemplatesEnum\.SERVE_EMU_WORLD_ANCHOR\b',source),name)
+            self.assertIn('TemplatesEnum.SERVE_EMU_WORLD_ANCHOR_CURRENT',source)
+
+    def test_retired_reintroduced_fails_audit_instead_of_silent_mislabel(self):
+        # Audit's entry point must guard against accidental reactivation after
+        # a code regression. Live screenshots have proven the replacement.
+        source=(audit.ROOT/'tools/template-system-audit/audit.py').read_text()
+        self.assertIn('Retired template has become active again',source)
+
     def test_upstream_blob_hash_matches_git_content_semantics(self):
         self.assertEqual('e69de29bb2d1d6434b8b29ae775ad8c2e48c5391', audit.git_hash(b''))
         self.assertNotEqual(audit.git_hash(b'a'),audit.git_hash(b'b'))

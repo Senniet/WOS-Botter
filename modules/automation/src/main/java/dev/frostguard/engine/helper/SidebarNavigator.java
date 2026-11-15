@@ -351,7 +351,7 @@ public final class SidebarNavigator {
         AreaData lowerRight = AreaData.of(590, 1145, 715, 1275);
         return emu.locatePattern(device, frame, TemplatesEnum.SERVE_EMU_CITY_ANCHOR,
                     lowerRight.topLeft(), lowerRight.bottomRight(), 90).isFound()
-                || emu.locatePattern(device, frame, TemplatesEnum.SERVE_EMU_WORLD_ANCHOR,
+                || emu.locatePattern(device, frame, TemplatesEnum.SERVE_EMU_WORLD_ANCHOR_CURRENT,
                     lowerRight.topLeft(), lowerRight.bottomRight(), 90).isFound()
                 || emu.locatePattern(device, frame, TemplatesEnum.GAME_HOME_FURNACE, threshold).isFound()
                 || emu.locatePattern(device, frame, TemplatesEnum.GAME_HOME_WORLD, threshold).isFound();

@@ -213,7 +213,7 @@ public class DeploymentHelper {
         var worldConfig = TemplateSearchHelper.SearchConfig.builder()
                 .withMaxAttempts(2).withDelay(160).withThreshold(90)
                 .withArea(anchor).build();
-        boolean atWorld = templates.locatePattern(TemplatesEnum.SERVE_EMU_WORLD_ANCHOR,
+        boolean atWorld = templates.locatePattern(TemplatesEnum.SERVE_EMU_WORLD_ANCHOR_CURRENT,
                 worldConfig).isFound();
         if (!atWorld) {
             atWorld = templates.locatePattern(TemplatesEnum.GAME_HOME_WORLD,
