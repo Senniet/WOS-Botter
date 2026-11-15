@@ -73,6 +73,8 @@ public class StorehouseChestRoutine extends DelayedTask {
             new PointData(150, 740), new PointData(560, 885));
     private static final AreaData STAMINA_CLAIM_BUTTON_AREA = new AreaData(
             new PointData(200, 900), new PointData(520, 1020));
+    // Verified X of the 2026 A Warm Welcome overlay, not an arbitrary Back tap.
+    private static final AreaData STAMINA_REWARD_CLOSE_AREA = AreaData.of(590, 160, 634, 210);
     private static final AreaData STAMINA_TOOLTIP_TITLE_AREA = new AreaData(
             new PointData(45, 670), new PointData(300, 750));
 
@@ -307,7 +309,47 @@ public class StorehouseChestRoutine extends DelayedTask {
                     + (pendingAgnesStamina == null ? "unreadable" : pendingAgnesStamina));
             logInfo("Stamina Claim button confirmed. Claiming the reward.");
             tapInside(claimButton);
-            sleepTask(450);
+            sleepTask(CLAIM_CLOSE_SETTLE_MILLIS);
+            StorehouseStaminaClaimRecovery.Outcome recovery =
+                    StorehouseStaminaClaimRecovery.dismissUnacceptedClaim(
+                            new StorehouseStaminaClaimRecovery.Actions() {
+                                @Override
+                                public boolean rewardTitleVisible() {
+                                    return isStaminaRewardTitleVisible();
+                                }
+
+                                @Override
+                                public boolean claimButtonVisible() {
+                                    ImageSearchResultData stillClaimable = locateStaminaDialogTemplate(
+                                            TemplatesEnum.STOREHOUSE_STAMINA_CLAIM_TEXT,
+                                            STAMINA_CLAIM_BUTTON_AREA, CLAIM_BUTTON_THRESHOLD);
+                                    return stillClaimable != null && stillClaimable.isFound();
+                                }
+
+                                @Override
+                                public void dismiss() {
+                                    logWarning("Storehouse stamina Claim did not dismiss A Warm Welcome; "
+                                            + "closing the verified reward overlay without recording a collection.");
+                                    captureInterfaceFailure("stamina-claim-not-accepted");
+                                    tapInside(STAMINA_REWARD_CLOSE_AREA);
+                                    sleepTask(CLAIM_CLOSE_SETTLE_MILLIS);
+                                }
+
+                                @Override
+                                public boolean cityVisible() {
+                                    ImageSearchResultData city = templateSearchHelper.locatePattern(
+                                            TemplatesEnum.GAME_HOME_FURNACE,
+                                            SearchConfigConstants.DEFAULT_SINGLE);
+                                    return city != null && city.isFound();
+                                }
+                            });
+            if (recovery != StorehouseStaminaClaimRecovery.Outcome.NOT_PRESENT) {
+                if (recovery == StorehouseStaminaClaimRecovery.Outcome.CLOSE_UNCONFIRMED) {
+                    captureInterfaceFailure("stamina-claim-dialog-close-unconfirmed");
+                }
+                pendingAgnesStamina = null;
+                return StorehouseVisitFlow.CollectionState.UNCONFIRMED;
+            }
             StorehouseVisitFlow.CollectionState confirmation = confirmBubbleDisappeared(
                     candidate, StorehouseBubbleDetector.Kind.STAMINA);
             if (confirmation == StorehouseVisitFlow.CollectionState.CONFIRMED) {
@@ -395,16 +437,19 @@ public class StorehouseChestRoutine extends DelayedTask {
         return StorehouseVisitFlow.Observation.absent();
     }
 
+    private boolean isStaminaRewardTitleVisible() {
+        ImageSearchResultData title = locateStaminaDialogTemplate(
+                TemplatesEnum.STOREHOUSE_STAMINA_REWARD_TITLE,
+                STAMINA_REWARD_TITLE_AREA, REWARD_TITLE_THRESHOLD);
+        return title != null && title.isFound();
+    }
+
     private ImageSearchResultData awaitStaminaClaimButton() {
         StorehouseStaminaClaimFlow.Result result = StorehouseStaminaClaimFlow.awaitClaimButton(
                 new StorehouseStaminaClaimFlow.Actions() {
                     @Override
                     public boolean isRewardDialogVisible() {
-                        ImageSearchResultData title = locateStaminaDialogTemplate(
-                                TemplatesEnum.STOREHOUSE_STAMINA_REWARD_TITLE,
-                                STAMINA_REWARD_TITLE_AREA,
-                                REWARD_TITLE_THRESHOLD);
-                        return title != null && title.isFound();
+                        return isStaminaRewardTitleVisible();
                     }
 
                     @Override
