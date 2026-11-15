@@ -22,6 +22,14 @@ class TrainingUnlockOverlayFrameTest {
         assertTrue(TrainingUnlockOverlay.visible(screenshot("/serveemu/training-unlock-175359.png")));
     }
 
+    @Test void recognisesLatestMarksmanPageAfterEarlierInfantryLancerUnlocks() throws Exception {
+        // The 21:58 Windows diagnostic captured a THIRD consecutive unlock
+        // page, VI Heroic Marksman. Only background anchors and the non-private
+        // "Tap anywhere to continue" line are retained in the fixture.
+        assertTrue(TrainingUnlockOverlay.visible(
+                screenshot("/training/qa-20261115/marksman-unlock-prompt.png")));
+    }
+
     @Test void ignoresNormalCitySidebarAndUnlabelledBlueBackground() throws Exception {
         assertFalse(TrainingUnlockOverlay.visible(screenshot("/serveemu/city-queues-masked.jpg")));
         BufferedImage blank = new BufferedImage(720, 1280, BufferedImage.TYPE_INT_RGB);
