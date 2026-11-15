@@ -1512,8 +1512,9 @@ private void handleBeastExclusive(ImageSearchResultData beast) {
 
 		ImageSearchResultData view = templateSearchHelper.locateAction(TemplatesEnum.INTEL_VIEW, INTEL_VIEW_ACTION_SEARCH);
 		if (!view.isFound()) {
-			logWarning(routineLogIntelligenceLine("Could not find the 'View' button for the beast. Going back."));
-			pressBack();
+            // An unrecognized modal is not proof that Android Back is safe:
+            // on the City/World HUD it can open Quit game instead.
+            deferIntelMissingAction("Beast", "View", "beast-view-missing");
 			return;
 		}
 		tapInside(view);
@@ -1521,10 +1522,9 @@ private void handleBeastExclusive(ImageSearchResultData beast) {
 
 		ImageSearchResultData attack = templateSearchHelper.locatePattern(TemplatesEnum.INTEL_ATTACK, SearchConfigConstants.SINGLE_WITH_RETRIES);
 		if (!attack.isFound()) {
-			logWarning(routineLogIntelligenceLine("Could not find the 'Attack' button for the beast. Going back."));
-			pressBack();
-			pressBack();
-
+            // The post-View page cannot be identified as a safe Back target.
+            // Retain an unknown outcome and retry instead of sending blind Back.
+            deferIntelMissingAction("Beast", "Attack", "beast-attack-missing");
 			return;
 		}
 		tapInside(attack);
