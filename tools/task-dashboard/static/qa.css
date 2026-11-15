@@ -11,3 +11,8 @@
 
 .qa-save-status{color:#8198af;font-size:11px;margin-top:7px}
 .qa-save-status.dirty{color:#f0c98b}
+
+.qa-action-buttons{display:flex;flex-wrap:wrap;gap:10px;margin:12px 0}
+.qa-action-buttons button{flex:1 1 190px}
+.qa-incomplete{border-left:3px solid #e6b06b;background:#2b2830;padding:12px 14px;margin:14px 0;color:#f7dcc0;font-size:12px;line-height:1.6}
+.qa-action-buttons button:disabled{opacity:.45;cursor:not-allowed}

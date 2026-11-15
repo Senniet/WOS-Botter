@@ -93,6 +93,48 @@ class BoardTests(unittest.TestCase):
         self.assertEqual('ok',self.board.protocol.sign(task,'reviewer','Independent logs and saved frame checked.')[0])
         self.assertEqual('verified',self.board.detail(task)['task']['status'])
 
+    def test_failed_and_pending_results_can_be_saved_without_signing(self):
+        key='TRAINING_TROOPS'
+        self.assertEqual('ok',self.board.protocol.begin(key,'1.1.66','Operator')[0])
+        # A failed action remains failed even if another independent step passes.
+        self.assertEqual('ok',self.board.protocol.check(key,'interaction','fail',
+            'Training button does not respond','Operator')[0])
+        self.assertEqual('broken',self.board.detail(key)['task']['status'])
+        self.assertEqual('ok',self.board.protocol.check(key,'preflight','pass',
+            'Screen dimensions and DPI match','Operator')[0])
+        self.assertEqual('broken',self.board.detail(key)['task']['status'])
+        self.assertEqual('ok',self.board.protocol.check(key,'regression','pending',
+            'Regression run not yet executed','Operator')[0])
+        self.assertEqual('broken',self.board.detail(key)['task']['status'])
+        self.assertEqual('ok',self.board.protocol.save_operator_note(key,
+            'Training fails at unlock popup after selecting highest tier.','Operator')[0])
+        self.assertEqual('broken',self.board.detail(key)['task']['status'])
+        restored=Board(self.dbfile,ROOT/'catalog.json',self.diags,self.authfile).detail(key)
+        self.assertEqual('Training fails at unlock popup after selecting highest tier.',
+            restored['qa']['round']['operator_note'])
+        self.assertEqual('fail',next(c['result'] for c in restored['qa']['checks']
+             if c['step']=='interaction'))
+        self.assertEqual('pending',next(c['result'] for c in restored['qa']['checks']
+             if c['step']=='regression'))
+        self.assertFalse(restored['qa']['round']['completed_at'])
+        self.assertEqual('missing_coach_evidence',self.board.protocol.sign(key,
+            'operator','Some notes.')[0])
+
+    def test_operator_notes_persist_without_extra_signoff(self):
+        key='ARENA'
+        self.board.protocol.begin(key,'1.1.66','Operator')
+        self.assertEqual('invalid',self.board.protocol.save_operator_note(key,
+            'x'*1201,'Operator')[0])
+        self.assertEqual('ok',self.board.protocol.save_operator_note(key,
+            'New observation about a visible but inactive button.','Operator')[0])
+        self.assertEqual('ok',self.board.protocol.save_operator_note(key,
+            'New observation about a visible but inactive button.','Operator')[0])
+        state=self.board.detail(key)
+        self.assertEqual('testing',state['task']['status'])
+        self.assertEqual('New observation about a visible but inactive button.',
+            state['qa']['round']['operator_note'])
+        self.assertFalse(state['qa']['round']['operator_signed_at'])
+
     def test_incomplete_checks_take_precedence_over_optional_operator_note(self):
         task='TRAINING_TROOPS'
         self.board.protocol.begin(task,'1.1.66','Operator')
@@ -241,6 +283,11 @@ class BoardTests(unittest.TestCase):
             self.assertEqual(200,status)
             self.assertEqual(7,len(new['qa']['checks']))
             self.assertEqual('testing',self.board.detail('ARENA')['task']['status'])
+            status,notes,_=req("POST","/api/tasks/ARENA/qa/operator-note",
+                {"note":"The game has a popup and claim remains unavailable."},session)
+            self.assertEqual(200,status)
+            self.assertIn('popup',notes['qa']['round']['operator_note'])
+            self.assertFalse(notes['qa']['round']['operator_signed_at'])
             self.assertEqual(400,req("POST","/api/tasks/ARENA/qa/operator-sign",{"note":"I saw the correct game result."},session)[0])
             with patch('server.TEMPLATE_AUDIT_PATH', self.root/'missing-audit.json'):
                 self.assertEqual(503,req("GET","/api/template-audit",cookie=session)[0])

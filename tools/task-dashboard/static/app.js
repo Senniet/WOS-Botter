@@ -32,7 +32,7 @@ function confirmLeavingEdits(){
 const qaErrors={
  needs_evidence_note:"De opgeslagen teststappen bevatten nog geen concrete toelichting. Vul per stap je waarneming in en sla de stappen op.",
  needs_note:"Schrijf bij deze stap minimaal 8 tekens over wat je hebt gezien.",
- incomplete_checks:"Niet alle 7 controlepunten zijn opgeslagen als ‘Werkt’. Sla de stappen eerst apart op.",
+ incomplete_checks:"Deze taak heeft nog openstaande, mislukte of niet-geteste stappen. Bewaar deze resultaten gerust; definitief afvinken kan pas nadat alle 7 stappen werken.",
  missing_coach_evidence:"Er ontbreekt een nieuwe, bij deze taak behorende Task Coach-run. Koppel die eerst.",
  invalid_evidence:"Deze Task Coach-run is niet gevonden, hoort bij een andere taak of is ouder dan de testronde.",
  open_issues:"Er zijn nog openstaande fouten. Los die eerst op en test opnieuw voordat je bevestigt.",
@@ -211,10 +211,10 @@ async function updateQa(key, action, payload){
  }
 }
 async function savePendingQaSteps(t,qa){
- // Save all currently filled QA controls before the operator attempts to
- // confirm. This removes the confusing requirement to click seven Save buttons.
+ // Save actual test observations (including FAIL and BLOCKED) without signing.
  const draft=qaDrafts.get(qaDraftId(t.key,qa.round));
- if(!draft)return;
+ if(!draft)return 0;
+ let writes=0;
  for(const spec of qa.steps){
   const statusField='result:'+spec.id,noteField='note:'+spec.id;
   if(!draft.has(statusField)&&!draft.has(noteField))continue;
@@ -225,18 +225,46 @@ async function savePendingQaSteps(t,qa){
   await request('/api/tasks/'+encodeURIComponent(t.key)+'/qa/check',
    {method:'POST',body:JSON.stringify({step:spec.id,result,note})});
   clearQaDraft(t.key,qa.round,[statusField,noteField]);
+  writes++;
+ }
+ if(draft.has('operator_note')){
+  await request('/api/tasks/'+encodeURIComponent(t.key)+'/qa/operator-note',
+   {method:'POST',body:JSON.stringify({note:draft.get('operator_note')})});
+  clearQaDraft(t.key,qa.round,['operator_note']);
+  writes++;
  }
  if(draft.has('coach_run')){
   await request('/api/tasks/'+encodeURIComponent(t.key)+'/qa/attach',
    {method:'POST',body:JSON.stringify({coach_run:draft.get('coach_run').trim()})});
   clearQaDraft(t.key,qa.round,['coach_run']);
+  writes++;
  }
+ return writes;
+}
+async function saveQaResults(t,qa){
+ try{
+  const writes=await savePendingQaSteps(t,qa);
+  if(writes)await refreshPreservingUnsavedMain();
+  showToast(writes?'Testresultaten opgeslagen. Je kunt fouten en ongeteste stappen later opnieuw testen; de taak is niet afgevinkt.':'Geen nieuwe wijzigingen om op te slaan.');
+ }catch(error){
+  showToast(qaErrors[error.message]||error.message,true);
+  await refreshPreservingUnsavedMain();
+ }
+}
+function qaAcceptanceSummary(qa,openIssues){
+ const checks=qa.checks||[],steps=qa.steps||[];
+ const count=result=>checks.filter(c=>c.result===result).length;
+ const failCount=count('fail'),blockedCount=count('blocked');
+ const pendingCount=steps.length-checks.filter(c=>c.result==='pass'||c.result==='fail'||c.result==='blocked').length;
+ const ready=steps.length>0&&checks.length===steps.length&&
+   checks.every(c=>c.result==='pass')&&!!qa.round?.coach_run&&openIssues===0;
+ return {failCount,blockedCount,pendingCount,ready};
 }
 function renderQa(t,qa){
  const sectionBox=section('Gezamenlijke testronde');
  sectionBox.id='qa-panel';
  sectionBox.append(node('p','detail-help',
-  'Eén testversie en één nieuwe Task Coach-run. Per stap vastleggen wat het spel werkelijk deed. Alleen jij bevestigt de gamekant; ChatGPT controleert de logs, screenshotregressie en code. Beide goedkeuringen zijn verplicht.'));
+  'Sla elk testresultaat op, ook bij ‘Werkt niet’ of ‘Nog niet gecontroleerd’. Daarmee registreren we de fout. Pas na een volledig geslaagde hertest kun je de taak samen met ChatGPT definitief afvinken.'));
  if(!qa){
   sectionBox.append(node('p','detail-help','Nog geen testronde voor deze taak geregistreerd. De oude vinkjes zijn historische vermeldingen, geen gezamenlijke verificatie.'));
  }else{
@@ -251,7 +279,7 @@ function renderQa(t,qa){
    const wrap=node('div','qa-step');
    wrap.append(node('div','qa-step-title',spec.label));
    const saveStatus=node('div','qa-save-status',c.updated_at?'Opgeslagen op '+dateText(c.updated_at):'Nog niet opgeslagen');
-   const markUnsaved=()=>{saveStatus.textContent='Niet opgeslagen — bevestigen bewaart dit automatisch';saveStatus.classList.add('dirty');};
+   const markUnsaved=()=>{saveStatus.textContent='Nog niet opgeslagen — klik op Testresultaten opslaan';saveStatus.classList.add('dirty');};
    if(qaDrafts.get(qaDraftId(t.key,r))?.has('result:'+spec.id)||qaDrafts.get(qaDraftId(t.key,r))?.has('note:'+spec.id))markUnsaved();
    const sel=node('select','field-input');
    for(const [value,label] of [['pending','Nog niet gecontroleerd'],['pass','Werkt'],['fail','Werkt niet'],['blocked','Nu niet mogelijk']]){
@@ -279,8 +307,28 @@ function renderQa(t,qa){
    const opNote=formInput('textarea','Welke acties en resultaten heb je zelf in de game gecontroleerd?','qa-step-note');
    opNote.value=qaValue(t.key,r,'operator_note',r.operator_note||'');opNote.maxLength=1200;
    opNote.addEventListener('input',()=>setQaDraft(t.key,r,'operator_note',opNote.value,r.operator_note||''));
-   const sign=node('button','primary',r.operator_signed_at?'✓ Jij hebt bevestigd':'Teststappen opslaan en bevestigen');
-   sign.type='button';sign.disabled=!!r.operator_signed_at;
+   const actions=node('div','qa-action-buttons');
+   const saveAll=node('button','outline','Testresultaten opslaan');
+   saveAll.type='button';
+   saveAll.addEventListener('click',async()=>{
+    saveAll.disabled=true;
+    try{await saveQaResults(t,qa);}finally{saveAll.disabled=false;}
+   });
+   actions.append(saveAll);
+   const openIssues=(details?.issues||[]).filter(i=>i.state==='open').length;
+   const {failCount,blockedCount,pendingCount,ready:canConfirm}=qaAcceptanceSummary(qa,openIssues);
+   if(!canConfirm){
+    const reasons=[];
+    if(failCount)reasons.push(failCount+' × werkt niet');
+    if(blockedCount)reasons.push(blockedCount+' × nu niet mogelijk');
+    if(pendingCount)reasons.push(pendingCount+' × nog niet getest');
+    if(!r.coach_run)reasons.push('Task Coach-run ontbreekt');
+    if(openIssues)reasons.push(openIssues+' openstaande fouten');
+    sectionBox.append(node('div','qa-incomplete',
+      'Nog niet gereed om af te vinken: '+reasons.join(', ')+'. Testresultaten opslaan kan wel.'));
+   }
+   const sign=node('button','primary',r.operator_signed_at?'✓ Jij hebt bevestigd':'Taak als werkend bevestigen');
+   sign.type='button';sign.disabled=!!r.operator_signed_at||!canConfirm;
    sign.addEventListener('click',async()=>{
     if(!confirm('Bevestig je dat je de volledige actie en het resultaat in de game zelf hebt gecontroleerd?'))return;
     sign.disabled=true;
@@ -293,7 +341,8 @@ function renderQa(t,qa){
      await refreshPreservingUnsavedMain();
     }finally{sign.disabled=false;}
    });
-   sectionBox.append(node('div','field-label','Jouw bevestiging (de opgeslagen stapnotities zijn voldoende; extra tekst is optioneel)'),opNote,sign);
+   actions.append(sign);
+   sectionBox.append(node('div','field-label','Jouw testnotitie (optioneel, wordt ook opgeslagen met Testresultaten opslaan)'),opNote,actions);
    sectionBox.append(node('p','detail-help','Bevestiging door ChatGPT: '+(r.reviewer_signed_at?dateText(r.reviewer_signed_at):'nog niet gegeven')));
   }
  }

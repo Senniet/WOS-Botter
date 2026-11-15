@@ -167,12 +167,14 @@ De takenlijst blijft periodiek verversen, maar een ingevoerd controlepunt of
 Task Coach-run blijft lokaal staan totdat de operator die opslaat of bewust
 weggooit. Ook bij het opslaan van één controlepunt blijven alle andere
 ingevoerde controlepunten staan. Het dashboard meldt per stap of die al
-opgeslagen is. Bij **Teststappen opslaan en bevestigen** worden alle ingevulde
-controlepunten opgeslagen, daarna wordt de gezamenlijke QA-handtekening
-geverifieerd. Omdat de opgeslagen stappen al apart bewijsnotities bevatten,
-is een aanvullende operatornotitie optioneel; het systeem maakt dan de
-samenvatting uit `interaction` en `postcondition`. De reviewer moet zijn
-onafhankelijke bevinding nog wel zelf uitschrijven. Ontbrekende Task Coach-
-bewijzen, mislukte controlepunten en openstaande bugs blijven blokkeren.
+opgeslagen is. Met **Testresultaten opslaan** worden zowel positieve als
+negatieve en nog onvolledige observaties, de optionele gebruikersnotitie en
+nieuwe Task Coach-referentie opgeslagen **zonder** de taak af te vinken.
+**Taak als werkend bevestigen** is een afzonderlijke knop die pas ingeschakeld
+wordt na zeven opgeslagen `pass`-resultaten, een passende Task Coach-run en
+gesloten issues. Er is geen extra verplichte operatornotitie boven op de
+individuele stapnotities. Een onafhankelijk reviewerbewijs blijft verplicht.
+Een mislukte stap blijft `broken` ook als daarna een `pass`-stap wordt
+opgeslagen. Onvolledige of geblokkeerde rondes mogen altijd opgeslagen worden.
 Een handmatige browserrefresh vereist nog steeds opnieuw laden van de pagina;
 onopgeslagen invoer moet daarvoor bewust bewaard worden.

@@ -37,10 +37,12 @@ async function run(){
  // Clicking the final confirmation stores every remaining step and the coach
  // run, but must not silently overwrite separately typed operator comments.
  await savePendingQaSteps(t,qa);
- assert.equal(calls.length,7);
- assert.equal(calls[6].url,'/api/tasks/TRAINING_TROOPS/qa/attach');
- assert.equal(calls[6].body.coach_run,'20261115-220000-qaabcdef');
- assert.equal(qaValue(t.key,qa.round,'operator_note',''), 'My observations remain typed');
+ assert.equal(calls.length,8);
+ assert.equal(calls[6].url,'/api/tasks/TRAINING_TROOPS/qa/operator-note');
+ assert.equal(calls[6].body.note,'My observations remain typed');
+ assert.equal(calls[7].url,'/api/tasks/TRAINING_TROOPS/qa/attach');
+ assert.equal(calls[7].body.coach_run,'20261115-220000-qaabcdef');
+ assert.equal(qaValue(t.key,qa.round,'operator_note',''), '');
  assert.equal(qaValue(t.key,qa.round,'note:postcondition',''), '');
  // A failed request may save earlier steps, but later unsaved edits stay put.
  calls.length=0;
@@ -59,6 +61,25 @@ async function run(){
  assert.equal(qaValue(t.key,qa.round,'note:interaction',''), '');
  assert.equal(qaValue(t.key,qa.round,'note:regression',''), 'Still typing regression note');
  assert.equal(hasUnsavedEdits(),true);
+ // UI acceptance is a separate, unavailable action whenever results fail.
+ const summarySource=source.slice(source.indexOf('function qaAcceptanceSummary('),
+                                   source.indexOf('function renderQa('));
+ vm.runInContext(summarySource+';globalThis.qaAcceptanceSummary=qaAcceptanceSummary;',context);
+ const evaluate=context.qaAcceptanceSummary;
+ const state={round:{coach_run:'20261115-220000-qaabcdef'},steps:qa.steps,
+              checks:qa.steps.map(x=>({step:x.id,result:'pass'}))};
+ assert.equal(evaluate(state,0).ready,true);
+ state.checks[3].result='fail';state.checks[6].result='pending';
+ const broken=evaluate(state,0);
+ assert.equal(broken.failCount,1);
+ assert.equal(broken.pendingCount,1);
+ assert.equal(broken.ready,false);
+ state.checks[3].result='pass';state.checks[6].result='pass';
+ assert.equal(evaluate(state,1).ready,false);
+ assert.equal(evaluate({...state,round:{coach_run:''}},0).ready,false);
+ assert.match(source,/Testresultaten opslaan/);
+ assert.match(source,/Taak als werkend bevestigen/);
+ assert.match(source,/sign\.disabled=!!r\.operator_signed_at\|\|!canConfirm/);
  // Periodic refresh explicitly never redraws task details.
  assert.match(source,/reload\(\{quiet:true,refreshDetail:false\}\)/);
  console.log('QA UI draft regression tests passed (full save, partial save, pending input, auto refresh).');

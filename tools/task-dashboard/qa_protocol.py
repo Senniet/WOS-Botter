@@ -144,11 +144,38 @@ class Protocol:
             at=timestamp()
             db.execute('''UPDATE qa_checks SET result=?,note=?,actor=?,updated_at=? WHERE round_id=? AND step=?''',
                        (result,note.strip(),actor,at,row['id'],step))
-            db.execute('''UPDATE qa_rounds SET operator_signed_at='',operator_note='',
+            db.execute('''UPDATE qa_rounds SET operator_signed_at='',
                         reviewer_signed_at='',reviewer_note='' WHERE id=?''',(row['id'],))
-            status={'fail':'broken','blocked':'blocked'}.get(result,'testing')
+            # A pass on the final edited step must not conceal an earlier fail.
+            outcomes={c['result'] for c in db.execute(
+                'SELECT result FROM qa_checks WHERE round_id=?',(row['id'],))}
+            status=('broken' if 'fail' in outcomes else
+                    'blocked' if 'blocked' in outcomes else 'testing')
             self.state(db,key,status,at)
             self.event(db,key,'qa_check',f'round={row["id"]} step={step} result={result}',actor,at)
+        return 'ok',self.snapshot(key)
+
+    def save_operator_note(self,key,note,actor):
+        """Persist optional operator observations without approving the task."""
+        if not isinstance(note,str) or len(note)>1200:
+            return 'invalid',None
+        with self.connection() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row=self.latest_row(db,key)
+            if row is None:return 'no_round',None
+            if row['completed_at']:return 'finalized',None
+            if row['operator_note'] == note.strip():return 'ok',self.snapshot(key)
+            at=timestamp()
+            db.execute('''UPDATE qa_rounds SET operator_note=?,operator_signed_at='',
+                        reviewer_signed_at='',reviewer_note='' WHERE id=?''',
+                       (note.strip(),row['id']))
+            self.event(db,key,'qa_note_saved',f'round={row["id"]} length={len(note.strip())}',actor,at)
+            # Existing approvals are invalidated by any changed live observation.
+            outcomes={c['result'] for c in db.execute(
+                'SELECT result FROM qa_checks WHERE round_id=?',(row['id'],))}
+            status=('broken' if 'fail' in outcomes else
+                    'blocked' if 'blocked' in outcomes else 'testing')
+            self.state(db,key,status,at)
         return 'ok',self.snapshot(key)
 
     def sign(self,key,role,note):
@@ -170,6 +197,8 @@ class Protocol:
             # Do not demand the operator type an eighth, duplicated account.
             # Their explicit confirmation button is still required, as are the
             # new coach run, positive checks and independent reviewer signoff.
+            if role=='operator' and len(note.strip())<12:
+                note=row['operator_note'].strip()
             if role=='operator' and len(note.strip())<12:
                 details={c['step']:c['note'].strip() for c in checks}
                 observed=details['postcondition']

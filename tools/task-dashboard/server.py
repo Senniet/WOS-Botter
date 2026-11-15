@@ -605,12 +605,13 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200,{"ok":True},{"Set-Cookie":"qa_session=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Strict"})
         if path=="/api/sync":
             return self.reply(200,{"imported":self.board.sync_diagnostics(force=True)})
-        match=re.fullmatch(r"/api/tasks/([A-Z][A-Z0-9_]{1,79})/qa/(start|attach|check|operator-sign)",path)
+        match=re.fullmatch(r"/api/tasks/([A-Z][A-Z0-9_]{1,79})/qa/(start|attach|check|operator-note|operator-sign)",path)
         if match:
             key,action=match.groups()
             if action=='start':state,data=self.board.protocol.begin(key,payload.get('build'),'Operator')
             elif action=='attach':state,data=self.board.protocol.attach(key,payload.get('coach_run'),'Operator')
             elif action=='check':state,data=self.board.protocol.check(key,payload.get('step'),payload.get('result'),payload.get('note'),'Operator')
+            elif action=='operator-note':state,data=self.board.protocol.save_operator_note(key,payload.get('note'),'Operator')
             else:state,data=self.board.protocol.sign(key,'operator',payload.get('note'))
             return self.reply(200,{"result":state,"qa":data}) if state=='ok' else self.reply(400,{"error":state})
         if path.startswith("/api/tasks/") and path.endswith("/issues"):
