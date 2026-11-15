@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0b1325">
+  <title>SurvivalOps · QA Dashboard</title>
+  <link rel="stylesheet" href="/style.css">
+  <script defer src="/app.js"></script>
+</head>
+<body>
+<div id="login" class="login-overlay" hidden>
+ <form id="login-form" class="login-card">
+  <div class="brand-logo">S<span>O</span></div>
+  <div class="eyebrow">PRIVÉ · LAN DASHBOARD</div>
+  <h1>SurvivalOps kwaliteitscontrole</h1>
+  <p>Log in om de gezamenlijke takenlijst, meldingen en testresultaten te bekijken of bij te werken.</p>
+  <label for="password">Toegangswachtwoord</label>
+  <input id="password" name="password" type="password" autocomplete="current-password" required autofocus placeholder="Wachtwoord">
+  <div id="login-error" class="error-text" role="alert"></div>
+  <button class="primary" type="submit">Dashboard openen</button>
+ </form>
+</div>
+<div id="app" hidden>
+<header class="topbar">
+ <div class="topbar-inner">
+  <div class="brand"><div class="brand-logo small">S<span>O</span></div><div><strong>SurvivalOps</strong><div class="brand-sub">QA Control Center <span class="bullet">·</span> Gedeelde takenlijst</div></div></div>
+  <div class="top-actions"><span class="private"><span class="dot"></span> LAN · webserver</span><button id="system-view" class="ghost" type="button">Algemene meldingen</button><button id="refresh" class="ghost" type="button" title="Diagnostiek opnieuw inladen">↻ Vernieuwen</button><button id="logout" class="ghost" type="button">Uitloggen</button></div>
+ </div>
+</header>
+<main class="shell">
+ <div class="hero">
+  <div><div class="eyebrow">GEMEENSCHAPPELIJKE PROJECTSTATUS</div><h1>Alles testen. Niets vergeten.</h1><p>Dezelfde taakstatus voor jou en ChatGPT. Een vinkje is een handmatige bevestiging; fouten en screenshots uit de diagnostiek staan er apart bij.</p></div>
+  <div class="hero-side"><span id="updated" class="muted">Status laden…</span><a href="https://github.com/Senniet/WOS-Botter/issues/35" target="_blank" rel="noopener noreferrer">Project op GitHub ↗</a></div>
+ </div>
+ <section class="stats" id="stats" aria-label="Voortgang"></section>
+ <div class="workspace">
+  <section class="task-panel">
+   <div class="panel-heading">
+    <div><h2>Alle taken <span id="show-count" class="count"></span></h2><div class="muted">Kies een taak om de details en openstaande fouten te bekijken</div></div>
+    <button id="only-issues" type="button" class="outline">Alleen aandachtspunten</button>
+   </div>
+   <div class="filters">
+     <div class="search-wrap"><span>⌕</span><input id="search" type="search" placeholder="Zoek taak, ID of fout…" aria-label="Zoeken"></div>
+     <select id="category" aria-label="Categorie"><option value="">Alle categorieën</option></select>
+     <select id="status" aria-label="Status">
+      <option value="">Alle statussen</option><option value="not_tested">Nog niet getest</option><option value="testing">In onderzoek</option><option value="working">Lijkt te werken</option><option value="broken">Werkt niet</option><option value="blocked">Geblokkeerd</option><option value="verified">Afgevinkt</option>
+     </select>
+   </div>
+   <div class="column-title"><span>Taak</span><span>Status</span><span>Meldingen</span></div>
+   <div id="task-list" class="task-list" aria-live="polite"></div>
+   <div id="empty" class="empty" hidden>Geen taken gevonden met deze filters.</div>
+  </section>
+  <aside class="detail-panel" id="detail-panel">
+    <div id="detail" class="detail-inner"><div class="detail-placeholder">Selecteer een taak om verder te gaan.</div></div>
+  </aside>
+ </div>
+ <div class="footer">
+  <span>Gegevens blijven op de eigen webserver. De broncode en automatisering staan op GitHub.</span>
+  <span id="diagnostics-count" class="muted"></span>
+ </div>
+</main>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</div>
+</body>
+</html>

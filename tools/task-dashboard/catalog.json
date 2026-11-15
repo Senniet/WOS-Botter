@@ -1,0 +1,429 @@
+[
+  {
+    "key": "GAME_ANALYTICS_LABYRINTH",
+    "code": 510,
+    "label": "Collect Alliance Labyrinth Ranking",
+    "category": "ANALYTICS",
+    "factory": "GameAnalyticsRoutine"
+  },
+  {
+    "key": "GAME_ANALYTICS_POWER",
+    "code": 511,
+    "label": "Collect Alliance Power Ranking",
+    "category": "ANALYTICS",
+    "factory": "GameAnalyticsRoutine"
+  },
+  {
+    "key": "ALLIANCE_AUTOJOIN",
+    "code": 40,
+    "label": "Alliance Autojoin",
+    "category": "ALLIANCE",
+    "factory": "AllianceAutojoinRoutine"
+  },
+  {
+    "key": "ALLIANCE_CHAMPIONSHIP",
+    "code": 49,
+    "label": "Alliance Championship",
+    "category": "ALLIANCE",
+    "factory": "AllianceChampionshipRoutine"
+  },
+  {
+    "key": "ALLIANCE_CHESTS",
+    "code": 44,
+    "label": "Alliance Chests",
+    "category": "ALLIANCE",
+    "factory": "AllianceChestRoutine"
+  },
+  {
+    "key": "ALLIANCE_MOBILIZATION",
+    "code": 46,
+    "label": "Alliance Mobilization",
+    "category": "ALLIANCE",
+    "factory": "AllianceMobilizationRoutine"
+  },
+  {
+    "key": "ALLIANCE_PET_TREASURE",
+    "code": 43,
+    "label": "Alliance Pet Treasure",
+    "category": "ALLIANCE",
+    "factory": "PetAllianceTreasuresRoutine"
+  },
+  {
+    "key": "ALLIANCE_SHOP",
+    "code": 47,
+    "label": "Alliance Shop",
+    "category": "ALLIANCE",
+    "factory": "AllianceShopRoutine"
+  },
+  {
+    "key": "ALLIANCE_TECH",
+    "code": 42,
+    "label": "Alliance Tech",
+    "category": "ALLIANCE",
+    "factory": "AllianceTechRoutine"
+  },
+  {
+    "key": "ALLIANCE_TRIUMPH",
+    "code": 45,
+    "label": "Alliance Triumph",
+    "category": "ALLIANCE",
+    "factory": "TriumphRoutine"
+  },
+  {
+    "key": "BEAR_TRAP",
+    "code": 48,
+    "label": "Bear Trap Event",
+    "category": "ALLIANCE",
+    "factory": "BearTrapRoutine"
+  },
+  {
+    "key": "CHIEF_ORDER_PRODUCTIVITY_DAY",
+    "code": 302,
+    "label": "Chief Order: Productivity Day",
+    "category": "CHIEF_ORDER",
+    "factory": "ChiefOrderRoutine"
+  },
+  {
+    "key": "CHIEF_ORDER_RUSH_JOB",
+    "code": 300,
+    "label": "Chief Order: Rush Job",
+    "category": "CHIEF_ORDER",
+    "factory": "ChiefOrderRoutine"
+  },
+  {
+    "key": "CHIEF_ORDER_URGENT_MOBILIZATION",
+    "code": 301,
+    "label": "Chief Order: Urgent Mobilization",
+    "category": "CHIEF_ORDER",
+    "factory": "ChiefOrderRoutine"
+  },
+  {
+    "key": "CITY_SURVIVORS",
+    "code": 71,
+    "label": "City Survivors",
+    "category": "CITY",
+    "factory": "NewSurvivorsRoutine"
+  },
+  {
+    "key": "CITY_UPGRADE_FURNACE",
+    "code": 70,
+    "label": "City Upgrade Furnace",
+    "category": "CITY",
+    "factory": "UpgradeBuildingsRoutine"
+  },
+  {
+    "key": "CITY_UPGRADE_PRIORITISE_FURNACE",
+    "code": 72,
+    "label": "Prioritise Furnace",
+    "category": "CITY",
+    "factory": "PrioritiseFurnaceRoutine"
+  },
+  {
+    "key": "RESEARCH",
+    "code": 73,
+    "label": "Research",
+    "category": "CITY",
+    "factory": "ResearchRoutine"
+  },
+  {
+    "key": "CUSTOM_TASK",
+    "code": 500,
+    "label": "Custom Task",
+    "category": "CUSTOM",
+    "factory": null
+  },
+  {
+    "key": "DAILY_MISSIONS",
+    "code": 31,
+    "label": "Daily Missions",
+    "category": "DAILY_OBJECTIVE",
+    "factory": "DailyMissionRoutine"
+  },
+  {
+    "key": "EXPERT_AGNES_INTEL",
+    "code": 34,
+    "label": "Expert Agnes Intel",
+    "category": "DAILY_OBJECTIVE",
+    "factory": "ExpertsAgnesIntelRoutine"
+  },
+  {
+    "key": "EXPERT_ROMULUS_TAG",
+    "code": 35,
+    "label": "Expert Romulus Tag",
+    "category": "DAILY_OBJECTIVE",
+    "factory": "ExpertsRomulusTagRoutine"
+  },
+  {
+    "key": "EXPERT_ROMULUS_TROOPS",
+    "code": 36,
+    "label": "Expert Romulus Troops",
+    "category": "DAILY_OBJECTIVE",
+    "factory": "ExpertsRomulusTroopsRoutine"
+  },
+  {
+    "key": "EXPERT_SKILL_TRAINING",
+    "code": 37,
+    "label": "Expert Skill Training",
+    "category": "DAILY_OBJECTIVE",
+    "factory": "ExpertSkillTrainingRoutine"
+  },
+  {
+    "key": "INTEL",
+    "code": 33,
+    "label": "Intel",
+    "category": "DAILY_OBJECTIVE",
+    "factory": "IntelligenceRoutine"
+  },
+  {
+    "key": "MAIL_REWARDS",
+    "code": 30,
+    "label": "Mail Rewards",
+    "category": "DAILY_OBJECTIVE",
+    "factory": "MailRewardsRoutine"
+  },
+  {
+    "key": "STOREHOUSE_CHEST",
+    "code": 32,
+    "label": "Storehouse Chest",
+    "category": "DAILY_OBJECTIVE",
+    "factory": "StorehouseChestRoutine"
+  },
+  {
+    "key": "EVENT_BERSERK_CRYPTID",
+    "code": 206,
+    "label": "Manual Rally Join",
+    "category": "EVENT",
+    "factory": "ManualRallyJoinRoutine"
+  },
+  {
+    "key": "EVENT_HERO_MISSION",
+    "code": 201,
+    "label": "Hero Mission Event",
+    "category": "EVENT",
+    "factory": "HeroMissionEventRoutine"
+  },
+  {
+    "key": "EVENT_JOURNEY_OF_LIGHT",
+    "code": 203,
+    "label": "Journey of Light Event",
+    "category": "EVENT",
+    "factory": "JourneyofLightRoutine"
+  },
+  {
+    "key": "EVENT_MYRIAD_BAZAAR",
+    "code": 205,
+    "label": "Myriad Bazaar Event",
+    "category": "EVENT",
+    "factory": "MyriadBazaarEventRoutine"
+  },
+  {
+    "key": "EVENT_POLAR_TERROR",
+    "code": 204,
+    "label": "Polar Terror Hunting",
+    "category": "EVENT",
+    "factory": "PolarTerrorHuntingRoutine"
+  },
+  {
+    "key": "EVENT_TUNDRA_TRUCK",
+    "code": 200,
+    "label": "Tundra Truck Event",
+    "category": "EVENT",
+    "factory": "TundraTruckEventRoutine"
+  },
+  {
+    "key": "FISHING_MINIGAME",
+    "code": 207,
+    "label": "Fishing Minigame",
+    "category": "EVENT",
+    "factory": "FishingMinigameRoutine"
+  },
+  {
+    "key": "MERCENARY_EVENT",
+    "code": 202,
+    "label": "Mercenary Event",
+    "category": "EVENT",
+    "factory": "MercenaryEventRoutine"
+  },
+  {
+    "key": "TEST_HOOK_LOOP",
+    "code": 208,
+    "label": "Test Hook Loop",
+    "category": "EVENT",
+    "factory": "TestHookLoopRoutine"
+  },
+  {
+    "key": "CREATE_CHARACTER",
+    "code": 110,
+    "label": "Create Character",
+    "category": "LIFECYCLE",
+    "factory": "CreateCharacterRoutine"
+  },
+  {
+    "key": "DUMMY_TASK",
+    "code": 99,
+    "label": "Dummy Task",
+    "category": "LIFECYCLE",
+    "factory": "DummyRoutine"
+  },
+  {
+    "key": "GATHER_BOOST",
+    "code": 101,
+    "label": "Gather Speed Boost",
+    "category": "LIFECYCLE",
+    "factory": "GatherSpeedRoutine"
+  },
+  {
+    "key": "GATHER_RESOURCES",
+    "code": 102,
+    "label": "Gather Resources",
+    "category": "LIFECYCLE",
+    "factory": "GatherRoutine"
+  },
+  {
+    "key": "INITIALIZE",
+    "code": 100,
+    "label": "Initialize",
+    "category": "LIFECYCLE",
+    "factory": "InitializeRoutine"
+  },
+  {
+    "key": "SKIP_TUTORIAL",
+    "code": 98,
+    "label": "Skip Tutorial",
+    "category": "LIFECYCLE",
+    "factory": "SkipTutorialRoutine"
+  },
+  {
+    "key": "TRAINING_TROOPS",
+    "code": 60,
+    "label": "Training",
+    "category": "MILITARY",
+    "factory": "TrainingRoutine"
+  },
+  {
+    "key": "PET_SKILLS",
+    "code": 51,
+    "label": "Pet Skills",
+    "category": "PET",
+    "factory": "PetSkillsRoutine"
+  },
+  {
+    "key": "ARENA",
+    "code": 15,
+    "label": "Arena",
+    "category": "RESOURCE",
+    "factory": "ArenaRoutine"
+  },
+  {
+    "key": "BANK",
+    "code": 14,
+    "label": "Bank",
+    "category": "RESOURCE",
+    "factory": "BankRoutine"
+  },
+  {
+    "key": "BEAST_HUNTING",
+    "code": 16,
+    "label": "Beast Hunting",
+    "category": "RESOURCE",
+    "factory": "BeastSlayRoutine"
+  },
+  {
+    "key": "CRYSTAL_LABORATORY",
+    "code": 4,
+    "label": "Crystal Laboratory",
+    "category": "RESOURCE",
+    "factory": "CrystalLaboratoryRoutine"
+  },
+  {
+    "key": "DO_EXPLORATION",
+    "code": 105,
+    "label": "Do Exploration",
+    "category": "RESOURCE",
+    "factory": "DoExplorationRoutine"
+  },
+  {
+    "key": "EXPLORATION_CHEST",
+    "code": 7,
+    "label": "Exploration Chest",
+    "category": "RESOURCE",
+    "factory": "ExplorationRoutine"
+  },
+  {
+    "key": "HERO_RECRUITMENT",
+    "code": 1,
+    "label": "Hero Recruitment",
+    "category": "RESOURCE",
+    "factory": "HeroRecruitmentRoutine"
+  },
+  {
+    "key": "LABYRINTH",
+    "code": 11,
+    "label": "Labyrinth",
+    "category": "RESOURCE",
+    "factory": "DailyLabyrinthRoutine"
+  },
+  {
+    "key": "LIFE_ESSENCE",
+    "code": 9,
+    "label": "Life Essence",
+    "category": "RESOURCE",
+    "factory": "LifeEssenceRoutine"
+  },
+  {
+    "key": "LIFE_ESSENCE_CARING",
+    "code": 10,
+    "label": "Life Essence Caring",
+    "category": "RESOURCE",
+    "factory": "LifeEssenceCaringRoutine"
+  },
+  {
+    "key": "NOMADIC_MERCHANT",
+    "code": 2,
+    "label": "Nomadic Merchant",
+    "category": "RESOURCE",
+    "factory": "NomadicMerchantRoutine"
+  },
+  {
+    "key": "PET_ADVENTURE",
+    "code": 6,
+    "label": "Pet Adventure",
+    "category": "RESOURCE",
+    "factory": "PetAdventureChestRoutine"
+  },
+  {
+    "key": "TREK_AUTOMATION",
+    "code": 12,
+    "label": "Tundra Trek Automation",
+    "category": "RESOURCE",
+    "factory": "TundraTrekAutoRoutine"
+  },
+  {
+    "key": "TREK_SUPPLIES",
+    "code": 8,
+    "label": "Trek Supplies",
+    "category": "RESOURCE",
+    "factory": "TundraTrekRoutine"
+  },
+  {
+    "key": "VIP_POINTS",
+    "code": 5,
+    "label": "VIP Points",
+    "category": "RESOURCE",
+    "factory": "VipRoutine"
+  },
+  {
+    "key": "WAR_ACADEMY",
+    "code": 3,
+    "label": "War Academy Shards",
+    "category": "RESOURCE",
+    "factory": "WarAcademyRoutine"
+  },
+  {
+    "key": "SHOP_MYSTERY",
+    "code": 80,
+    "label": "Shop Mystery",
+    "category": "SHOP",
+    "factory": "MysteryShopRoutine"
+  }
+]
