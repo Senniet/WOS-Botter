@@ -93,6 +93,10 @@ public class StorehouseChestRoutine extends DelayedTask {
     private static final int TOOLTIP_TITLE_THRESHOLD = 88;
     private static final String BUILDING_COUNTDOWN_WHITELIST = "0123456789:d";
     private static final int BASE_STOREHOUSE_STAMINA = 120;
+    private static final AreaData STAMINA_CAPACITY_NOTICE_AREA = AreaData.of(40, 300, 680, 430);
+    private static final AreaData STAMINA_DIALOG_CLOSE_AREA = AreaData.of(560, 135, 665, 235);
+    private static final int STAMINA_CAPACITY_NOTICE_THRESHOLD = 88;
+    private static final int STAMINA_DIALOG_CLOSE_THRESHOLD = 85;
 
     // On-building countdown glyphs measured on a 720x1280 city frame.
     static final Color BUILDING_TIMER_GREEN = new Color(61, 216, 13);
@@ -308,6 +312,16 @@ public class StorehouseChestRoutine extends DelayedTask {
             logInfo("Stamina Claim button confirmed. Claiming the reward.");
             tapInside(claimButton);
             sleepTask(450);
+            if (isStaminaCapacityBlocked()) {
+                logInfo("Storehouse Claim responded with a full Chief Stamina capacity notice;"
+                        + " reward was not collected.");
+                pendingAgnesStamina = null;
+                if (!closeCapacityBlockedRewardDialog()) {
+                    captureInterfaceFailure("stamina-full-dialog-close-unverified");
+                    return StorehouseVisitFlow.CollectionState.UNKNOWN;
+                }
+                return StorehouseVisitFlow.CollectionState.BLOCKED_CAPACITY;
+            }
             StorehouseVisitFlow.CollectionState confirmation = confirmBubbleDisappeared(
                     candidate, StorehouseBubbleDetector.Kind.STAMINA);
             if (confirmation == StorehouseVisitFlow.CollectionState.CONFIRMED) {
@@ -393,6 +407,43 @@ public class StorehouseChestRoutine extends DelayedTask {
         }
         logDebug("Storehouse " + kind.name().toLowerCase(Locale.ROOT) + " bubble absent after stable scan");
         return StorehouseVisitFlow.Observation.absent();
+    }
+
+    private boolean isStaminaCapacityBlocked() {
+        RawImageData frame = emuManager.captureScreen(EMULATOR_NUMBER);
+        ImageSearchResultData notice = emuManager.locatePattern(EMULATOR_NUMBER, frame,
+                TemplatesEnum.STOREHOUSE_STAMINA_CAPACITY_MAXED,
+                STAMINA_CAPACITY_NOTICE_AREA.topLeft(),
+                STAMINA_CAPACITY_NOTICE_AREA.bottomRight(), STAMINA_CAPACITY_NOTICE_THRESHOLD);
+        return notice != null && notice.isFound();
+    }
+
+    private boolean closeCapacityBlockedRewardDialog() {
+        RawImageData frame = emuManager.captureScreen(EMULATOR_NUMBER);
+        ImageSearchResultData close = emuManager.locatePattern(EMULATOR_NUMBER, frame,
+                TemplatesEnum.STOREHOUSE_STAMINA_REWARD_CLOSE,
+                STAMINA_DIALOG_CLOSE_AREA.topLeft(),
+                STAMINA_DIALOG_CLOSE_AREA.bottomRight(), STAMINA_DIALOG_CLOSE_THRESHOLD);
+        if (close == null || !close.isFound()) {
+            logWarning("Stamina full, but the reward dialog's close icon was not verified.");
+            return false;
+        }
+        tapInside(close);
+        sleepTask(CLAIM_CLOSE_SETTLE_MILLIS);
+        for (int attempt = 0; attempt < 2; attempt++) {
+            RawImageData after = emuManager.captureScreen(EMULATOR_NUMBER);
+            ImageSearchResultData title = emuManager.locatePattern(EMULATOR_NUMBER, after,
+                    TemplatesEnum.STOREHOUSE_STAMINA_REWARD_TITLE,
+                    STAMINA_REWARD_TITLE_AREA.topLeft(),
+                    STAMINA_REWARD_TITLE_AREA.bottomRight(), REWARD_TITLE_THRESHOLD);
+            if (title != null && title.isFound()) {
+                logWarning("Stamina reward dialog remained open after its verified close control.");
+                return false;
+            }
+            if (attempt == 0) sleepTask(150);
+        }
+        logInfo("Full-capacity Storehouse reward dialog closed and title disappearance verified.");
+        return true;
     }
 
     private ImageSearchResultData awaitStaminaClaimButton() {
