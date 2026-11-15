@@ -37,6 +37,14 @@ public final class LanDiagnosticReporter {
     private static final String CERT_SHA256 =
             "e427136dc48a04dd6afbdc6728cc06ff353eb69237b1efcb3e90adcd386536c7";
     private static final int MAX_SCREENSHOT = 2_000_000;
+    private static final URI TASK_COACH_ENDPOINT = URI.create(
+            "https://10.0.0.100:18761/api/taskcoach/evidence");
+    private static final ThreadPoolExecutor EVIDENCE_EXECUTOR = new ThreadPoolExecutor(
+            1, 1, 0, TimeUnit.SECONDS, new ArrayBlockingQueue<>(2), job -> {
+                Thread thread = new Thread(job, "SurvivalOps-TaskCoachEvidenceUpload");
+                thread.setDaemon(true);
+                return thread;
+            }, new ThreadPoolExecutor.AbortPolicy());
     private static final ThreadPoolExecutor EXECUTOR = new ThreadPoolExecutor(
             1, 1, 0, TimeUnit.SECONDS, new ArrayBlockingQueue<>(24), job -> {
                 Thread t = new Thread(job, "SurvivalOps-LanDiagnostics");
@@ -56,6 +64,70 @@ public final class LanDiagnosticReporter {
         if (!file.startsWith(root.resolve("logs/snapshot")) || !file.getFileName().toString().endsWith(".png"))
             return;
         submit(activity, kind, file);
+    }
+
+    /** Share a complete bounded Task Coach report through the existing pinned,
+     * authenticated private LAN diagnostics service. This is opt-in via the
+     * existing diagnostics and screenshot-sharing settings; never uploads
+     * images if the screenshot setting is disabled. Does not block game tasks.
+     */
+    public static String uploadTaskCoachEvidence(Path folder, java.util.function.Consumer<String> feedback) {
+        try {
+            if (!workspaceReady(WorkspacePaths.current().database()))
+                return "NOT_SHARED: LAN diagnostics not configured";
+            Map<String, String> config = ConfigService.obtain().loadGlobalSettings();
+            if (config == null || !Boolean.parseBoolean(config.getOrDefault(
+                    ConfigurationKeyEnum.LAN_DIAGNOSTICS_ENABLED_BOOL.name(), "false"))) {
+                return "NOT_SHARED: LAN diagnostics disabled in emulator settings";
+            }
+            String token = config.getOrDefault(ConfigurationKeyEnum.LAN_DIAGNOSTICS_TOKEN_STRING.name(), "");
+            if (token.length() < 32) return "NOT_SHARED: LAN token not configured";
+            boolean images = Boolean.parseBoolean(config.getOrDefault(
+                    ConfigurationKeyEnum.LAN_DIAGNOSTICS_SCREENSHOTS_BOOL.name(), "false"));
+            if (folder == null || !Files.isRegularFile(folder.resolve("summary.txt"))
+                    || !Files.isRegularFile(folder.resolve("recognition-events.csv"))) {
+                return "NOT_SHARED: Task Coach report not ready";
+            }
+            EVIDENCE_EXECUTOR.execute(() -> transmitTaskCoachEvidence(folder, images, token, feedback));
+            return images ? "QUEUED: report, scores, proposals and captures"
+                    : "QUEUED: text report only (screenshot sharing disabled)";
+        } catch (java.util.concurrent.RejectedExecutionException ex) {
+            return "NOT_SHARED: evidence upload queue full; retry using Upload evidence";
+        } catch (RuntimeException ex) {
+            return "NOT_SHARED: evidence uploader unavailable (" + ex.getClass().getSimpleName() + ")";
+        }
+    }
+
+    private static void transmitTaskCoachEvidence(Path folder, boolean images, String token,
+                                                   java.util.function.Consumer<String> feedback) {
+        String status;
+        try {
+            TaskCoachEvidenceBundle.Package archive = TaskCoachEvidenceBundle.create(folder, images);
+            HttpRequest request = HttpRequest.newBuilder(TASK_COACH_ENDPOINT)
+                    .header("Authorization", "Bearer " + token)
+                    .header("Content-Type", "application/zip")
+                    .header("X-SurvivalOps-Session", archive.sessionId())
+                    .timeout(Duration.ofSeconds(90))
+                    .POST(HttpRequest.BodyPublishers.ofByteArray(archive.zip()))
+                    .build();
+            var response = client().send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() == 201 || response.statusCode() == 200) {
+                status = "UPLOADED: " + archive.sessionId() + " (" + archive.imageFiles()
+                        + " images; " + archive.omittedImages() + " omitted). Stored on webserver under taskcoach/.";
+                LOG.info("Task Coach evidence uploaded: {} ({} image files)",
+                        archive.sessionId(), archive.imageFiles());
+            } else {
+                status = "UPLOAD_FAILED: HTTP " + response.statusCode() + "; retry Upload evidence";
+                LOG.warn("Task Coach upload rejected: HTTP {}", response.statusCode());
+            }
+        } catch (Exception ex) {
+            status = "UPLOAD_FAILED: " + ex.getClass().getSimpleName() + "; retry Upload evidence";
+            LOG.warn("Task Coach evidence upload unavailable: {}", ex.toString());
+        }
+        if (feedback != null) {
+            try { feedback.accept(status); }
+            catch (RuntimeException ignored) { /* Display status must not impact game */ }
+        }
     }
 
     public static void failure(String task, String exceptionType) {

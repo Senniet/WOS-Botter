@@ -59,8 +59,10 @@
                     <Button text="Run task + diagnose" onAction="#handleStartTaskCoach" styleClass="compact-button"/>
                     <Button text="Stop diagnostics" onAction="#handleStopTaskCoach" styleClass="compact-button"/>
                     <Button text="Show report" onAction="#handleShowTaskCoach" styleClass="compact-button"/>
+                    <Button text="Upload evidence" onAction="#handleUploadTaskCoachEvidence" styleClass="compact-button"/>
                 </HBox>
                 <Label fx:id="coachStatusLabel" text="Idle — select a task and profile" wrapText="true" styleClass="field-label"/>
+                <Label text="Evidence upload uses LAN Diagnostics settings. Images require the existing screenshot-sharing option." wrapText="true" styleClass="field-label"/>
                 <Button text="Rollback selected template repair" onAction="#handleRollbackCoachTemplate" styleClass="compact-button" maxWidth="Infinity"/>
                 <Label text="Original templates are preserved. Unverified proposals remain inactive." wrapText="true" styleClass="field-label"/>
             </VBox>

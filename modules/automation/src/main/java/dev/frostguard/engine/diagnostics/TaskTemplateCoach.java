@@ -105,6 +105,7 @@ public final class TaskTemplateCoach {
         volatile boolean active;
         volatile Thread ownerThread;
         volatile String outcome = "UNKNOWN";
+        volatile String evidenceUploadStatus = "LOCAL_ONLY: no upload started";
         final java.util.concurrent.atomic.AtomicBoolean sawTroopUnlock = new java.util.concurrent.atomic.AtomicBoolean();
         final AtomicInteger unlockBlockerChecks = new AtomicInteger();
         Session(long profileId, String device, TpDailyTaskEnum task, Path dir, boolean autoApply) {
@@ -135,6 +136,8 @@ public final class TaskTemplateCoach {
         Session session = CURRENT.get();
         if (session == null) return;
         session.active = false;
+        // A completed report must never be overwritten by a later Stop click.
+        if (session.phase.equals("COMPLETED")) return;
         if (!session.phase.equals("COMPLETED")) {
             session.phase = "STOPPED";
             session.note = "Monitoring stopped; scheduled game task was NOT cancelled";
@@ -152,6 +155,11 @@ public final class TaskTemplateCoach {
                 session.stats.values().stream().sorted(Comparator.comparingInt((Stats stat) -> stat.misses).reversed())
                         .forEach(stat -> report.add(stat.name + " hits=" + stat.hits + " misses=" + stat.misses));
                 Files.write(session.dir.resolve("summary.txt"), report, StandardCharsets.UTF_8);
+                List<String> events = new ArrayList<>();
+                events.add("time_utc,template,method,threshold,score,hit,x,y,roi_left,roi_top,roi_right,roi_bottom");
+                events.addAll(session.observations);
+                Files.write(session.dir.resolve("recognition-events.csv"), events, StandardCharsets.UTF_8);
+                uploadEvidence(session);
             } catch (Exception ignored) { /* preserving the live game task matters more */ }
         }, "survivalops-task-coach-stop-report");
         partial.setDaemon(true);
@@ -265,6 +273,7 @@ public final class TaskTemplateCoach {
                         + " proposed, " + session.repaired.get() + " verified repair(s) enabled, "
                         + session.drops.get() + " capture(s) dropped. Details in summary.txt";
                 session.phase = "COMPLETED";
+                uploadEvidence(session);
             } catch (Exception ex) {
                 session.phase = "ERROR";
                 session.note = "Final audit error: " + ex.getClass().getSimpleName() + " " + ex.getMessage();
@@ -272,6 +281,53 @@ public final class TaskTemplateCoach {
         }, "survivalops-task-coach-finalizer");
         finalizer.setDaemon(true);
         finalizer.start();
+    }
+
+    /** Retry upload of the most recently completed (or stopped) diagnostic run.
+     * This never triggers a new game task or alters templates.
+     */
+    private static volatile String previousEvidenceUploadStatus = "LOCAL_ONLY: no upload started";
+
+    public static String uploadCurrentEvidence() {
+        Session session = CURRENT.get();
+        if (session != null) {
+            if (session.active || session.phase.equals("FINALIZING") || session.phase.equals("ARMED")) {
+                return "Complete or stop diagnostics before uploading evidence";
+            }
+            return uploadEvidence(session);
+        }
+        // After a restart the last local evidence remains in the workspace.
+        // Let the operator upload it without re-running the game task.
+        try {
+            Path runs = WorkspacePaths.current().cache().resolve("task-template-coach");
+            if (!Files.isDirectory(runs)) return "No local Task Coach evidence found";
+            try (var paths = Files.list(runs)) {
+                Path latest = paths.filter(Files::isDirectory)
+                        .filter(p -> Files.isRegularFile(p.resolve("summary.txt"))
+                                && Files.isRegularFile(p.resolve("recognition-events.csv")))
+                        .max(Comparator.comparing(p -> p.getFileName().toString()))
+                        .orElse(null);
+                if (latest == null) return "No completed Task Coach report found";
+                String result = LanDiagnosticReporter.uploadTaskCoachEvidence(latest,
+                        value -> previousEvidenceUploadStatus = value);
+                previousEvidenceUploadStatus = result;
+                return result;
+            }
+        } catch (Exception ex) {
+            return "Could not find previous Task Coach evidence: " + ex.getClass().getSimpleName();
+        }
+    }
+
+    public static String evidenceUploadStatus() {
+        Session session = CURRENT.get();
+        return session == null ? previousEvidenceUploadStatus : session.evidenceUploadStatus;
+    }
+
+    private static String uploadEvidence(Session session) {
+        String result = LanDiagnosticReporter.uploadTaskCoachEvidence(session.dir,
+                value -> session.evidenceUploadStatus = value);
+        session.evidenceUploadStatus = result;
+        return result;
     }
 
     /** Called on the real recognition path; constant time unless a bounded capture is due. */

@@ -112,6 +112,7 @@ public class DebuggingLayoutController {
 
     private javafx.animation.Timeline coachStatusTimer;
     private String lastCoachPhase = "IDLE";
+    private String lastCoachEvidenceUploadStatus = "";
 
     private File currentScreenshotFile;
     private List<File> allTemplates = new ArrayList<>();
@@ -602,6 +603,13 @@ public class DebuggingLayoutController {
     }
 
     @FXML
+    private void handleUploadTaskCoachEvidence(ActionEvent event) {
+        String result = TaskTemplateCoach.uploadCurrentEvidence();
+        log("Task Coach evidence: " + result);
+        refreshTaskCoachStatus(false);
+    }
+
+    @FXML
     private void handleShowTaskCoach(ActionEvent event) {
         refreshTaskCoachStatus(true);
         var status = TaskTemplateCoach.snapshot();
@@ -629,7 +637,15 @@ public class DebuggingLayoutController {
                 + " | checks " + status.checks() + ", hits " + status.hits()
                 + ", misses " + status.misses() + ", captures " + status.captures()
                 + ", proposed " + status.proposals() + ", repaired " + status.repaired()
-                + "\n" + status.note());
+                + "\n" + status.note()
+                + "\nWebserver evidence: " + TaskTemplateCoach.evidenceUploadStatus());
+        String uploadStatus = TaskTemplateCoach.evidenceUploadStatus();
+        if (!uploadStatus.equals(lastCoachEvidenceUploadStatus)) {
+            lastCoachEvidenceUploadStatus = uploadStatus;
+            if (uploadStatus.startsWith("UPLOADED") || uploadStatus.startsWith("UPLOAD_FAILED")) {
+                log("Task Coach webserver evidence: " + uploadStatus);
+            }
+        }
         if (!lastCoachPhase.equals(status.phase())) {
             lastCoachPhase = status.phase();
             if (status.phase().equals("COMPLETED") || status.phase().equals("ERROR")) {
