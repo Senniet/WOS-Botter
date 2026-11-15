@@ -574,6 +574,8 @@ public class DebuggingLayoutController {
         }
     }
 
+    private record TemplateAuditScore(String name, double score) {}
+
     /** Non-destructive screenshot audit: absence on one frame is NOT a stale template. */
     private void scanVisibleTemplates() {
         if (currentScreenshotFile == null || screenshotImageView.getImage() == null) {
@@ -594,33 +596,69 @@ public class DebuggingLayoutController {
             @Override
             protected List<String> call() throws Exception {
                 byte[] capture = Files.readAllBytes(screenshot.toPath());
-                List<String> hits = new ArrayList<>();
+                List<String> report = new ArrayList<>();
+                List<String> failures = new ArrayList<>();
+                List<TemplateAuditScore> scores = new ArrayList<>();
                 int checked = 0;
-                int errors = 0;
+                int skipped = 0;
                 for (File template : candidates) {
                     if (isCancelled()) break;
                     String path = template.getAbsolutePath().replace("\\", "/");
                     int marker = path.indexOf("/templates/");
-                    if (marker < 0) { errors++; continue; }
+                    if (marker < 0) {
+                        failures.add(template.getName() + ": not under templates directory");
+                        skipped++;
+                        continue;
+                    }
                     try {
+                        String resource = path.substring(marker);
+                        if (OpenCvPatternLocator.class.getResource(resource) == null) {
+                            failures.add(template.getName() + ": missing bundled resource " + resource);
+                            checked++;
+                            continue;
+                        }
+                        java.awt.image.BufferedImage sprite = javax.imageio.ImageIO.read(template);
+                        if (sprite == null) {
+                            failures.add(template.getName() + ": unreadable image");
+                            checked++;
+                            continue;
+                        }
+                        if (sprite.getWidth() > width || sprite.getHeight() > height) {
+                            failures.add(template.getName() + ": larger than screenshot");
+                            checked++;
+                            continue;
+                        }
                         ImageSearchResultData result = OpenCvPatternLocator.locatePattern(
-                                capture, path.substring(marker), new PointData(0, 0),
-                                new PointData(width, height), 90.0);
-                        if (result != null && result.isFound()) {
-                            hits.add(String.format(java.util.Locale.ROOT,
-                                    "MATCH %s: %.1f%% at (%.0f, %.0f)", template.getName(),
-                                    result.getMatchPercentage(), result.getPoint().getX(),
-                                    result.getPoint().getY()));
+                                capture, resource, new PointData(0, 0),
+                                new PointData(width, height), 0.0);
+                        if (result == null || !Double.isFinite(result.getMatchPercentage())) {
+                            failures.add(template.getName() + ": no valid score");
+                        } else {
+                            scores.add(new TemplateAuditScore(template.getName(),
+                                    result.getMatchPercentage()));
                         }
                     } catch (RuntimeException ex) {
-                        errors++;
+                        failures.add(template.getName() + ": " + ex.getClass().getSimpleName()
+                                + " - " + ex.getMessage());
                     }
                     checked++;
                     if (checked % 25 == 0) updateMessage("Scanned " + checked + "/" + candidates.size());
                 }
-                hits.add("Completed: " + checked + " checked, " + (hits.size())
-                        + " visible matches, " + errors + " errors. Non-matches are not necessarily outdated.");
-                return hits;
+                scores.sort((left, right) -> Double.compare(right.score(), left.score()));
+                long strong = scores.stream().filter(score -> score.score() >= 90).count();
+                long possible = scores.stream().filter(score -> score.score() >= 70 && score.score() < 90).count();
+                report.add("Scan complete: " + checked + " checked, " + strong
+                        + " strong (90%+), " + possible + " possible (70-90%), "
+                        + failures.size() + " errors, " + skipped + " skipped.");
+                report.add("Best 30 scores (below 90% is NOT a verified match):");
+                for (int i = 0; i < Math.min(30, scores.size()); i++) {
+                    TemplateAuditScore score = scores.get(i);
+                    report.add(String.format(java.util.Locale.ROOT, "  %.1f%% %s",
+                            score.score(), score.name()));
+                }
+                for (String failure : failures) report.add("ERROR " + failure);
+                report.add("Scores are for this screenshot only; missing elements do not imply stale assets.");
+                return report;
             }
         };
         task.messageProperty().addListener((obs, oldValue, newValue) -> log(newValue));
