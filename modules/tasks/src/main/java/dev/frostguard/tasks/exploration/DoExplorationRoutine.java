@@ -140,18 +140,15 @@ public class DoExplorationRoutine extends DelayedTask {
     }
 
     private boolean explorationTitleVisible() {
-        // At 14:12 the current page clearly showed the Exploration heading
-        // at y~18..65, above the older y=65..160 search region. Reuse the
-        // existing page instead of tapping the lower-left HUD a second time.
-        if (templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_EXPLORATION_TITLE_NOV_2026,
+        // Current 720x1280 page: NOV_2026 matched 100% in live Task Coach.
+        // Earlier SERVE_EMU_EXPLORATION_TITLE and original
+        // EXPLORATION_SCREEN_TITLE scored 37-50% on that exact page.
+        // They are retained as archived assets but no longer scanned in a
+        // fallback cascade. If the current title fails, do not infer a page.
+        return templateSearchHelper.locatePattern(
+                TemplatesEnum.SERVE_EMU_EXPLORATION_TITLE_NOV_2026,
                 SearchConfig.builder().withMaxAttempts(1).withThreshold(92)
-                        .withArea(AreaData.of(65, 0, 335, 115)).build()).isFound()) return true;
-        if (templateSearchHelper.locatePattern(TemplatesEnum.EXPLORATION_SCREEN_TITLE,
-                SearchConfig.builder().withMaxAttempts(2).withDelay(150).withThreshold(90)
-                        .withArea(AreaData.of(70, 5, 365, 150)).build()).isFound()) return true;
-        return templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_EXPLORATION_TITLE,
-                SearchConfig.builder().withMaxAttempts(2).withDelay(150).withThreshold(90)
-                        .withArea(AreaData.of(50, 65, 330, 160)).build()).isFound();
+                        .withArea(AreaData.of(65, 0, 335, 115)).build()).isFound();
     }
 
     private ImageSearchResultData detectExploreButton() {
