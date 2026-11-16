@@ -51,6 +51,16 @@ public class TemplateSearchHelper {
         this.logs        = LoggingService.obtain();
     }
 
+    private EmulatorRecognitionPolicy recognitionPolicy() {
+        // Helpers can be created before an emulator is initialized (notably
+        // during scheduling). Read the selected backend at SEARCH time so a
+        // helper never permanently caches the legacy/null policy.
+        return EmulatorRecognitionPolicy.forEmulator(
+                emu == null ? null : emu.getSelectedEmulatorType());
+    }
+
+    public boolean usesServeEmuRecognition() { return recognitionPolicy().isServeEmu(); }
+
     public int getFailedSearches() { return missCount; }
 
     public void setPreemptionCheck(Runnable check) {
@@ -68,6 +78,7 @@ public class TemplateSearchHelper {
      * Never use this alone to authorize an action.
      */
     public ImageSearchResultData locatePatternFast(TemplatesEnum tpl, SearchConfig cfg) {
+        if (!recognitionPolicy().shouldProbe(tpl)) return ImageSearchResultData.miss();
         preemptionHook.run();
         ImageSearchResultData result = doSearch(tpl, cfg);
         return result == null ? ImageSearchResultData.miss() : result;
@@ -93,11 +104,13 @@ public class TemplateSearchHelper {
                                                TemplatesEnum... alternatives) {
         Objects.requireNonNull(preferred, "preferred");
         Objects.requireNonNull(cfg, "cfg");
+        if (!recognitionPolicy().shouldProbe(preferred)) return ImageSearchResultData.miss();
         ImageSearchResultData primary = locatePattern(preferred, cfg);
         if (confirmedAction(preferred, cfg, primary, false)) return primary;
         if (alternatives != null) {
             for (TemplatesEnum alternative : alternatives) {
-                if (alternative == null || alternative == preferred || !alternative.existsAtPath()) continue;
+                if (alternative == null || alternative == preferred || !alternative.existsAtPath()
+                        || !recognitionPolicy().shouldProbe(alternative)) continue;
                 preemptionHook.run();
                 ImageSearchResultData exact = doSearch(alternative, cfg);
                 if (confirmedAction(alternative, cfg, exact, false)) {
@@ -105,6 +118,7 @@ public class TemplateSearchHelper {
                     return exact;
                 }
                 // The same button artwork often changes size under BlueStacks scaling.
+                if (!recognitionPolicy().useScaledAlternative(alternative)) continue;
                 ImageSearchResultData scaled = doSearchMultiScale(alternative, cfg);
                 if (confirmedAction(alternative, cfg, scaled, true)) {
                     dbg("Action " + preferred.name() + " confirmed via " + alternative.name() + " multiscale");
@@ -161,6 +175,10 @@ public class TemplateSearchHelper {
 
     private ImageSearchResultData retrySearch(TemplatesEnum tpl, SearchConfig cfg,
                                               boolean mono, boolean multiScale) {
+        if (!recognitionPolicy().shouldProbe(tpl)) {
+            dbg("Skipped obsolete " + tpl.name() + " for SERVE_EMU; other emulators unaffected");
+            return ImageSearchResultData.miss();
+        }
         ImageSearchResultData last = null;
         for (int a = 1; a <= cfg.getMaxAttempts(); a++) {
             preemptionHook.run();
@@ -173,7 +191,8 @@ public class TemplateSearchHelper {
         }
         // Only the general colour matcher gets a shared, conservative
         // fallback. Explicit mono or multiscale callers retain their semantics.
-        if (!mono && !multiScale && cfg.getThreshold() >= 90) {
+        if (!mono && !multiScale && cfg.getThreshold() >= 90
+                && recognitionPolicy().useImplicitFallback(tpl)) {
             ImageSearchResultData fallback = verifiedFallback(tpl, cfg);
             if (fallback != null && fallback.isFound()) return fallback;
         }
@@ -241,6 +260,7 @@ public class TemplateSearchHelper {
 
     private List<ImageSearchResultData> retryMultiSearch(TemplatesEnum tpl, SearchConfig cfg,
                                                          boolean mono) {
+        if (!recognitionPolicy().shouldProbe(tpl)) return List.of();
         List<ImageSearchResultData> last = null;
         for (int a = 1; a <= cfg.getMaxAttempts(); a++) {
             preemptionHook.run();

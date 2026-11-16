@@ -10,6 +10,7 @@ import java.util.function.Function;
 import java.util.concurrent.locks.*;
 
 import dev.frostguard.vision.match.OpenCvPatternLocator;
+import dev.frostguard.engine.helper.EmulatorRecognitionPolicy;
 import dev.frostguard.api.configs.*;
 import dev.frostguard.engine.emulator.instance.*;
 import dev.frostguard.api.domain.*;
@@ -52,6 +53,7 @@ public class EmulatorController {
     private final Map<String,Long> physicalOwnerProfileIds = new ConcurrentHashMap<>();
     private final Map<String,Long>   cooldowns    = new HashMap<>();
     private EmulatorInstance backend;
+    private volatile EmulatorType selectedType;
     private int maxSlots = 3;
 
     private EmulatorController() {}
@@ -86,12 +88,21 @@ public class EmulatorController {
             case BLUESTACKS -> new BlueStacksEmulatorInstance(dir);
             case SERVE_EMU -> new ServeEmuEmulatorInstance(dir);
         };
-        LOG.info("Backend: {}", kind.getDisplayName());
+        selectedType = kind;
+        LOG.info("Backend: {}; recognition strategy selected per backend", kind.getDisplayName());
 
         // slot capacity
         maxSlots = Optional.ofNullable(cfg.get(ConfigurationKeyEnum.MAX_RUNNING_EMULATORS_INT.name()))
                 .map(Integer::parseInt)
                 .orElse(Integer.parseInt(ConfigurationKeyEnum.MAX_RUNNING_EMULATORS_INT.getDefaultValue()));
+    }
+
+    /** Only the initialized backend determines the recognition policy.
+     * Never infer emulator type from screenshots or profile labels.
+     * Pre-init scheduling tests and cold-start routines may construct their
+     * helpers before a backend exists; null uses the unchanged legacy policy. */
+    public EmulatorType getSelectedEmulatorType() {
+        return selectedType;
     }
 
     private void requireBackend() {
@@ -197,15 +208,22 @@ public class EmulatorController {
         requireBackend(); return backend.readText(idx, a, b, c, reuseFrame);
     }
 
+    private boolean probeAllowed(TemplatesEnum template) {
+        requireBackend();
+        return EmulatorRecognitionPolicy.forEmulator(selectedType).shouldProbe(template);
+    }
+
     // --- template matching ---
 
     public ImageSearchResultData locatePattern(String idx, TemplatesEnum t,
             PointData tl, PointData br, double th) {
+        if (!probeAllowed(t)) return ImageSearchResultData.miss();
         return locatePattern(idx, captureScreen(idx), t, tl, br, th);
     }
 
     public ImageSearchResultData locatePattern(String idx, RawImageData frame,
             TemplatesEnum t, PointData tl, PointData br, double th) {
+        if (!probeAllowed(t)) return ImageSearchResultData.miss();
         requireBackend();
         try { OpenCvPatternLocator.setContextLabel(label(idx));
               ImageSearchResultData result = OpenCvPatternLocator.locatePattern(frame, regionTpl(t.getTemplate()), tl, br, th);
@@ -220,6 +238,7 @@ public class EmulatorController {
     }
 
     public ImageSearchResultData locatePattern(String idx, TemplatesEnum t, double th) {
+        if (!probeAllowed(t)) return ImageSearchResultData.miss();
         return locatePattern(idx, captureScreen(idx), t, th);
     }
     public ImageSearchResultData locatePattern(String idx, RawImageData frame, TemplatesEnum t, double th) {
@@ -228,6 +247,7 @@ public class EmulatorController {
 
     public ImageSearchResultData locatePatternMultiScale(String idx, RawImageData frame,
             TemplatesEnum t, PointData tl, PointData br, double th) {
+        if (!probeAllowed(t)) return ImageSearchResultData.miss();
         requireBackend();
         try { OpenCvPatternLocator.setContextLabel(label(idx));
               ImageSearchResultData result = OpenCvPatternLocator.locatePatternMultiScale(frame, regionTpl(t.getTemplate()), tl, br, th);
@@ -242,9 +262,11 @@ public class EmulatorController {
     }
     public ImageSearchResultData locatePatternMultiScale(String idx, TemplatesEnum t,
             PointData tl, PointData br, double th) {
+        if (!probeAllowed(t)) return ImageSearchResultData.miss();
         return locatePatternMultiScale(idx, captureScreen(idx), t, tl, br, th);
     }
     public ImageSearchResultData locatePatternMultiScale(String idx, TemplatesEnum t, double th) {
+        if (!probeAllowed(t)) return ImageSearchResultData.miss();
         return locatePatternMultiScale(idx, captureScreen(idx), t, ORIGIN, FULL, th);
     }
     public ImageSearchResultData locatePatternMultiScale(String idx, RawImageData frame, TemplatesEnum t, double th) {
@@ -253,6 +275,7 @@ public class EmulatorController {
 
     public ImageSearchResultData locatePatternMono(String idx, TemplatesEnum t,
             PointData tl, PointData br, double th) {
+        if (!probeAllowed(t)) return ImageSearchResultData.miss();
         requireBackend(); RawImageData frame = captureScreen(idx);
         try { OpenCvPatternLocator.setContextLabel(label(idx));
               ImageSearchResultData result = OpenCvPatternLocator.locatePatternMono(frame, regionTpl(t.getTemplate()), tl, br, th);
@@ -271,6 +294,7 @@ public class EmulatorController {
 
     public List<ImageSearchResultData> locateAllPatternsMono(String idx, TemplatesEnum t,
             PointData tl, PointData br, double th, int max) {
+        if (!probeAllowed(t)) return List.of();
         requireBackend(); RawImageData frame = captureScreen(idx);
         try { OpenCvPatternLocator.setContextLabel(label(idx));
               List<ImageSearchResultData> results = OpenCvPatternLocator.locateAllPatternsMono(
@@ -285,6 +309,7 @@ public class EmulatorController {
 
     public List<ImageSearchResultData> locateAllPatterns(String idx, TemplatesEnum t,
             PointData tl, PointData br, double th, int max) {
+        if (!probeAllowed(t)) return List.of();
         requireBackend(); RawImageData frame = captureScreen(idx);
         try { OpenCvPatternLocator.setContextLabel(label(idx));
               List<ImageSearchResultData> results = OpenCvPatternLocator.locateAllPatterns(
@@ -295,6 +320,7 @@ public class EmulatorController {
     }
     public List<ImageSearchResultData> locateAllPatterns(String idx, RawImageData frame,
             TemplatesEnum t, PointData tl, PointData br, double th, int max) {
+        if (!probeAllowed(t)) return List.of();
         requireBackend();
         try { OpenCvPatternLocator.setContextLabel(label(idx));
               List<ImageSearchResultData> results = OpenCvPatternLocator.locateAllPatterns(

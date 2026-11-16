@@ -77,7 +77,9 @@ def git_hash(data: bytes) -> str:
 def production_uses(root: Path) -> dict[str, list[str]]:
     uses = defaultdict(set)
     for p in (root / 'modules').glob('*/src/main/java/**/*.java'):
-        if p == root / ENUM:
+        if p == root / ENUM or p.name == 'EmulatorRecognitionPolicy.java':
+            # Policy declares rejected template IDs. These references are not
+            # an executed OpenCV lookup and must not be counted as hot paths.
             continue
         for key in REFERENCE.findall(p.read_text(encoding='utf-8', errors='replace')):
             uses[key].add(p.stem)
@@ -112,6 +114,44 @@ def coach_observations(evidence: Path) -> tuple[dict, int, int]:
         stat['tasks'] = sorted(stat['tasks'])
         stat['max_miss_score'] = round(stat['max_miss_score'],2)
     return dict(observed), len(sessions), sum(a['checks'] for a in observed.values())
+
+
+def task_method_profiles(evidence: Path) -> dict:
+    """Count methods per coached *task*, not per emulator or game account.
+
+    These are recognition observations, not three emulators, and not proof
+    that a template was visible. The profiles guide safe before/after runs.
+    """
+    out=defaultdict(lambda:{'sessions':set(),'observations':0,
+                            'method_counts':defaultdict(int),
+                            'templates':defaultdict(lambda:{'checks':0,'hits':0})})
+    if not evidence.is_dir(): return {}
+    for path in evidence.glob('*/*/recognition-events.csv'):
+        run=path.parent/'run.txt'
+        task=next((line[5:].strip() for line in run.read_text(errors='replace').splitlines()
+                   if line.startswith('task=')), 'UNKNOWN') if run.exists() else 'UNKNOWN'
+        if not re.fullmatch(r'[A-Z][A-Z0-9_]+',task):task='UNKNOWN'
+        profile=out[task]
+        profile['sessions'].add(path.parent.name)
+        with path.open(newline='',encoding='utf-8-sig') as source:
+            for item in csv.DictReader(source):
+                name=item.get('template','')
+                method=item.get('method','')
+                if not re.fullmatch(r'[A-Z][A-Z0-9_]+',name):continue
+                if method not in {'color','mono','multiscale','multi','multi-mono'}:continue
+                profile['observations']+=1
+                profile['method_counts'][method]+=1
+                sample=profile['templates'][name]
+                sample['checks']+=1
+                sample['hits']+=item.get('hit','').lower()=='true'
+    return {task:{'sessions':len(data['sessions']),
+                  'observations':data['observations'],
+                  'method_counts':dict(data['method_counts']),
+                  'most_checked':[
+                      dict(template=name,**stats)
+                      for name,stats in sorted(data['templates'].items(),
+                          key=lambda p:-p[1]['checks'])[:12]]}
+            for task,data in sorted(out.items())}
 
 
 def audit(root: Path, evidence: Path, upstream: str='upstream/main') -> dict:
@@ -190,6 +230,7 @@ def audit(root: Path, evidence: Path, upstream: str='upstream/main') -> dict:
         'extra_assets':extras,
         'shared_resource_paths':[{ 'resource':k, 'keys':v } for k,v in by_path.items() if len(v)>1],
         'duplicate_contents':[{ 'keys':v } for v in by_sha.values() if len(v)>1],
+        'task_recognition_profiles':task_method_profiles(evidence),
         'templates':sorted(entries, key=lambda v:v['name'])
     }
     return result
@@ -219,6 +260,10 @@ def markdown(result: dict) -> str:
     for e in seen:
         obs=e['observations']
         lines.append(f"- `{e['name']}` — {obs['checks']} observations in {obs['sessions']} sessions; peak non-match {obs['max_miss_score']}%; task(s): {', '.join(obs['tasks'])}")
+    lines += ['', '## Per-task recognition method counts (not separate emulators)', '']
+    for task,stats in result.get('task_recognition_profiles',{}).items():
+        modes=', '.join(f'{method}={count}' for method,count in stats['method_counts'].items())
+        lines.append(f"- `{task}`: {stats['sessions']} sessions, {stats['observations']} checks; {modes}")
     lines += ['', '## Next action', '',
               'Review only templates for which the expected UI was definitely visible, using cropped screen-specific evidence; write an actual before/after acceptance test. Do not globally lower thresholds or auto-promote Task Coach proposals.', '']
     return '\n'.join(lines)
