@@ -56,8 +56,15 @@
      for(const session of data.sessions){const o=make('option','',session.id+' ('+session.capture_count+' beelden)');o.value=session.id;select.append(o);}
      if(!data.sessions.length)select.append(make('option','','Geen runs gevonden'));
    }catch(e){select.append(make('option','',e.message));}}
- async function flow(){const task=el('inspector-task').value,host=el('inspector-flow');host.textContent='Broncodeflow lezen…';
-   try{const d=await get(url('/api/inspector/flow',{task}));host.replaceChildren();
+ let latestFlowRequest=0;
+ async function flow(){
+   const requestId=++latestFlowRequest;
+   const task=el('inspector-task').value,host=el('inspector-flow');
+   el('inspector-flow-section').hidden=false;
+   host.textContent='Broncodeflow lezen…';
+   try{const d=await get(url('/api/inspector/flow',{task}));
+     if(requestId!==latestFlowRequest || task!==el('inspector-task').value)return;
+     host.replaceChildren();
      host.append(make('h4','',d.label),make('div','inspect-small','Bron: '+(d.source||'niet gevonden')));
      host.append(make('p','muted',d.description||'Broncodeflow niet beschikbaar.'));
      if(d.annotated_stages?.length){
@@ -78,7 +85,7 @@
        const b=make('button','outline',name);b.type='button';
        b.addEventListener('click',()=>{const input=el('template-query');input.value=name;input.dispatchEvent(new Event('input'));input.scrollIntoView({behavior:'smooth',block:'center'});});set.append(b);
      }host.append(set);
-   }catch(e){host.textContent=e.message;}}
+   }catch(e){if(requestId===latestFlowRequest)host.textContent='Flow laden mislukt: '+e.message;}}
  async function run(){const id=el('inspector-run').value,host=el('inspector-run-result');if(!id)return;
    host.textContent='Run laden…';
    try{const d=await get(url('/api/inspector/run',{id}));host.replaceChildren();
