@@ -89,6 +89,30 @@ class ControllerTest(unittest.TestCase):
                 self.assertEqual(adb.call_count,2)
                 self.assertEqual(sum(e['type']=='tap' for e in report['events']),2)
 
+    def test_heartbeat_reports_actual_recent_probe_not_just_configured_device(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            with mock.patch.object(controller,'DATA',root):
+                self.assertFalse(controller.get_heartbeat({'serial':'emulator-5554'})['connected'])
+                controller.heartbeat(True,'emulator-5554')
+                self.assertTrue(controller.get_heartbeat({'serial':'emulator-5554'})['connected'])
+                self.assertFalse(controller.get_heartbeat({'serial':'emulator-5584'})['connected'])
+                obj=json.loads((root/'health.json').read_text());obj['unix_time']-=2700
+                (root/'health.json').write_text(json.dumps(obj))
+                self.assertFalse(controller.get_heartbeat({'serial':'emulator-5554'})['connected'])
+
+    def test_emergency_stop_blocks_new_tasks_and_next_game_action(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            with mock.patch.object(controller,'DATA',root):
+                controller.save_config({'bound':{'serial':'emulator-5554'},'paused':True})
+                self.assertTrue(controller.paused())
+                with self.assertRaisesRegex(RuntimeError,'paused'):controller.new_run('INITIALIZE')
+                with self.assertRaisesRegex(RuntimeError,'paused'):controller.require_active()
+                self.assertEqual({'paused':False,'game_actions':0},controller.pause(False))
+                self.assertFalse(controller.paused())
+                self.assertRegex(controller.new_run('INITIALIZE'),'[0-9a-f]{16}')
+
     def test_reviewed_tech_research_exit_needs_both_title_and_back(self):
         with tempfile.TemporaryDirectory() as d:
             sample=Path(d)/'research.png'

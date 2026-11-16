@@ -11,3 +11,9 @@
 .autoqa-proof{margin:8px 0 16px}.autoqa-proof img{width:min(100%,440px);max-height:460px;object-fit:contain;object-position:top;display:block;border-radius:7px}
 .autoqa-proof figcaption{font-size:.8em;opacity:.8;margin:6px 0}
 @media(max-width:800px){.autoqa-grid{grid-template-columns:1fr}.autoqa-head{flex-direction:column}}
+
+.autoqa-audit{margin:20px 0;border-top:1px solid #394b64;padding-top:16px}
+.autoqa-audit-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:8px;margin-top:12px;max-height:440px;overflow:auto}
+.autoqa-audit-item{display:flex;flex-direction:column;gap:5px;text-align:left;padding:12px;border:1px solid #34455e;border-radius:9px;background:#15243a;color:#e5edf8;cursor:pointer}
+.autoqa-audit-item small{color:#b6c5d9}
+.autoqa-audit-item:hover{border-color:#7ab8e7}

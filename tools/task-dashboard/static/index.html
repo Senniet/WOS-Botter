@@ -72,8 +72,15 @@
   <div class="autoqa-actions"><label for="autoqa-task">Taak</label><select id="autoqa-task"></select>
    <button id="autoqa-enqueue" type="button" class="primary">Observatietest starten</button>
    <button id="autoqa-navigate" type="button" class="outline" hidden>Veilige Exploration-navigatie testen</button>
-   <button id="autoqa-refresh" type="button" class="outline">Vernieuwen</button></div>
+   <button id="autoqa-claim" type="button" class="outline" hidden>Gratis Daily Claim All testen</button>
+   <button id="autoqa-refresh" type="button" class="outline">Vernieuwen</button>
+   <button id="autoqa-pause" type="button" class="outline">⏸ Testcontroller pauzeren</button></div>
   <p id="autoqa-feedback" role="status" class="muted"></p>
+  <section class="autoqa-audit"><h3>Automatische controle van alle 62 taken</h3>
+   <p class="muted">Historische Task Coach-resultaten bepalen de onderzoekvolgorde, niet of een taak definitief werkt. Ook een scheduler-uitkomst SUCCEEDED is nog geen bewijs van een opgehaalde beloning.</p>
+   <div id="autoqa-audit-summary" class="muted">Audit laden…</div>
+   <div id="autoqa-audit-list" class="autoqa-audit-list"></div>
+  </section>
   <div class="autoqa-grid"><div><h3>Testwachtrij en resultaten</h3><div id="autoqa-runs" class="autoqa-runs"></div></div>
   <div><h3>Testbewijs</h3><div id="autoqa-detail" class="autoqa-detail">Selecteer een run om het bewijs te bekijken.</div></div></div>
  </section>

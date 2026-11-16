@@ -552,6 +552,9 @@ class Handler(BaseHTTPRequestHandler):
         if not self.require_auth():return
         if path=="/api/session":return self.reply(200,{"authenticated":True})
         if path=="/api/autoqa":return self.reply(200,autoqa_bridge.status())
+        if path=="/api/autoqa/audit":
+            report=autoqa_bridge.audit()
+            return self.reply(200,report) if report else self.reply(503,{"error":"audit_not_ready"})
         if path=="/api/autoqa/detail":
             query=parse_qs(urlsplit(self.path).query)
             result=autoqa_bridge.detail(query.get("id",[""])[0])
@@ -615,6 +618,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200,{"ok":True},{"Set-Cookie":"qa_session=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Strict"})
         if path=="/api/sync":
             return self.reply(200,{"imported":self.board.sync_diagnostics(force=True)})
+        if path=="/api/autoqa/pause":
+            if set(payload)!={'paused'} or type(payload.get('paused')) is not bool:
+                return self.reply(400,{'error':'boolean_paused_required'})
+            return self.reply(200,autoqa_bridge.set_paused(payload['paused']))
         if path=="/api/autoqa/enqueue":
             if not set(payload).issubset({'task','mode'}) or 'task' not in payload or not isinstance(payload.get("task"),str):
                 return self.reply(400,{"error":"task_required"})

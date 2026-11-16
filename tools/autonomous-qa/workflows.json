@@ -344,7 +344,13 @@
       "expected_screens": [
         "daily_missions"
       ],
-      "reviewed_action_steps": [],
+      "reviewed_action_steps": [
+        "verify_daily_title_and_free_claim_twice",
+        "tap_claim_all_once",
+        "verify_reward_banner_and_dismiss_hint_twice",
+        "dismiss_reward_once",
+        "verify_daily_title_and_claim_button_gone"
+      ],
       "requires_review_for_actions": true
     },
     {

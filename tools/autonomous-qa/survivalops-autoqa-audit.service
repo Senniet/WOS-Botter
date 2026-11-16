@@ -1,0 +1,9 @@
+[Unit]
+Description=SurvivalOps cross-task Task Coach evidence audit
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/survivalops-autonomous-qa
+ExecStart=/usr/bin/python3 %h/survivalops-autonomous-qa/audit.py
+NoNewPrivileges=yes
+UMask=0077

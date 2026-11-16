@@ -22,6 +22,7 @@ import tempfile
 import time
 import recognition
 import proposals
+import daily
 
 HOME=Path.home()
 DATA=Path(os.environ.get('SURVIVALOPS_AUTOQA_DATA',HOME/'.local/share/survivalops-autoqa'))
@@ -62,8 +63,24 @@ def db():
 
 def configuration():
     path=DATA/'config.json'
-    if not path.is_file():return {'bound':None,'mode':'observe','allow_actions':False}
+    if not path.is_file():return {'bound':None,'mode':'observe','allow_unreviewed_actions':False}
     return json.loads(path.read_text())
+
+
+def paused()->bool:
+    return bool(configuration().get('paused',False))
+
+
+def require_active()->None:
+    if paused():raise RuntimeError('Controller paused by operator; refusing next game action')
+
+
+def pause(value:bool)->dict:
+    # A single stop also applies to an already executing workflow because
+    # every actual game tap is guarded immediately before ADB invocation.
+    config=configuration();config['paused']=bool(value)
+    save_config(config)
+    return {'paused':bool(value),'game_actions':0}
 
 
 def save_config(config):
@@ -131,7 +148,7 @@ def bind(serial:str,force=False)->dict:
     if cfg.get('bound') and cfg['bound']['serial']!=serial and not force:
         raise RuntimeError('Another emulator is bound; explicit --force needed')
     cfg.update(bound={k:found[k] for k in ('serial','fingerprint_hash','size','density','api')},
-               mode='observe',allow_actions=False)
+               mode='observe',allow_unreviewed_actions=False)
     save_config(cfg)
     return cfg
 
@@ -166,8 +183,14 @@ def scenario(task:str)->dict:
             'mode':'observe','steps':['verify_pinned_emulator','capture_before',
                   'recognize_current_screen','capture_after','write_evidence'],
             'expected_screens':expected.get(task,[]),
-            'reviewed_action_steps':(['verify_city_world_twice','optional_known_research_back',
-                'tap_exploration_entry_once','verify_exploration_title_and_explore_button'] if task=='DO_EXPLORATION' else []),
+            'reviewed_action_steps':(
+                ['verify_city_world_twice','optional_known_research_back',
+                 'tap_exploration_entry_once','verify_exploration_title_and_explore_button']
+                 if task=='DO_EXPLORATION' else
+                ['verify_daily_title_and_free_claim_twice','tap_claim_all_once',
+                 'verify_reward_banner_and_dismiss_hint_twice','dismiss_reward_once',
+                 'verify_daily_title_and_claim_button_gone']
+                 if task=='DAILY_MISSIONS' else []),
             'requires_review_for_actions':True}
 
 
@@ -191,13 +214,15 @@ def snapshot(run_id:str,name:str,device:str)->dict:
 
 
 def new_run(task:str,mode='observe')->str:
-    if mode not in ('observe','navigate'):
+    if mode not in ('observe','navigate','claim_free'):
         raise ValueError('Invalid test mode')
     plan=scenario(task)
-    if mode=='navigate' and (task!='DO_EXPLORATION' or not plan['reviewed_action_steps']):
+    if (mode=='navigate' and task!='DO_EXPLORATION' or
+        mode=='claim_free' and task!='DAILY_MISSIONS'):
         raise ValueError('Active test is not reviewed for this task; observation only')
     pinned=configuration().get('bound')
     if not pinned:raise ValueError('Bind a test emulator first')
+    if paused():raise RuntimeError('Controller is paused; new runs not accepted')
     run_id=os.urandom(8).hex()
     with db() as c:
         pending=c.execute("select count(*) from runs where state in ('queued','running')").fetchone()[0]
@@ -207,13 +232,37 @@ def new_run(task:str,mode='observe')->str:
     return run_id
 
 
+def heartbeat(healthy:bool,serial:str,reason:str=''):
+    DATA.mkdir(parents=True,exist_ok=True)
+    data={'healthy':bool(healthy),'device':serial,'checked_at':stamp(),
+          'unix_time':time.time(),'detail':reason[:160]}
+    tmp=DATA/'health.tmp';tmp.write_text(json.dumps(data))
+    os.chmod(tmp,0o600);tmp.replace(DATA/'health.json')
+
+
+def get_heartbeat(pinned):
+    path=DATA/'health.json'
+    try:
+        obj=json.loads(path.read_text())
+        age=max(0,int(time.time()-float(obj['unix_time'])))
+        obj['seconds_old']=age
+        obj['connected']=bool(obj.get('healthy') and age<=40*60
+            and pinned and obj.get('device')==pinned.get('serial'))
+        return obj
+    except (OSError,ValueError,TypeError,KeyError):
+        return {'healthy':False,'connected':False,'seconds_old':None,'checked_at':None}
+
+
 def status(limit=40)->dict:
     cfg=configuration()
     with db() as c:
         rows=[dict(r) for r in c.execute('select * from runs order by created_at desc,id desc limit ?', (max(1,min(limit,200)),))]
         summary=dict(c.execute('select state,count(*) from runs group by state').fetchall())
-    return {'connected':bool(cfg.get('bound')),'device':cfg.get('bound'),
-            'allow_actions':{'DO_EXPLORATION':['navigate_only']},
+    health=get_heartbeat(cfg.get('bound'))
+    return {'connected':health['connected'],'device':cfg.get('bound'),
+            'health':health,'paused':bool(cfg.get('paused',False)),
+            'allow_actions':{'DO_EXPLORATION':['navigate_only'],
+                              'DAILY_MISSIONS':['free_claim_only']},
             'mode':'reviewed_navigation_or_observe','summary':summary,'runs':rows}
 
 
@@ -260,6 +309,7 @@ def execute(row:dict)->dict:
         scenario(row['task'])
         actual=bound_device()
         if actual['serial']!=row['device']:raise RuntimeError('Queued run refers to a different emulator; cancelled')
+        heartbeat(True,actual['serial'],'Android 16 emulator, display and WOS process verified')
         events.append({'time':stamp(),'type':'preflight','detail':'Android 16, 720x1280@320, WOS running, pinned serial verified'})
         plan=scenario(row['task'])
         states=[]
@@ -279,7 +329,60 @@ def execute(row:dict)->dict:
             report['checks']+=len(recognition.STATES)
             return image,path,detection
         first,first_path,initial=evidence('before')
-        if row['mode']=='navigate':
+        if row['mode']=='claim_free':
+            if row['task']!='DAILY_MISSIONS':
+                raise RuntimeError('No reviewed free Claim All workflow')
+            first_state=daily.state(first_path)
+            if not first_state['ready_to_claim']:
+                raise RuntimeError('Daily title and free Claim All not jointly verified; no tap')
+            time.sleep(0.15)
+            _,check_path,_=evidence('preflight2')
+            second_state=daily.state(check_path)
+            if not daily.claim_is_stable(first_state,second_state):
+                raise RuntimeError('Claim All button did not remain stable for two frames; no tap')
+            bound_device()
+            require_active()
+            x,y=second_state['claim_point']
+            adb('shell','input','tap',str(x),str(y),serial=actual['serial'],timeout=15)
+            report['actions']+=1
+            events.append({'time':stamp(),'type':'tap','detail':'Verified free Daily Missions Claim All'})
+            reward_state=None
+            for index in range(8):
+                time.sleep(0.35)
+                _,path,_=evidence('reward-'+str(index))
+                state=daily.state(path)
+                if state['reward_visible']:
+                    reward_state=state
+                    break
+            if reward_state is None:
+                raise RuntimeError('Claim All tapped, but no confirmed Rewards banner+hint; stopping, not marking success')
+            time.sleep(0.15)
+            _,second_reward_path,_=evidence('reward-confirm')
+            if not daily.reward_is_stable(reward_state,daily.state(second_reward_path)):
+                raise RuntimeError('Rewards dialog changed; refusing dismiss tap')
+            bound_device()
+            require_active()
+            # This area is explicitly labelled 'Tap anywhere to exit' and
+            # verified on two frames. Never tap reward chests or gem buttons.
+            adb('shell','input','tap','365','1163',serial=actual['serial'],timeout=15)
+            report['actions']+=1
+            events.append({'time':stamp(),'type':'tap','detail':'Dismiss confirmed free Rewards via Tap anywhere to exit'})
+            done=False
+            for index in range(8):
+                time.sleep(0.35)
+                image,path,_=evidence('after' if index==7 else 'post-'+str(index))
+                if daily.state(path)['post_claim']:
+                    if image['name']!='after':
+                        new_path=path.with_name('after.png');path.replace(new_path)
+                        image['name']='after';image['file']='after.png'
+                    done=True
+                    break
+            if done:
+                report.update(outcome='free_claim_verified',
+                              reason='Free Claim All collected and Rewards dismissed; optional milestone chest not tested')
+            else:
+                report.update(outcome='blocked',reason='No verified Daily screen with Claim All gone after reward dismissal')
+        elif row['mode']=='navigate':
             # Only the one reviewed, free City/World→Exploration shortcut.
             # No spending, no automatic recovery, no guessing button pixels.
             if row['task']!='DO_EXPLORATION':raise RuntimeError('No reviewed navigation workflow for this task')
@@ -296,6 +399,7 @@ def execute(row:dict)->dict:
                 if not confirmation['ready']:
                     raise RuntimeError('Tech Research Back changed; refusing unverified click')
                 bound_device()
+                require_active()
                 adb('shell','input','tap','41','32',serial=actual['serial'],timeout=15)
                 report['actions']+=1
                 events.append({'time':stamp(),'type':'tap','detail':'Verified Tech Research Back x41 y32 (no spending)'})
@@ -315,6 +419,7 @@ def execute(row:dict)->dict:
                 raise RuntimeError('Root screen changed between confirmations; no tap')
             # Re-evaluate pinned identity immediately before the single action.
             bound_device()
+            require_active()
             adb('shell','input','tap','70','1220',serial=actual['serial'],timeout=15)
             report['actions']+=1
             events.append({'time':stamp(),'type':'tap','detail':'Verified Exploration shortcut x70 y1220'})
@@ -356,6 +461,8 @@ def execute(row:dict)->dict:
                 events.append({'time':stamp(),'type':'template_proposal',
                         'detail':'Stable unknown UI cropped for review; never activated'})
     except Exception as exc:
+        if 'actual' not in locals():
+            heartbeat(False,row['device'],'Emulator preflight failed; '+str(exc)[:90])
         report.update(outcome='blocked',reason=str(exc)[:300])
         events.append({'time':stamp(),'type':'error','detail':report['reason']})
     finally:
@@ -440,6 +547,10 @@ def worker(once=False):
     with db() as c:
         c.execute("update runs set state='interrupted',reason='Worker restarted; no automatic retry',ended_at=? where state='running'",(stamp(),))
     while True:
+        if paused():
+            if once:break
+            time.sleep(2)
+            continue
         row=next_queued()
         if row:execute(row)
         elif once:break
@@ -452,13 +563,14 @@ def main():
     sub=p.add_subparsers(dest='cmd',required=True)
     sub.add_parser('discover')
     b=sub.add_parser('bind');b.add_argument('serial');b.add_argument('--force',action='store_true')
-    q=sub.add_parser('enqueue');q.add_argument('task');q.add_argument('--mode',choices=('observe','navigate'),default='observe')
+    q=sub.add_parser('enqueue');q.add_argument('task');q.add_argument('--mode',choices=('observe','navigate','claim_free'),default='observe')
     sub.add_parser('status')
     d=sub.add_parser('detail');d.add_argument('id')
     w=sub.add_parser('worker');w.add_argument('--once',action='store_true')
     sub.add_parser('workflows')
     sub.add_parser('recheck-evidence')
     sub.add_parser('reconcile-counters')
+    action=sub.add_parser('pause');action.add_argument('state',choices=('on','off'))
     a=p.parse_args()
     if a.cmd=='discover':result=devices()
     elif a.cmd=='bind':result=bind(a.serial,a.force)
@@ -468,6 +580,7 @@ def main():
     elif a.cmd=='workflows':result=[scenario(t['key']) for t in tasks()]
     elif a.cmd=='recheck-evidence':result=recheck_evidence()
     elif a.cmd=='reconcile-counters':result=reconcile_action_counters()
+    elif a.cmd=='pause':result=pause(a.state=='on')
     elif a.cmd=='worker':worker(a.once);result={'ok':True}
     print(json.dumps(result,indent=2,ensure_ascii=False))
 
