@@ -12,6 +12,7 @@ import dev.frostguard.api.domain.SizeData;
 import dev.frostguard.api.domain.RawImageData;
 import dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig;
 import dev.frostguard.engine.helper.BlueLabelActionDetector;
+import dev.frostguard.engine.helper.GreenLabelActionDetector;
 import dev.frostguard.engine.helper.RecognitionConsensus;
 import dev.frostguard.vision.convert.ImageConverter;
 import dev.frostguard.tasks.diagnostics.TaskDiagnosticSnapshots;
@@ -37,6 +38,11 @@ public class DoExplorationRoutine extends DelayedTask {
     private static final PointData FIGHT_BUTTON_TOP_LEFT = new PointData(390, 1170);
     private static final PointData FIGHT_BUTTON_BOTTOM_RIGHT = new PointData(670, 1220);
     // Verified live Victory screen: "Tap anywhere to exit" at the footer.
+    // Chest claims are separate from the Quick Exploration completion receipt.
+    private static final GreenLabelActionDetector.Region OUTER_CHEST_CLAIM =
+            new GreenLabelActionDetector.Region(535,830,701,909);
+    private static final GreenLabelActionDetector.Region INNER_IDLE_CLAIM =
+            new GreenLabelActionDetector.Region(213,875,507,972);
     private static final PointData VICTORY_CONTINUE_TOP_LEFT = new PointData(290, 1140);
     private static final PointData VICTORY_CONTINUE_BOTTOM_RIGHT = new PointData(430, 1205);
 
@@ -62,13 +68,23 @@ public class DoExplorationRoutine extends DelayedTask {
 
     protected void execute() {
         battleOutcomeUnknown = false;
+        // A previous run may have ended after Confirm while Quick Exploration
+        // was still animating or already showing its completed Rewards. That
+        // is not a new normal battle and must be resolved before any navigation.
+        QuickExplorationFrame.State existing=QuickExplorationFrame.classify(
+                emuManager.captureScreen(EMULATOR_NUMBER),EMULATOR_NUMBER);
+        if (existing!=QuickExplorationFrame.State.OTHER) {
+            logInfo("Resuming pending Quick Exploration result, state="+existing);
+            completeQuickRouteAndSchedule();
+            return;
+        }
         // Resume a confirmation left by a previous run instead of navigating
         // blindly through a pending modal or starting another battle.
         QuickDialogOutcome pending = inspectQuickExplorationConfirmation();
         if (pending != QuickDialogOutcome.NOT_PRESENT) {
             if (pending == QuickDialogOutcome.CONFIRMED) {
-                logInfo("Resumed Quick Exploration confirmed; skipping all regular battle taps");
-                rescheduleInOneHour();
+                logInfo("Resumed Quick Exploration started; verifying the result and Rewards");
+                completeQuickRouteAndSchedule();
             } else {
                 markWorkIncomplete("Exploration: pending Quick Exploration confirmation not verified");
                 logWarning("Pending Quick Exploration modal is unresolved; "
@@ -104,8 +120,8 @@ public class DoExplorationRoutine extends DelayedTask {
         // through it; the confirmed shortcut executes the battle automatically.
         QuickDialogOutcome afterExplore = awaitQuickConfirmationAfterExplore();
         if (afterExplore == QuickDialogOutcome.CONFIRMED) {
-            logInfo("Quick Exploration started directly after Explore; no formation or Fight taps needed");
-            rescheduleInOneHour();
+            logInfo("Quick Exploration started; waiting for completion and Rewards claim");
+            completeQuickRouteAndSchedule();
             return;
         }
         if (afterExplore == QuickDialogOutcome.UNRESOLVED) {
@@ -129,6 +145,119 @@ public class DoExplorationRoutine extends DelayedTask {
         } else {
             rescheduleInOneHour();
         }
+    }
+
+    private void completeQuickRouteAndSchedule() {
+        if (completeQuickRoute()) {
+            rescheduleInOneHour();
+        } else {
+            markWorkIncomplete("Quick Exploration result, rewards or optional chest not verified");
+            logWarning("Quick Exploration receipt/claim unresolved; "
+                    + TaskDiagnosticSnapshots.capture(emuManager,EMULATOR_NUMBER,
+                            "exploration","quick-rewards-unverified"));
+            reschedule(LocalDateTime.now().plusMinutes(10));
+        }
+    }
+
+    private boolean completeQuickRoute() {
+        QuickExplorationFlow.Outcome receipt=QuickExplorationFlow.finish(
+                ()->{checkPreemption();return emuManager.captureScreen(EMULATOR_NUMBER);},
+                point->{checkPreemption();tapInside(new PointData(point.getX()-9,point.getY()-9),
+                        new PointData(point.getX()+9,point.getY()+9));},
+                ()->sleepTask(650),EMULATOR_NUMBER);
+        if (receipt!=QuickExplorationFlow.Outcome.REWARDS_CLOSED) {
+            logWarning("Quick Exploration completed Rewards not confirmed/closed; "
+                    + TaskDiagnosticSnapshots.capture(emuManager,EMULATOR_NUMBER,
+                            "exploration","quick-reward-sheet-pending"));
+            return false;
+        }
+        logInfo("Quick Exploration completed and its Total Rewards receipt closed; checking optional chest");
+        if (!claimQuickRouteChestIfAvailable())return false;
+        return returnHomeAfterQuickRoute();
+    }
+
+    private boolean returnHomeAfterQuickRoute() {
+        var first=emuManager.captureScreen(EMULATOR_NUMBER);
+        if(ExplorationPageFrame.title(first)) {
+            var arrow=ExplorationPageFrame.verifiedBackCandidate(first);
+            if(!arrow.isFound())return false;
+            sleepTask(190);
+            var second=ExplorationPageFrame.verifiedBackCandidate(
+                    emuManager.captureScreen(EMULATOR_NUMBER));
+            if(!RecognitionConsensus.agrees(arrow,second,15))return false;
+            tapVerifiedSquadAction(second);
+            sleepTask(550);
+            if(ExplorationPageFrame.title(emuManager.captureScreen(EMULATOR_NUMBER)))return false;
+        }
+        try {
+            navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME,this::checkPreemption);
+            logInfo("Quick Exploration, optional income and City Home verified");
+            return true;
+        } catch(dev.frostguard.engine.error.HomeNotFoundException missing) {
+            logWarning("Quick Exploration rewards received but Home not verified: "+missing.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * After a completed Quick run, Exploration may also expose the ordinary
+     * green chest Claim. That is a different reward from Total Rewards.
+     * Never tap a random green control: require Exploration title, stable
+     * outer/inner Claim buttons and a distinct Rewards screen in succession.
+     */
+    private boolean claimQuickRouteChestIfAvailable() {
+        var initial=emuManager.captureScreen(EMULATOR_NUMBER);
+        if (!ExplorationPageFrame.title(initial)) return false;
+        var outer=GreenLabelActionDetector.detect(ImageConverter.toBufferedImage(initial),OUTER_CHEST_CLAIM);
+        if (!outer.isFound()) {
+            logInfo("No additional green Exploration Chest claim visible after Quick Rewards");
+            return true;
+        }
+        sleepTask(200);
+        var secondFrame=emuManager.captureScreen(EMULATOR_NUMBER);
+        var second=ExplorationPageFrame.title(secondFrame)
+                ? GreenLabelActionDetector.detect(ImageConverter.toBufferedImage(secondFrame),OUTER_CHEST_CLAIM)
+                : ImageSearchResultData.miss();
+        if (!RecognitionConsensus.agrees(outer,second,10))return false;
+        tapVerifiedSquadAction(second);
+        sleepTask(600);
+
+        if (!quickIdleIncomeVisible()) {
+            logWarning("Outer chest Claim did not open verified Idle Income");
+            return false;
+        }
+        var firstInner=GreenLabelActionDetector.detect(
+                ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER)),INNER_IDLE_CLAIM);
+        if (!firstInner.isFound())return false;
+        sleepTask(180);
+        var secondInner=GreenLabelActionDetector.detect(
+                ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER)),INNER_IDLE_CLAIM);
+        if (!RecognitionConsensus.agrees(firstInner,secondInner,10) || !quickIdleIncomeVisible())return false;
+        tapVerifiedSquadAction(secondInner);
+        sleepTask(680);
+        var reward=emuManager.captureScreen(EMULATOR_NUMBER);
+        if(!ExplorationIncomeRewardsFrame.visible(reward)) {
+            logWarning("Idle Income Claim tapped but current Rewards sheet not recognized");
+            return false;
+        }
+        sleepTask(210);
+        if(!ExplorationIncomeRewardsFrame.visible(emuManager.captureScreen(EMULATOR_NUMBER)))return false;
+        // The verified screen itself says "Tap anywhere to exit". This is
+        // a blank lower area, not a purchase or another Claim button.
+        tapInside(new PointData(345,1145),new PointData(365,1165));
+        sleepTask(700);
+        var after=emuManager.captureScreen(EMULATOR_NUMBER);
+        if(ExplorationIncomeRewardsFrame.visible(after))return false;
+        boolean confirmed=ExplorationPageFrame.title(after);
+        if(confirmed)logInfo("Quick Exploration extra chest/Idle Income Rewards claimed and exit verified");
+        return confirmed;
+    }
+
+    private boolean quickIdleIncomeVisible() {
+        return templateSearchHelper.locatePattern(
+                TemplatesEnum.SERVE_EMU_IDLE_INCOME_TITLE_NOV_2026,
+                SearchConfig.builder().withMaxAttempts(1).withThreshold(90)
+                        .withArea(AreaData.of(210,233,520,330)).build()).isFound();
     }
 
     private boolean openExplorationScreen() {
@@ -228,7 +357,8 @@ public class DoExplorationRoutine extends DelayedTask {
                 handleDefeat();
                 return false;
             } else if (battleResult == BattleResult.QUICK_CONFIRMED) {
-                logInfo("Late Quick Exploration confirmation completed; stopping manual battle taps");
+                logInfo("Late Quick Exploration confirmed; handling result instead of manual battle");
+                if (!completeQuickRoute()) battleOutcomeUnknown=true;
                 return false;
             } else {
                 battleOutcomeUnknown = true;

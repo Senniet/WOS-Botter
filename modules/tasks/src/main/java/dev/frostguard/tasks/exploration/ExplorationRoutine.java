@@ -262,12 +262,12 @@ public class ExplorationRoutine extends DelayedTask {
     }
 
     private boolean finishConfirmedRewards() {
-        logInfo(routineLogExplorationLine("Rewards banner confirmed: claim succeeded."));
-        dismissRewardPopup();
-        if (rewardsOverlayVisible()) {
-            logWarning(routineLogExplorationLine("Rewards confirmed, but overlay did not close; "
+        logInfo(routineLogExplorationLine("Rewards banner confirmed; verifying dismissal before completion"));
+        if (!dismissRewardPopup()) {
+            markWorkIncomplete("Exploration Chest reward received but Rewards window not closed");
+            logWarning(routineLogExplorationLine("Rewards overlay did not close; "
                     + captureDiagnostic("reward-overlay-still-open")));
-            return true; // Rewards received, do not falsely schedule another immediate claim.
+            return false;
         }
         closeIdleIncomeIfVisible();
         return true;
@@ -335,6 +335,11 @@ public class ExplorationRoutine extends DelayedTask {
 	}
 
     private boolean rewardsOverlayVisible() {
+        // Real 16-Nov Idle Income Rewards uses a blue header that scored
+        // only ~39% against the old shared/current Rewards templates. This
+        // unique title AND its exit footer are verified on the same frame.
+        if (ExplorationIncomeRewardsFrame.visible(
+                emuManager.captureScreen(EMULATOR_NUMBER))) return true;
         if (templateSearchHelper.locatePattern(TemplatesEnum.SHARED_REWARDS_BANNER_CURRENT,
                 dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig.builder()
                         .withMaxAttempts(1).withThreshold(92)
@@ -357,12 +362,16 @@ public class ExplorationRoutine extends DelayedTask {
         return false;
     }
 
-	private void dismissRewardPopup() {
-        // The Rewards panel explicitly says "Tap anywhere to exit". Tap its
-        // empty lower area *only after* its banner has been identified.
+    private boolean dismissRewardPopup() {
+        // The Rewards panel says "Tap anywhere to exit". Confirm it exists
+        // on two fresh frames, click once and verify it has disappeared.
+        if (!rewardsOverlayVisible()) return false;
+        sleepTask(200);
+        if (!rewardsOverlayVisible()) return false;
         tapInside(REWARD_POPUP_TOP_LEFT, REWARD_POPUP_BOTTOM_RIGHT);
         sleepTask(750);
-	}
+        return !rewardsOverlayVisible();
+    }
 
     private void rescheduleFromConfiguredOffset(ExplorationClaimOutcome outcome) {
         Integer minutes = profile.getConfig(ConfigurationKeyEnum.INT_EXPLORATION_CHEST_OFFSET, Integer.class);
