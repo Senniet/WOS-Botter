@@ -53,6 +53,7 @@
      node("div","","Afmetingen: "+(t.dimensions?t.dimensions.join(" × "):"niet beschikbaar")),
      node("div","","Task Coach: "+(obs.hits||0)+" herkenningen / "+(obs.checks||0)+" methodemetingen in "+(obs.sessions||0)+" sessies"),
      node("div","","Taken met waarnemingen: "+((obs.tasks||[]).join(", ")||"nog geen")));
+   window.VisualInspector?.decorateTemplate(info,t);
    return info;
  }
  function renderTaskProfiles(profiles){
@@ -84,6 +85,7 @@
    const area=el("template-area").value,status=el("template-status").value;
    const priority={missing_asset:0,invalid_png:0,review_observed_misses:1,not_observed:2,observed_hit:3};
    const filtered=data.templates.filter(t=>
+     (el("inspector-show-hidden").checked||!window.VisualInspector?.isHidden(t.name))&&
      (!area||t.area===area)&&(!status||(status==="retired"?t.runtime_role==="retired":
      status==="protected_guard"?t.runtime_role==="protected_guard":t.status===status))&&
      (!query||(t.name+" "+t.resource+" "+(t.source_uses||[]).join(" ")).toLowerCase().includes(query)));
@@ -115,6 +117,7 @@
    window.AutoQA?.close();
    setView(true);
    if(!state.data)await refresh();else render();
+   window.VisualInspector?.open();
  }
  function close(){if(!state.visible)return;setView(false);}
  el("template-nav").addEventListener("click",()=>state.visible?close():open());
@@ -124,5 +127,7 @@
    el(id).addEventListener(id==="template-query"?"input":"change",()=>{state.shown=100;state.selected="";render();});
  }
  el("template-more").addEventListener("click",()=>{state.shown+=100;render();});
+ el("inspector-show-hidden").addEventListener("change",render);
+ window.addEventListener("template-review-changed",render);
  window.TemplateAudit={open,close};
 })();

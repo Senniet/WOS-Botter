@@ -283,6 +283,8 @@ class BoardTests(unittest.TestCase):
         try:
             self.assertEqual(401,req("GET","/api/tasks")[0])
             self.assertEqual(401,req("GET","/api/template-audit")[0])
+            self.assertEqual(401,req("GET","/api/inspector/ocr")[0])
+            self.assertEqual(401,req("GET","/api/inspector/template-image?name=TRAINING_TRAIN_BUTTON")[0])
             self.assertEqual(401,req("GET","/api/autoqa")[0])
             self.assertEqual(401,req("GET","/api/autoqa/audit")[0])
             self.assertEqual(401,req("GET","/api/autoqa/image?id=abcd0123456789ef&name=before")[0])
@@ -293,6 +295,24 @@ class BoardTests(unittest.TestCase):
             session=headers["Set-Cookie"].split(";",1)[0].split("=",1)[1]
             status,data,_=req("GET","/api/tasks",cookie=session)
             self.assertEqual(200,status);self.assertEqual(62,data["total"])
+            status,flow,_=req('GET','/api/inspector/flow?task=TRAINING_TROOPS',cookie=session)
+            self.assertEqual(200,status);self.assertGreaterEqual(len(flow['annotated_stages']),10)
+            status,sessions,_=req('GET','/api/inspector/sessions?task=TRAINING_TROOPS',cookie=session)
+            self.assertEqual(200,status);self.assertIn('sessions',sessions)
+            status,data,_=req('GET','/api/inspector/ocr',cookie=session)
+            self.assertEqual(200,status);self.assertIn('counts',data)
+            status,png,_=req('GET','/api/inspector/template-image?name=TRAINING_TRAIN_BUTTON',cookie=session)
+            self.assertEqual(200,status);self.assertTrue(png.startswith(b'\x89PNG'))
+            self.assertEqual(404,req('GET','/api/inspector/template-image?name=..%2F..%2Fetc%2Fpasswd',cookie=session)[0])
+            with patch('server.inspector.DB',self.root/'review.json'):
+                status,hidden,_=req('POST','/api/inspector/review',{'name':'TRAINING_TRAIN_BUTTON','action':'hidden'},session)
+                self.assertEqual(200,status);self.assertTrue(hidden['production_unchanged'])
+                status,choices,_=req('GET','/api/inspector/review',cookie=session)
+                self.assertEqual('hidden',choices['choices']['TRAINING_TRAIN_BUTTON'])
+                status,restored,_=req('POST','/api/inspector/review',{'name':'TRAINING_TRAIN_BUTTON','action':'restore'},session)
+                self.assertEqual(200,status);self.assertEqual('active_in_catalog',restored['review_state'])
+                self.assertEqual(400,req('POST','/api/inspector/review',{'name':'../../invalid','action':'hidden'},session)[0])
+            self.assertEqual(403,req('POST','/api/inspector/review',{'name':'TRAINING_TRAIN_BUTTON','action':'hidden'},session,'https://evil.example')[0])
             with patch('server.autoqa_bridge.audit',return_value={'schema':1,'tasks':[]}):
                 status,data,_=req('GET','/api/autoqa/audit',cookie=self.board.make_cookie())
                 self.assertEqual(200,status);self.assertEqual([],data['tasks'])
