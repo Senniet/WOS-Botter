@@ -39,8 +39,8 @@ private static final int CLAIM_PROGRESS_TOLERANCE_PIXELS = 20;
 private static final PointData DAILY_MISSIONS_BUTTON_VALUE = new PointData(50, 1050);
 
 private static final SearchConfig DAILY_SCREEN_TITLE_SEARCH = SearchConfig.builder()
-		.withMaxAttempts(3)
-		.withDelay(300)
+		.withMaxAttempts(1)
+		.withDelay(0)
 		.withThreshold(87)
 		.withArea(new AreaData(new PointData(120, 80), new PointData(600, 225)))
 		.build();
@@ -80,15 +80,17 @@ public DailyMissionRoutine(AccountDescriptor profile, TpDailyTaskEnum dailyMissi
         }
         // Never press Android Back when the Daily Missions screen was never
         // confirmed. On a City/World HUD that can open the game's Quit prompt.
-        if (dailyScreenReached) {
-            dismissInterface();
-        } else {
+        boolean returnedHome = !dailyScreenReached || dismissInterface();
+        if (dailyScreenReached && !returnedHome) {
+            markWorkIncomplete("Daily Missions rewards handled but Daily dialog did not close to City/World");
+        }
+        if (!dailyScreenReached) {
             logWarning(routineLogDailyMissionLine(
                     "Daily Missions was not confirmed; skipping blind Back cleanup"));
         }
 
 		configureRecurringBehaviorFlow();
-        if (!dailyScreenReached || !claimFlowCompleted) {
+        if (!dailyScreenReached || !claimFlowCompleted || !returnedHome) {
             LocalDateTime retryAt = nextUnverifiedRetry(LocalDateTime.now());
             markWorkIncomplete("Daily Missions: screen or reward claim not verified");
             reschedule(retryAt);
@@ -148,11 +150,17 @@ private boolean switchToDailyMissionsTabFlow() {
 	}
 
 private ImageSearchResultData currentDailyTitle() {
+        // Task Coach 20261116-182434: current original title reached 100% on
+        // the real Daily page, while legacy SERVE_EMU_DAILY_TITLE missed all
+        // 12 times (15-43%) and repeated costly multi/mono fallback probes.
+        // Serve-EMU uses the one proven source; other backends keep their
+        // original alternative for backwards compatibility.
         ImageSearchResultData original = templateSearchHelper.locatePattern(
                 TemplatesEnum.DAILY_MISSION_SCREEN_TITLE, DAILY_SCREEN_TITLE_SEARCH);
-        if (original.isFound()) return original;
+        if (original.isFound() || emuManager.getSelectedEmulatorType()
+                == dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU) return original;
         return templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_DAILY_TITLE,
-                SearchConfig.builder().withMaxAttempts(2).withDelay(150)
+                SearchConfig.builder().withMaxAttempts(1)
                         .withThreshold(90).withArea(AreaData.of(120, 80, 600, 225)).build());
     }
 
@@ -203,7 +211,9 @@ private boolean redeemRewardsIndividually() {
 			if (!claimResult.isFound()) {
                 logInfo(routineLogDailyMissionLine("Individual collecting complete. Claimed " + claimedCount + " rewards"));
                 claimActionObserved = claimedCount > 0;
-                return true;
+                // A daily chest can be ready even when ordinary Claim All
+                // is absent. Check it only after finishing the normal list.
+                return claimOptional160Milestone();
 			}
 
 			claimedCount++;
@@ -283,8 +293,40 @@ private boolean redeemAllRewardsAtOnce(ImageSearchResultData claimAllResult) {
             return false;
         }
         logInfo(routineLogDailyMissionLine("Claim All no longer visible after tap."));
-        return true;
+        // The 160-point chest is NOT always available. It is distinct from
+        // the ordinary mission Claim All, and may open a second Rewards sheet.
+        return claimOptional160Milestone();
 	}
+
+private boolean claimOptional160Milestone() {
+        var first=emuManager.captureScreen(EMULATOR_NUMBER);
+        if (!DailyMissionsCurrentFrame.title(first))return false;
+        var chest=DailyMilestone160Frame.ready(first);
+        if (!chest.isFound()) {
+            logInfo(routineLogDailyMissionLine("160-point chest not available or already claimed; skipping"));
+            return true;
+        }
+        sleepTask(180);
+        var second=DailyMilestone160Frame.ready(emuManager.captureScreen(EMULATOR_NUMBER));
+        if (!RecognitionConsensus.agrees(chest,second,12)) {
+            logWarning(routineLogDailyMissionLine("160-point chest not stable; no click"));
+            return false;
+        }
+        PointData target=second.getPoint();
+        logInfo(routineLogDailyMissionLine("Verified optional 160-point chest at "+target));
+        tapInside(new PointData(target.getX()-10,target.getY()-10),
+                new PointData(target.getX()+10,target.getY()+10));
+        sleepTask(540);
+        if (!dismissRewardPopupsFlow())return false;
+        var after=emuManager.captureScreen(EMULATOR_NUMBER);
+        if (DailyMilestone160Frame.ready(after).isFound()) {
+            logWarning(routineLogDailyMissionLine("160-point chest remained closed after tap"));
+            return false;
+        }
+        boolean returnedDaily=DailyMissionsCurrentFrame.title(after);
+        if(returnedDaily)claimActionObserved=true;
+        return returnedDaily;
+    }
 
 private ImageSearchResultData seekForClaimAllButton() {
         ImageSearchResultData match = templateSearchHelper.locatePattern(
@@ -363,18 +405,37 @@ private boolean redeemAllRewards() {
         return completed && actionObserved;
     }
 
-private void dismissInterface() {
-        if (!currentDailyTitle().isFound()) {
-            logWarning(routineLogDailyMissionLine("Daily screen not visible during cleanup; "
-                    + "refusing blind Back or close taps"));
-            return;
+private boolean dismissInterface() {
+        // Use exact Daily title + current top-right X from the same frame.
+        // The old fixed click y133..186 lay BELOW the real X near (690,124).
+        var first=emuManager.captureScreen(EMULATOR_NUMBER);
+        var x=DailyMissionsCurrentFrame.close(first);
+        if (!x.isFound()) {
+            logWarning(routineLogDailyMissionLine("Daily header X unverified; refusing blind cleanup tap"));
+            return false;
         }
-        // Current Daily Missions has a visible X at the top-right of the
-        // verified modal. Unlike Android Back, this cannot summon Quit Game.
-        tapInside(AreaData.of(662, 133, 707, 186));
-        sleepTask(350);
-        if (currentDailyTitle().isFound()) logWarning(routineLogDailyMissionLine(
-                "Daily Missions remained visible after verified close action"));
+        sleepTask(170);
+        var second=DailyMissionsCurrentFrame.close(emuManager.captureScreen(EMULATOR_NUMBER));
+        if (!RecognitionConsensus.agrees(x,second,12)) {
+            logWarning(routineLogDailyMissionLine("Daily close icon moved or disappeared; no tap"));
+            return false;
+        }
+        PointData p=second.getPoint();
+        tapInside(new PointData(p.getX()-7,p.getY()-7),
+                new PointData(p.getX()+7,p.getY()+7));
+        sleepTask(420);
+        var after=emuManager.captureScreen(EMULATOR_NUMBER);
+        if (DailyMissionsCurrentFrame.title(after)) {
+            logWarning(routineLogDailyMissionLine("Daily Missions remained visible after verified X"));
+            return false;
+        }
+        // Do not mark successful if a new, unknown overlay replaces Daily.
+        boolean city=emuManager.locatePattern(EMULATOR_NUMBER,after,
+                TemplatesEnum.SERVE_EMU_CITY_ANCHOR,
+                new PointData(590,1145),new PointData(715,1275),90).isFound();
+        if (city) logInfo(routineLogDailyMissionLine("Daily Missions closed, City HUD confirmed"));
+        else logWarning(routineLogDailyMissionLine("Daily closed but City HUD not verified"));
+        return city;
     }
 
 private void queueManualMode() {
