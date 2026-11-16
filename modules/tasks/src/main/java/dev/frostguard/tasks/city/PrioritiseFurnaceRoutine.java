@@ -15,12 +15,10 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 import org.jetbrains.annotations.NotNull;
-import static dev.frostguard.api.configs.TemplatesEnum.GAME_HOME_FURNACE;
 import static dev.frostguard.api.configs.TemplatesEnum.GAME_HOME_SHORTCUTS_GO;
 import static dev.frostguard.api.configs.TemplatesEnum.GAME_HOME_SHORTCUTS_OBTAIN;
 import static dev.frostguard.api.configs.TemplatesEnum.GAME_HOME_SHORTCUTS_UPGRADE_TEXT;
 import static dev.frostguard.api.configs.TemplatesEnum.GAME_HOME_SHORTCUTS_UPGRADE;
-import static dev.frostguard.api.configs.TemplatesEnum.GAME_HOME_WORLD;
 import static dev.frostguard.engine.nav.LeftMenuTextSettings.*;
 
 public class PrioritiseFurnaceRoutine extends DelayedTask {
@@ -40,19 +38,31 @@ public PrioritiseFurnaceRoutine(AccountDescriptor profile, TpDailyTaskEnum tpDai
 @Override
     protected void execute() {
 
-        ImageSearchResultData worldResult = templateSearchHelper.locatePattern(GAME_HOME_WORLD,
-                SearchConfigConstants.DEFAULT_SINGLE);
-        ImageSearchResultData cityResult = templateSearchHelper.locatePattern(GAME_HOME_FURNACE,
-                SearchConfigConstants.DEFAULT_SINGLE);
-
-        if (worldResult.isFound()) {
-            logInfo(routineLogPrioritiseFurnaceLine("World image detected (Not on correct screen). Pressing to navigate."));
-            tapInside(worldResult);
-        } else if (cityResult.isFound()) {
-            logInfo(routineLogPrioritiseFurnaceLine("City image detected. Screen state validated."));
-        } else {
-            logInfo(routineLogPrioritiseFurnaceLine("Neither World nor City image detected."));
+        // The scheduler starts this task on HOME. One current Serve-EMU City
+        // anchor suffices: do not search the obsolete World variant first.
+        var rootArea=dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig.builder()
+                .withMaxAttempts(1).withThreshold(90)
+                .withArea(AreaData.of(590,1145,715,1275)).build();
+        ImageSearchResultData cityResult=templateSearchHelper.locatePattern(
+                dev.frostguard.api.configs.TemplatesEnum.SERVE_EMU_CITY_ANCHOR,rootArea);
+        if (!cityResult.isFound()) {
+            ImageSearchResultData worldResult=templateSearchHelper.locatePattern(
+                    dev.frostguard.api.configs.TemplatesEnum.SERVE_EMU_WORLD_ANCHOR_CURRENT,rootArea);
+            if(worldResult.isFound()) {
+                logInfo(routineLogPrioritiseFurnaceLine("World detected; switching to City from verified root"));
+                tapInside(worldResult);
+                sleepTask(650);
+                cityResult=templateSearchHelper.locatePattern(
+                        dev.frostguard.api.configs.TemplatesEnum.SERVE_EMU_CITY_ANCHOR,rootArea);
+            }
         }
+        if(!cityResult.isFound()) {
+            markWorkIncomplete("Prioritise Furnace: City root HUD not verified");
+            logWarning(routineLogPrioritiseFurnaceLine("No City anchor; refusing old blind furnace routine"));
+            reschedule(LocalDateTime.now().plusMinutes(5));
+            return;
+        }
+        logInfo(routineLogPrioritiseFurnaceLine("Current City anchor confirmed"));
 
 
         tapNear(new PointData(15, 552));

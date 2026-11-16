@@ -24,7 +24,17 @@ public final class EmulatorRecognitionPolicy {
             TemplatesEnum.EXPLORATION_SCREEN_TITLE,
             TemplatesEnum.SERVE_EMU_IDLE_INCOME_TITLE,
             TemplatesEnum.EXPLORATION_IDLE_INCOME_TITLE,
-            TemplatesEnum.SERVE_EMU_WORLD_ANCHOR);
+            TemplatesEnum.SERVE_EMU_WORLD_ANCHOR,
+            // 36 misses in 4 Daily runs, while original DAILY_MISSION_SCREEN_TITLE
+            // matched the same live page at 100% (20 positives).
+            TemplatesEnum.SERVE_EMU_DAILY_TITLE,
+            // Old World tab never yielded a positive in available coached
+            // runs, while WORLD_ANCHOR_CURRENT matched, including confirmed
+            // monochrome and multiscale rescues. Keep CURRENT fallback intact.
+            TemplatesEnum.GAME_HOME_WORLD,
+            // Current Arena Challenge matched on the actual challenge screen;
+            // original 2026-off-brand button failed all recorded attempts.
+            TemplatesEnum.ARENA_CHALLENGE_BUTTON);
 
     private static final Set<TemplatesEnum> SERVE_EMU_EXACT_HEADERS = EnumSet.of(
             TemplatesEnum.SERVE_EMU_EXPLORATION_TITLE_NOV_2026,

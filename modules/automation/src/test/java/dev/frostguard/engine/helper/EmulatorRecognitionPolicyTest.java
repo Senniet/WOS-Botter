@@ -6,14 +6,17 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class EmulatorRecognitionPolicyTest {
-    @Test void serveEmuAvoidsAllFiveConfirmedOldVariants() {
+    @Test void serveEmuAvoidsConfirmedOldVariants() {
         var policy=EmulatorRecognitionPolicy.forEmulator(EmulatorType.SERVE_EMU);
         for(var template:new TemplatesEnum[]{
                 TemplatesEnum.EXPLORATION_SCREEN_TITLE,
                 TemplatesEnum.SERVE_EMU_EXPLORATION_TITLE,
                 TemplatesEnum.EXPLORATION_IDLE_INCOME_TITLE,
                 TemplatesEnum.SERVE_EMU_IDLE_INCOME_TITLE,
-                TemplatesEnum.SERVE_EMU_WORLD_ANCHOR}) {
+                TemplatesEnum.SERVE_EMU_WORLD_ANCHOR,
+                TemplatesEnum.SERVE_EMU_DAILY_TITLE,
+                TemplatesEnum.GAME_HOME_WORLD,
+                TemplatesEnum.ARENA_CHALLENGE_BUTTON}) {
             assertFalse(policy.shouldProbe(template),template.name());
         }
     }
@@ -23,6 +26,9 @@ class EmulatorRecognitionPolicyTest {
             if(emulator==EmulatorType.SERVE_EMU)continue;
             var policy=EmulatorRecognitionPolicy.forEmulator(emulator);
             assertTrue(policy.shouldProbe(TemplatesEnum.SERVE_EMU_WORLD_ANCHOR),emulator.name());
+            assertTrue(policy.shouldProbe(TemplatesEnum.GAME_HOME_WORLD),emulator.name());
+            assertTrue(policy.shouldProbe(TemplatesEnum.SERVE_EMU_DAILY_TITLE),emulator.name());
+            assertTrue(policy.shouldProbe(TemplatesEnum.ARENA_CHALLENGE_BUTTON),emulator.name());
             assertTrue(policy.useImplicitFallback(
                     TemplatesEnum.SERVE_EMU_EXPLORATION_TITLE_NOV_2026),emulator.name());
             assertTrue(policy.useScaledAlternative(
@@ -46,6 +52,8 @@ class EmulatorRecognitionPolicyTest {
         var policy=EmulatorRecognitionPolicy.forEmulator(EmulatorType.SERVE_EMU);
         for(var t:new TemplatesEnum[]{
                 TemplatesEnum.GAME_HOME_RECONNECT,
+                TemplatesEnum.DAILY_MISSION_SCREEN_TITLE,
+                TemplatesEnum.ARENA_CHALLENGE_BUTTON_CURRENT,
                 TemplatesEnum.SERVE_EMU_WORLD_ANCHOR_CURRENT,
                 TemplatesEnum.SERVE_EMU_CITY_ANCHOR,
                 TemplatesEnum.GAME_START_WELCOME_BACK_TITLE,

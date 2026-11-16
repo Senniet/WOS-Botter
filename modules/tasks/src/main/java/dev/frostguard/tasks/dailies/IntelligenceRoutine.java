@@ -1660,10 +1660,13 @@ private void handleBeastExclusive(ImageSearchResultData beast) {
 
         // Disappearance alone does not prove that the march started. Confirm
         // the world HUD before updating stamina, statistics, or mission progress.
+        // Serve-EMU current World HUD is the positively recorded post-Deploy
+        // anchor (including real mono/multiscale hits). The retired Frostguard
+        // GAME_HOME_WORLD never matched the selected 2026 emulator.
         ImageSearchResultData verifiedWorld = templateSearchHelper.locatePattern(
-                TemplatesEnum.GAME_HOME_WORLD,
+                TemplatesEnum.SERVE_EMU_WORLD_ANCHOR_CURRENT,
                 SearchConfig.builder().withMaxAttempts(3).withDelay(400)
-                        .withThreshold(85).build());
+                        .withThreshold(90).withArea(AreaData.of(590,1145,715,1275)).build());
         if (!verifiedWorld.isFound()) {
             logWarning(routineLogIntelligenceLine("Deploy disappeared, but no World screen was confirmed; "
                     + intelDiagnostic("deploy-transition-unknown") + ". No progress deducted."));

@@ -488,8 +488,10 @@ private RallyLaunchResult launchSingleRallyFlow(int polarLevel, boolean useFlag,
         }
 
         ImageSearchResultData worldAnchor = templateSearchHelper.locatePattern(
-                TemplatesEnum.GAME_HOME_WORLD,
-                SearchConfigConstants.RESILIENT);
+                TemplatesEnum.SERVE_EMU_WORLD_ANCHOR_CURRENT,
+                dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig.builder()
+                        .withMaxAttempts(3).withDelay(350).withThreshold(90)
+                        .withArea(dev.frostguard.api.domain.AreaData.of(590,1145,715,1275)).build());
         if (!worldAnchor.isFound()) {
             logWarning(routineLogPolarTerrorHuntingLine(
                     "Deployment result: Deploy disappeared but World anchor was not verified; not treating this as a confirmed rally"));
@@ -588,8 +590,10 @@ private void leaveSameTargetDialog() {
         sleepTask(800);
 
         ImageSearchResultData worldAnchor = templateSearchHelper.locatePattern(
-                TemplatesEnum.GAME_HOME_WORLD,
-                SearchConfigConstants.SINGLE_WITH_RETRIES);
+                TemplatesEnum.SERVE_EMU_WORLD_ANCHOR_CURRENT,
+                dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig.builder()
+                        .withMaxAttempts(3).withDelay(350).withThreshold(90)
+                        .withArea(dev.frostguard.api.domain.AreaData.of(590,1145,715,1275)).build());
         if (!worldAnchor.isFound()) {
             logWarning(routineLogPolarTerrorHuntingLine(
                     "World anchor not verified after cancelling; the next run re-navigates"));
