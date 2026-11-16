@@ -82,10 +82,12 @@ class TemplateAuditTests(unittest.TestCase):
     def test_all_runtime_decisions_are_accounted_for_and_no_old_world_checks_remain(self):
         result=audit.audit(audit.ROOT,Path('/nonexistent'))
         template_by_name={entry['name']:entry for entry in result['templates']}
-        self.assertEqual(523,len(template_by_name))
+        # Template inventory grows as real-screen regressions introduce new
+        # assets. Avoid freezing the 15-Nov count at 523.
+        self.assertEqual(len(audit.enum_names((audit.ROOT/audit.ENUM).read_text())),len(template_by_name))
         self.assertEqual(5,result['summary']['retired_from_runtime'])
         self.assertEqual(7,result['summary']['protected_safety_guards'])
-        self.assertEqual(523,sum(result['summary'][name] for name in (
+        self.assertEqual(len(template_by_name),sum(result['summary'][name] for name in (
             'retired_from_runtime','protected_safety_guards',
             'active_source_referenced','registered_unused_review')))
         for name in audit.json.loads((audit.ROOT/audit.DECISIONS).read_text())['retired']:

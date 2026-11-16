@@ -620,37 +620,27 @@ public class NavigationHelper {
         boolean welcomeBackDismissed = false;
         while (pass <= budget) {
             checkpoint.run();
-            // detect reconnect
-            // On Serve-EMU a normal healthy launch frequently produces
-            // three GAME_HOME_RECONNECT method checks even though its popup
-            // is absent. Try one cheap exact observation on the first pass;
-            // only if the screen remains unknown do subsequent passes use
-            // the complete multi-scale/greyscale verified recovery.
-            ImageSearchResultData reconnect = searcher.usesServeEmuRecognition() && pass == 1
-                    ? searcher.locatePatternFast(TemplatesEnum.GAME_HOME_RECONNECT,
-                            SearchConfigConstants.DEFAULT_SINGLE)
-                    : searcher.locatePattern(TemplatesEnum.GAME_HOME_RECONNECT,
-                            SearchConfigConstants.DEFAULT_SINGLE);
-            if (reconnect.isFound()) {
-                throw new ProfileInReconnectStateException(accountName + " in reconnect state");
-            }
-
-            // Most recovery calls begin on a stable screen. First try cheap
-            // exact anchors; retain the resilient matcher for later passes.
+            // Healthy Serve-EMU City/World HUD: its correct bottom-right tab
+            // is already a positive root signal. Observe the root BEFORE
+            // checking a reconnect overlay; reconnect itself covers the tabs,
+            // so it cannot yield a positive root match on a healthy frame.
+            // On unknown/blocked HUD we still run the FULL reconnect guard
+            // before any recovery tap (including fast-path pass 1).
             ImageSearchResultData cityButton = findHomeAnchor(pass == 1);
             boolean atHome = cityButton.isFound();
             ImageSearchResultData worldButton = atHome ? ImageSearchResultData.miss() : findWorldAnchor(pass == 1);
             boolean atWorld = worldButton.isFound();
-
-            // If neither stable HUD anchor is visible, we are on an unknown
-            // screen: re-run the FULL verified reconnect detector BEFORE any
-            // back navigation or popup input. Thus the fast happy path does
-            // not sacrifice reconnect safety under a popup or connection loss.
-            if (searcher.usesServeEmuRecognition() && pass == 1 && !atHome && !atWorld
-                    && searcher.locatePattern(TemplatesEnum.GAME_HOME_RECONNECT,
-                            SearchConfigConstants.DEFAULT_SINGLE).isFound()) {
-                throw new ProfileInReconnectStateException(accountName + " in reconnect state");
+            if (NavigationProbePlan.requiresFullReconnect(
+                    emu.getSelectedEmulatorType(),atHome,atWorld)) {
+                ImageSearchResultData reconnect = searcher.locatePattern(
+                        TemplatesEnum.GAME_HOME_RECONNECT, SearchConfigConstants.DEFAULT_SINGLE);
+                if (reconnect.isFound()) {
+                    throw new ProfileInReconnectStateException(accountName + " in reconnect state");
+                }
             }
+            // A stable root tab means navigation may continue without the
+            // globally repeated reconnect/Welcome Back/offer/reward sweep.
+            // Screen transitions are still verified before any tap below.
 
             checkpoint.run();
             // check if already at desired location

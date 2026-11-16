@@ -48,10 +48,10 @@ public class DoExplorationRoutine extends DelayedTask {
 
     private boolean battleOutcomeUnknown;
 
-    private static final long MAX_FIGHTING_WINDOW_MS = 120_000L;
+    private static final long MAX_FIGHTING_WINDOW_MS = ExplorationBattleTiming.SESSION_WINDOW_MS;
     private static final long RESULT_SEARCH_START_DELAY_MS = 1_500L;
-    private static final long RESULT_DETECTION_WINDOW_MS = 25_000L;
-    private static final long RESULT_DETECTION_DELAY_MS = 1_000L;
+    private static final long RESULT_DETECTION_WINDOW_MS = ExplorationBattleTiming.RESULT_WINDOW_MS;
+    private static final long RESULT_DETECTION_DELAY_MS = ExplorationBattleTiming.POLL_MS;
     private static final long EXPLORATION_SCREEN_LOAD_DELAY_MS = 500L;
     private static final long EXPLORE_BUTTON_TAP_DELAY_MS = 300L;
     private static final long QUICK_DEPLOY_DELAY_MS = 300L;
@@ -95,7 +95,12 @@ public class DoExplorationRoutine extends DelayedTask {
             return;
         }
         logInfo("Opening exploration screen...");
-        if (!explorationTitleVisible()) navigationHelper.ensureCorrectScreenLocation(LaunchPoint.WORLD);
+        // Both City and World expose the same bottom-left Exploration shortcut.
+        // The old code always forced City→World first, wasting multiple root
+        // and reconnect checks despite the visible direct City shortcut.
+        if (!explorationTitleVisible() && !verifiedRootShortcutAvailable()) {
+            navigationHelper.ensureCorrectScreenLocation(LaunchPoint.WORLD);
+        }
         if (!openExplorationScreen()) {
             markWorkIncomplete("Exploration: page not opened or title unverified");
             logWarning("Exploration page could not be verified; " + TaskDiagnosticSnapshots.capture(
@@ -135,7 +140,7 @@ public class DoExplorationRoutine extends DelayedTask {
 
         boolean fightingWindowReached = fightUntilStoppedOrExpired();
         if (fightingWindowReached) {
-            logWarning("Exploration fighting window reached 2 minutes. Rescheduling...");
+            logWarning("Exploration fighting session reached its bounded limit; rescheduling without blind taps");
         }
 
         if (battleOutcomeUnknown) {
@@ -260,6 +265,16 @@ public class DoExplorationRoutine extends DelayedTask {
                         .withArea(AreaData.of(210,233,520,330)).build()).isFound();
     }
 
+    private boolean verifiedRootShortcutAvailable() {
+        var first=ExplorationRootFrame.root(emuManager.captureScreen(EMULATOR_NUMBER));
+        if (first==ExplorationRootFrame.Root.UNKNOWN)return false;
+        sleepTask(140);
+        var second=ExplorationRootFrame.root(emuManager.captureScreen(EMULATOR_NUMBER));
+        boolean stable=ExplorationRootFrame.stable(first,second);
+        if(stable)logInfo("Exploration shortcut available directly on "+second+"; no City→World detour");
+        return stable;
+    }
+
     private boolean openExplorationScreen() {
         if (explorationTitleVisible()) return true;
         logInfo("Tapping exploration entry area...");
@@ -352,7 +367,15 @@ public class DoExplorationRoutine extends DelayedTask {
             BattleResult battleResult = waitForBattleResult(fightingStartedAt);
             if (battleResult == BattleResult.VICTORY) {
                 if (!handleVictory()) return false;
+                logInfo("Normal Exploration battle #"+battleNumber+" completed, City verified");
+                if(!ExplorationBattleTiming.nextStageAllowed(battleNumber,
+                        (System.nanoTime()-fightingStartedAt)/1_000_000L))return false;
                 battleNumber++;
+                // Legacy routine tried Fight again immediately after Victory,
+                // even though the current game explicitly returns to City.
+                // Re-enter the next Exploration stage from verified City;
+                // NEVER tap Fight or Back on an unrelated screen.
+                if(!prepareNextStageAfterVictory())return false;
             } else if (battleResult == BattleResult.DEFEAT) {
                 handleDefeat();
                 return false;
@@ -369,6 +392,34 @@ public class DoExplorationRoutine extends DelayedTask {
             }
         }
 
+        return true;
+    }
+
+    private boolean prepareNextStageAfterVictory() {
+        if (!verifiedRootShortcutAvailable() || !openExplorationScreen()) {
+            battleOutcomeUnknown=true;
+            logWarning("Next Exploration stage could not be opened from verified City after Victory");
+            return false;
+        }
+        var explore=detectExploreButton();
+        if (explore==null || !explore.isFound()) {
+            logInfo("No further verified Explore CTA after Victory; ending completed session");
+            return false;
+        }
+        tapExploreButton(explore);
+        var quick=awaitQuickConfirmationAfterExplore();
+        if (quick==QuickDialogOutcome.CONFIRMED) {
+            if(!completeQuickRoute())battleOutcomeUnknown=true;
+            return false;
+        }
+        if (quick==QuickDialogOutcome.UNRESOLVED) {
+            battleOutcomeUnknown=true;
+            logWarning("Next-stage Quick modal unknown, refusing blind Fight");
+            return false;
+        }
+        // The next startBattle() independently validates Squad Settings,
+        // optional Quick Deploy and Fight on two fresh frames.
+        logInfo("Next normal Exploration stage opened; checking Squad Settings before Fight");
         return true;
     }
 
@@ -549,20 +600,39 @@ public class DoExplorationRoutine extends DelayedTask {
     }
 
     private boolean handleVictory() {
-        logInfo("Exploration Victory detected; exiting through verified footer");
-        tapInside(VICTORY_CONTINUE_TOP_LEFT, VICTORY_CONTINUE_BOTTOM_RIGHT);
-        sleepTask(600);
-        if (isTemplateFound(TemplatesEnum.EXPLORATION_VICTORY)) {
-            // Allow the result animation to settle once; never tap twice without
-            // a fresh recognized Victory frame.
-            sleepTask(300);
-            if (isTemplateFound(TemplatesEnum.EXPLORATION_VICTORY)) {
-                logWarning("Exploration Victory did not close; stopping without another Fight tap; "
-                        + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
-                                "exploration", "victory-exit-unverified"));
-                battleOutcomeUnknown = true;
-                return false;
+        logInfo("Exploration Victory detected; verifying actual Return to City button");
+        var first=ExplorationVictoryFrame.returnToCity(emuManager.captureScreen(EMULATOR_NUMBER));
+        if(!first.isFound()) {
+            battleOutcomeUnknown=true;
+            logWarning("Victory detected but its Return to City button is missing; "
+                    + TaskDiagnosticSnapshots.capture(emuManager,EMULATOR_NUMBER,
+                    "exploration","victory-return-city-unverified"));
+            return false;
+        }
+        sleepTask(200);
+        var second=ExplorationVictoryFrame.returnToCity(emuManager.captureScreen(EMULATOR_NUMBER));
+        if(!RecognitionConsensus.agrees(first,second,14)) {
+            battleOutcomeUnknown=true;
+            logWarning("Victory return action changed; no stale tap");
+            return false;
+        }
+        tapVerifiedSquadAction(second);
+        sleepTask(800);
+        // Loading the root HUD after a battle can take several seconds.
+        // Passively inspect it; never tap Back or Fight during this handoff.
+        boolean arrivedCity=false;
+        for(int poll=0;poll<6;poll++){
+            var after=emuManager.captureScreen(EMULATOR_NUMBER);
+            if(ExplorationRootFrame.root(after)==ExplorationRootFrame.Root.CITY){
+                arrivedCity=true;
+                break;
             }
+            if(poll<5)sleepTask(470);
+        }
+        if (!arrivedCity) {
+            battleOutcomeUnknown=true;
+            logWarning("Victory Return to City clicked but City HUD was not verified within bounded settle");
+            return false;
         }
         StatisticsService.obtain().addToCounter(profile, "Exploration Fights Won", 1);
         return true;
@@ -579,7 +649,26 @@ public class DoExplorationRoutine extends DelayedTask {
 
         while (!isElapsed(detectionStartedAt, RESULT_DETECTION_WINDOW_MS)
                 && !isFightingWindowExpired(fightingStartedAt)) {
-            QuickDialogOutcome modal = inspectQuickExplorationConfirmation();
+            if (attempt <= 2 || attempt % 5 == 0) logInfo("Battle result detection attempt #" + attempt + "...");
+            // First check only two tiny UI regions. On a real combat frame
+            // Auto + x2 mean the fight continues; avoid all full-frame
+            // Victory/Defeat fallback and the quick-modal OCR scan.
+            // The 18:45 Task Coach capture proves both controls are present
+            // while the older 25-second result search is already running.
+            if (ExplorationBattleHudFrame.active(emuManager.captureScreen(EMULATOR_NUMBER))) {
+                if(attempt<=2 || attempt%8==0)
+                    logDebug("Active Exploration battle HUD confirmed; waiting, not tapping");
+                sleepWithinDetectionWindow(detectionStartedAt,fightingStartedAt);
+                attempt++;
+                continue;
+            }
+            // When active-battle controls disappear, a late Quick dialog or
+            // normal Victory/Defeat may have replaced them. Quick OCR is
+            // valuable only during the initial 15-second transition; the
+            // known normal combat after that is monitored without clicks.
+            QuickDialogOutcome modal = ExplorationBattleTiming.mayInspectLateQuick(
+                    (System.nanoTime()-detectionStartedAt)/1_000_000L)
+                    ? inspectQuickExplorationConfirmation() : QuickDialogOutcome.NOT_PRESENT;
             if (modal == QuickDialogOutcome.UNRESOLVED) {
                 logWarning("Unexpected confirmation could not be safely handled; "
                         + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
@@ -590,14 +679,13 @@ public class DoExplorationRoutine extends DelayedTask {
                 logInfo("Quick Exploration modal resolved during battle result polling");
                 return BattleResult.QUICK_CONFIRMED;
             }
-            if (attempt <= 2 || attempt % 5 == 0) logInfo("Battle result detection attempt #" + attempt + "...");
-            if (isTemplateFound(TemplatesEnum.EXPLORATION_VICTORY)) {
-                logInfo("Victory template detected.");
+            if (confirmedBattleResult(TemplatesEnum.EXPLORATION_VICTORY)) {
+                logInfo("Victory confirmed on two successive frames.");
                 return BattleResult.VICTORY;
             }
 
-            if (isTemplateFound(TemplatesEnum.EXPLORATION_DEFEAT)) {
-                logInfo("Defeat template detected.");
+            if (confirmedBattleResult(TemplatesEnum.EXPLORATION_DEFEAT)) {
+                logInfo("Defeat confirmed on two successive frames.");
                 return BattleResult.DEFEAT;
             }
 
@@ -607,6 +695,14 @@ public class DoExplorationRoutine extends DelayedTask {
         }
 
         return BattleResult.NOT_FOUND;
+    }
+
+    private boolean confirmedBattleResult(TemplatesEnum template) {
+        // Preserve mono/scaled fallback: Task Coach has actual 99.65%-score
+        // grayscale Victory hits that exact-only matching would miss.
+        if(!isTemplateFound(template))return false;
+        sleepTask(200);
+        return isTemplateFound(template);
     }
 
     private boolean isTemplateFound(TemplatesEnum template) {
