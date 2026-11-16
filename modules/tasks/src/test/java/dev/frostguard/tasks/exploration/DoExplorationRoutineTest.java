@@ -39,7 +39,7 @@ class DoExplorationRoutineTest {
         assertEquals(List.of(
                 new PointData(179, 1178),
                 new PointData(502, 1178)), routine.tapTopLefts);
-        assertEquals(List.of(300L), routine.sleepDurations);
+        assertEquals(List.of(120L), routine.sleepDurations);
     }
 
     @Test
