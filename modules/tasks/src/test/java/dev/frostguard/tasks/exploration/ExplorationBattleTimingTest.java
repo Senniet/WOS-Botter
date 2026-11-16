@@ -6,7 +6,8 @@ class ExplorationBattleTimingTest {
   assertTrue(ExplorationBattleTiming.RESULT_WINDOW_MS>=120_000);
   assertTrue(ExplorationBattleTiming.RESULT_WINDOW_MS>25_000);
   assertTrue(ExplorationBattleTiming.SESSION_WINDOW_MS>ExplorationBattleTiming.RESULT_WINDOW_MS);
-  assertTrue(ExplorationBattleTiming.POLL_MS>=2_000);
+  assertTrue(ExplorationBattleTiming.POLL_MS>=150);
+  assertTrue(ExplorationBattleTiming.POLL_MS<=500);
  }
  @Test void normalVictoryMayContinueOnlyWithBoundedSessionAndBattleCount() {
   assertTrue(ExplorationBattleTiming.nextStageAllowed(1,50_000));

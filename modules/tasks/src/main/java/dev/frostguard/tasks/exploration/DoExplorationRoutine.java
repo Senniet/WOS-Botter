@@ -49,12 +49,12 @@ public class DoExplorationRoutine extends DelayedTask {
     private boolean battleOutcomeUnknown;
 
     private static final long MAX_FIGHTING_WINDOW_MS = ExplorationBattleTiming.SESSION_WINDOW_MS;
-    private static final long RESULT_SEARCH_START_DELAY_MS = 1_500L;
+    private static final long RESULT_SEARCH_START_DELAY_MS = 350L;
     private static final long RESULT_DETECTION_WINDOW_MS = ExplorationBattleTiming.RESULT_WINDOW_MS;
     private static final long RESULT_DETECTION_DELAY_MS = ExplorationBattleTiming.POLL_MS;
-    private static final long EXPLORATION_SCREEN_LOAD_DELAY_MS = 500L;
-    private static final long EXPLORE_BUTTON_TAP_DELAY_MS = 300L;
-    private static final long QUICK_DEPLOY_DELAY_MS = 300L;
+    private static final long EXPLORATION_SCREEN_LOAD_DELAY_MS = 180L;
+    private static final long EXPLORE_BUTTON_TAP_DELAY_MS = 100L;
+    private static final long QUICK_DEPLOY_DELAY_MS = 120L;
     private static final long VICTORY_CONTINUE_DELAY_MS = 200L;
 
     public DoExplorationRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
@@ -301,7 +301,7 @@ public class DoExplorationRoutine extends DelayedTask {
                 SearchConfig.builder().withMaxAttempts(1).withThreshold(86)
                         .withArea(AreaData.of(160, 1100, 540, 1230)).build());
         if (existing.isFound()) {
-            sleepTask(150);
+            sleepTask(90);
             var second = templateSearchHelper.locatePattern(TemplatesEnum.EXPLORATION_BUTTON,
                     SearchConfig.builder().withMaxAttempts(1).withThreshold(86)
                             .withArea(AreaData.of(160, 1100, 540, 1230)).build());
@@ -317,7 +317,7 @@ public class DoExplorationRoutine extends DelayedTask {
                     emuManager, EMULATOR_NUMBER, "exploration", "explore-button-missing"));
             return ImageSearchResultData.miss();
         }
-        sleepTask(250);
+        sleepTask(100);
         var second = BlueLabelActionDetector.detect(
                 ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER)), EXPLORE_BLUE_BUTTON);
         if (RecognitionConsensus.agrees(first, second, 8)) {
@@ -646,70 +646,52 @@ public class DoExplorationRoutine extends DelayedTask {
     private BattleResult waitForBattleResult(long fightingStartedAt) {
         long detectionStartedAt = System.nanoTime();
         int attempt = 1;
-
         while (!isElapsed(detectionStartedAt, RESULT_DETECTION_WINDOW_MS)
                 && !isFightingWindowExpired(fightingStartedAt)) {
-            if (attempt <= 2 || attempt % 5 == 0) logInfo("Battle result detection attempt #" + attempt + "...");
-            // First check only two tiny UI regions. On a real combat frame
-            // Auto + x2 mean the fight continues; avoid all full-frame
-            // Victory/Defeat fallback and the quick-modal OCR scan.
-            // The 18:45 Task Coach capture proves both controls are present
-            // while the older 25-second result search is already running.
-            if (ExplorationBattleHudFrame.active(emuManager.captureScreen(EMULATOR_NUMBER))) {
-                if(attempt<=2 || attempt%8==0)
-                    logDebug("Active Exploration battle HUD confirmed; waiting, not tapping");
+            // Take ONE fresh remote screenshot; check Auto+x2, Victory and
+            // Defeat on that same frame. The old matcher captured a NEW
+            // screenshot for each color/scale/mono method (6 costly ADB
+            // transfers every time there was no result).
+            long started=System.nanoTime();
+            RawImageData frame=emuManager.captureScreen(EMULATOR_NUMBER);
+            long captureMs=(System.nanoTime()-started)/1_000_000L;
+            var state=ExplorationFastResultFrame.classify(frame,attempt%8==0);
+            long classifyMs=(System.nanoTime()-started)/1_000_000L-captureMs;
+            if(attempt==1 || attempt%12==0)
+                logInfo("Exploration fast scan #"+attempt+": capture="+captureMs
+                        +"ms, local recognition="+classifyMs+"ms, state="+state);
+            if(state==ExplorationFastResultFrame.State.FIGHTING) {
+                if(attempt==1 || attempt%12==0)
+                    logDebug("Battle active; fast HUD check #"+attempt);
                 sleepWithinDetectionWindow(detectionStartedAt,fightingStartedAt);
                 attempt++;
                 continue;
             }
-            // When active-battle controls disappear, a late Quick dialog or
-            // normal Victory/Defeat may have replaced them. Quick OCR is
-            // valuable only during the initial 15-second transition; the
-            // known normal combat after that is monitored without clicks.
-            QuickDialogOutcome modal = ExplorationBattleTiming.mayInspectLateQuick(
-                    (System.nanoTime()-detectionStartedAt)/1_000_000L)
-                    ? inspectQuickExplorationConfirmation() : QuickDialogOutcome.NOT_PRESENT;
-            if (modal == QuickDialogOutcome.UNRESOLVED) {
-                logWarning("Unexpected confirmation could not be safely handled; "
-                        + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
-                                "exploration", "quick-confirm-unresolved"));
-                return BattleResult.CONFIRMATION_UNRESOLVED;
+            if(state==ExplorationFastResultFrame.State.VICTORY
+                    || state==ExplorationFastResultFrame.State.DEFEAT) {
+                sleepTask(120);
+                var second=ExplorationFastResultFrame.classify(
+                    emuManager.captureScreen(EMULATOR_NUMBER),false);
+                if(ExplorationFastResultFrame.sameConfirmedResult(state,second)) {
+                    logInfo("Battle result verified on two frames: "+state);
+                    return state==ExplorationFastResultFrame.State.VICTORY
+                        ? BattleResult.VICTORY : BattleResult.DEFEAT;
+                }
             }
-            if (modal == QuickDialogOutcome.CONFIRMED) {
-                logInfo("Quick Exploration modal resolved during battle result polling");
-                return BattleResult.QUICK_CONFIRMED;
+            // A late Quick modal can be present before a battle starts. Do
+            // not OCR continuously once a normal battle is underway.
+            if(ExplorationBattleTiming.mayInspectLateQuick(
+                    (System.nanoTime()-detectionStartedAt)/1_000_000L)) {
+                var modal=inspectQuickExplorationConfirmation();
+                if(modal==QuickDialogOutcome.UNRESOLVED)return BattleResult.CONFIRMATION_UNRESOLVED;
+                if(modal==QuickDialogOutcome.CONFIRMED)return BattleResult.QUICK_CONFIRMED;
             }
-            if (confirmedBattleResult(TemplatesEnum.EXPLORATION_VICTORY)) {
-                logInfo("Victory confirmed on two successive frames.");
-                return BattleResult.VICTORY;
-            }
-
-            if (confirmedBattleResult(TemplatesEnum.EXPLORATION_DEFEAT)) {
-                logInfo("Defeat confirmed on two successive frames.");
-                return BattleResult.DEFEAT;
-            }
-
-            if (attempt <= 2 || attempt % 5 == 0) logDebug("Battle result absent; waiting for screen transition");
-            sleepWithinDetectionWindow(detectionStartedAt, fightingStartedAt);
+            if(attempt==1 || attempt%12==0)
+                logDebug("No completed battle result on frame #"+attempt+"; retrying");
+            sleepWithinDetectionWindow(detectionStartedAt,fightingStartedAt);
             attempt++;
         }
-
         return BattleResult.NOT_FOUND;
-    }
-
-    private boolean confirmedBattleResult(TemplatesEnum template) {
-        // Preserve mono/scaled fallback: Task Coach has actual 99.65%-score
-        // grayscale Victory hits that exact-only matching would miss.
-        if(!isTemplateFound(template))return false;
-        sleepTask(200);
-        return isTemplateFound(template);
-    }
-
-    private boolean isTemplateFound(TemplatesEnum template) {
-        ImageSearchResultData result = templateSearchHelper.locatePattern(
-                template,
-                SearchConfig.builder().withMaxAttempts(1).withDelay(0L).build());
-        return result != null && result.isFound();
     }
 
     private void tapSearchResultArea(ImageSearchResultData result) {
