@@ -47,6 +47,7 @@ public class LifeEssenceCaringRoutine extends DelayedTask {
 
 		// Navigate to Life Essence menu
 		if (!navigateToLifeEssenceMenu()) {
+            markWorkIncomplete("Life Essence Caring: sidebar/page not verified; no care action");
 			logWarning("Failed to navigate to Life Essence menu. Retrying in " + retryOffsetMinutes + " minutes.");
 			reschedule(LocalDateTime.now().plusMinutes(retryOffsetMinutes));
 			return;
@@ -74,6 +75,11 @@ public class LifeEssenceCaringRoutine extends DelayedTask {
 			}
 		}
 
+        // A skipped/unreachable Caring task must not be marked completed.
+        // The positive claim remains separate from a "no attempts left" run.
+        if (islandsCared == 0) {
+            markWorkIncomplete("Life Essence Caring: no caring action was confirmed");
+        }
 		// No island found - retry later
 
 		closeAllMenus();

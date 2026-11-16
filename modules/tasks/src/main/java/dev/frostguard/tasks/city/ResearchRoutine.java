@@ -135,6 +135,24 @@ public ResearchRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
 
     @Override
     protected void execute() {
+        boolean preempted=false;
+        try {
+            executeResearchWork();
+        } catch (dev.frostguard.engine.error.TaskPreemptedException
+                 | java.util.concurrent.CancellationException stop) {
+            preempted=true;
+            throw stop;
+        } finally {
+            // Never consume a higher-priority task's time while it is
+            // preempting us. Otherwise end the research UI transaction with
+            // a page-specific, verified Back rather than broad screen scans.
+            if (!preempted && !Thread.currentThread().isInterrupted()) {
+                returnHomeAfterResearchIfVisible();
+            }
+        }
+    }
+
+    private void executeResearchWork() {
 
         var constructionReservation = ConstructionBlockerRegistry.reservationFor(
                 profile, ConstructionBlockerRegistry.Consumer.RESEARCH);
@@ -449,8 +467,8 @@ private boolean openResearchTree() {
 
 private boolean isResearchTreeVisible() {
         if (templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_RESEARCH_TITLE,
-                SearchConfig.builder().withMaxAttempts(2).withDelay(130)
-                        .withThreshold(90).withArea(AreaData.of(75, 65, 380, 155)).build()).isFound())
+                SearchConfig.builder().withMaxAttempts(1)
+                        .withThreshold(90).withArea(AreaData.of(75, 0, 380, 100)).build()).isFound())
             return true;
         for (int attempt = 1; attempt <= 3; attempt++) {
             try {
@@ -472,6 +490,38 @@ private boolean isResearchTreeVisible() {
             }
         }
         return false;
+    }
+
+private void returnHomeAfterResearchIfVisible() {
+        var frame=emuManager.captureScreen(EMULATOR_NUMBER);
+        if (!ResearchPageFrame.titleVisible(frame)) return;
+        var first=ResearchPageFrame.safeBack(frame);
+        if (!first.isFound()) {
+            markWorkIncomplete("Research completed but header Back not verified");
+            logWarning(routineLogResearchLine("Tech Research Back missing; no blind tap"));
+            return;
+        }
+        sleepTask(220);
+        var second=ResearchPageFrame.safeBack(emuManager.captureScreen(EMULATOR_NUMBER));
+        if (!dev.frostguard.engine.helper.RecognitionConsensus.agrees(first,second,15)) {
+            markWorkIncomplete("Research Back moved or changed");
+            logWarning(routineLogResearchLine("Tech Research changed before exit; no tap"));
+            return;
+        }
+        tapNear(second.getPoint());
+        sleepTask(580);
+        if (ResearchPageFrame.titleVisible(emuManager.captureScreen(EMULATOR_NUMBER))) {
+            markWorkIncomplete("Research tree still visible after one Back");
+            logWarning(routineLogResearchLine("Research header still visible; refusing repeated blind Back"));
+            return;
+        }
+        try {
+            navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME,this::checkPreemption);
+            logInfo(routineLogResearchLine("Returned Home after verified Tech Research header exit"));
+        } catch(dev.frostguard.engine.error.HomeNotFoundException missing) {
+            markWorkIncomplete("Research: Home not verified after exiting Tech Research");
+            logWarning(routineLogResearchLine("Research ran but Home not verified: "+missing.getMessage()));
+        }
     }
 
 private PointData findResearchEntryHandTarget() {
