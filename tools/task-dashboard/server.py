@@ -6,6 +6,7 @@ import base64
 from collections import Counter, defaultdict
 from datetime import datetime, timezone, timedelta
 import hashlib
+from html import escape as html_escape
 import hmac
 from http import HTTPStatus
 from http.cookies import SimpleCookie
@@ -538,19 +539,46 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(payload,dict):raise ValueError("Object required")
         return payload
 
+    def taskflow_page(self):
+        query=parse_qs(urlsplit(self.path).query)
+        task=query.get('task',['TRAINING_TROOPS'])[0]
+        if not KEY_PATTERN.fullmatch(task):return self.reply(400,{'error':'invalid_task'})
+        data=inspector.java_flow(task)
+        if not data:return self.reply(404,{'error':'unknown_task'})
+        h=lambda x:html_escape(str(x),quote=True)
+        all_tasks=sorted(json.loads(inspector.CATALOG.read_text()),key=lambda x:x['label'])
+        options=''.join('<option value="'+h(t['key'])+'"'+(' selected' if task==t['key'] else '')+'>'+h(t['label'])+'</option>' for t in all_tasks)
+        sections=[]
+        if data.get('annotated_stages'):
+            entries=''.join('<li><strong>'+h(t['label'])+'</strong><div class="hint">'+h(t['method'])+'() · '+h(t['condition'])+'</div></li>' for t in data['annotated_stages'])
+            sections.append('<section><h2>Volledige logische taakflow</h2><ol>'+entries+'</ol></section>')
+        entries=''.join('<li><code>'+h(t['method'])+'()</code>'+('<div class="hint">Conditionele stap</div>' if t.get('conditional') else '')+'</li>' for t in data.get('steps',[]))
+        sections.append('<section><h2>Java-methodeaanroepen</h2><p class="hint">Sommige stappen worden alleen onder voorwaarden uitgevoerd.</p><ol>'+entries+'</ol></section>')
+        templates=data.get('templates',[])
+        sections.append('<section><h2>Templates ('+str(len(templates))+')</h2><div class="tags">'+''.join('<code>'+h(t)+'</code>' for t in templates)+'</div></section>')
+        page=''.join(['<!doctype html><html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">',
+            '<title>SurvivalOps taakflow</title><link rel="stylesheet" href="/taskflow.css"></head><body><main>',
+            '<nav><a href="/">← Terug naar QA Dashboard</a><span>SurvivalOps · taakflows</span></nav>',
+            '<header><h1>',h(data['label']),'</h1><p>Dit is een zelfstandige pagina zonder uitklapmenu of automatische herlaadactie.</p></header>',
+            '<form action="/taskflow" method="GET"><label for="task">Taak</label><select id="task" name="task">',options,'</select><button type="submit">Toon codeflow</button></form>',
+            '<p class="hint">Bron: ',h(data.get('source','niet gevonden')),'</p>',*sections,
+            '<footer><a href="/">Terug naar het dashboard</a></footer></main></body></html>'])
+        return self.raw_reply(200,page.encode('utf-8'),'text/html; charset=utf-8')
+
     def do_GET(self):
         path=urlsplit(self.path).path
         if path=="/healthz":
             return self.reply(200,{"ok":True,"service":"SurvivalOps QA"})
-        if path in ("/","/index.html","/app.js","/live.js","/style.css","/live.css","/templates.js","/templates.css","/qa.css","/autoqa.js","/autoqa.css","/inspector.js","/inspector.css"):
+        if path in ("/","/index.html","/app.js","/live.js","/style.css","/live.css","/templates.js","/templates.css","/qa.css","/autoqa.js","/autoqa.css","/inspector.js","/inspector.css","/taskflow.css"):
             name = "index.html" if path=="/" else path.lstrip("/")
             target=HERE/"static"/name
-            if name not in {"index.html","app.js","live.js","style.css","live.css","templates.js","templates.css","qa.css","autoqa.js","autoqa.css","inspector.js","inspector.css"} or not target.is_file():
+            if name not in {"index.html","app.js","live.js","style.css","live.css","templates.js","templates.css","qa.css","autoqa.js","autoqa.css","inspector.js","inspector.css","taskflow.css"} or not target.is_file():
                 return self.reply(404,{"error":"not_found"})
             mime= {"index.html":"text/html; charset=utf-8","app.js":"text/javascript; charset=utf-8","live.js":"text/javascript; charset=utf-8",
-                   "style.css":"text/css; charset=utf-8","live.css":"text/css; charset=utf-8","templates.js":"text/javascript; charset=utf-8","templates.css":"text/css; charset=utf-8","qa.css":"text/css; charset=utf-8","autoqa.js":"text/javascript; charset=utf-8","autoqa.css":"text/css; charset=utf-8","inspector.js":"text/javascript; charset=utf-8","inspector.css":"text/css; charset=utf-8"}[name]
+                   "style.css":"text/css; charset=utf-8","live.css":"text/css; charset=utf-8","templates.js":"text/javascript; charset=utf-8","templates.css":"text/css; charset=utf-8","qa.css":"text/css; charset=utf-8","autoqa.js":"text/javascript; charset=utf-8","autoqa.css":"text/css; charset=utf-8","inspector.js":"text/javascript; charset=utf-8","inspector.css":"text/css; charset=utf-8","taskflow.css":"text/css; charset=utf-8"}[name]
             return self.raw_reply(200,target.read_bytes(),mime)
         if not self.require_auth():return
+        if path=="/taskflow":return self.taskflow_page()
         if path=="/api/session":return self.reply(200,{"authenticated":True})
         if path=="/api/autoqa":return self.reply(200,autoqa_bridge.status())
         if path=="/api/autoqa/audit":
