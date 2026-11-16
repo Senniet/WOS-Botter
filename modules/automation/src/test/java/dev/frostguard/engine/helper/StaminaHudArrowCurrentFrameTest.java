@@ -11,7 +11,11 @@ import static org.junit.jupiter.api.Assertions.*;
 class StaminaHudArrowCurrentFrameTest {
     @BeforeAll static void cv() throws Exception { OpenCvPatternLocator.loadNativeLibrary(); }
 
-    @Test void cityAndWorldShowTheCurrentHudArrow() throws Exception {
+    // Regression: this visual arrow was historically named staminaHudArrow,
+    // but live emulator tapping (34,140) opens CITY BONUS, not Obtain more.
+    // Keep the legacy asset for audit compatibility; never use it as a
+    // stamina input in production.
+    @Test void cityAndWorldContainTheMisnamedCityBonusArrow() throws Exception {
         assertTrue(hudArrow("city-redacted.png"));
         assertTrue(hudArrow("world-redacted.png"));
     }
