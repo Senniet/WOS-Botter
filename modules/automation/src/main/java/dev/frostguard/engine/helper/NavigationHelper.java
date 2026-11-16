@@ -621,8 +621,17 @@ public class NavigationHelper {
         while (pass <= budget) {
             checkpoint.run();
             // detect reconnect
-            if (searcher.locatePattern(TemplatesEnum.GAME_HOME_RECONNECT,
-                    SearchConfigConstants.DEFAULT_SINGLE).isFound()) {
+            // On Serve-EMU a normal healthy launch frequently produces
+            // three GAME_HOME_RECONNECT method checks even though its popup
+            // is absent. Try one cheap exact observation on the first pass;
+            // only if the screen remains unknown do subsequent passes use
+            // the complete multi-scale/greyscale verified recovery.
+            ImageSearchResultData reconnect = searcher.usesServeEmuRecognition() && pass == 1
+                    ? searcher.locatePatternFast(TemplatesEnum.GAME_HOME_RECONNECT,
+                            SearchConfigConstants.DEFAULT_SINGLE)
+                    : searcher.locatePattern(TemplatesEnum.GAME_HOME_RECONNECT,
+                            SearchConfigConstants.DEFAULT_SINGLE);
+            if (reconnect.isFound()) {
                 throw new ProfileInReconnectStateException(accountName + " in reconnect state");
             }
 
@@ -632,6 +641,16 @@ public class NavigationHelper {
             boolean atHome = cityButton.isFound();
             ImageSearchResultData worldButton = atHome ? ImageSearchResultData.miss() : findWorldAnchor(pass == 1);
             boolean atWorld = worldButton.isFound();
+
+            // If neither stable HUD anchor is visible, we are on an unknown
+            // screen: re-run the FULL verified reconnect detector BEFORE any
+            // back navigation or popup input. Thus the fast happy path does
+            // not sacrifice reconnect safety under a popup or connection loss.
+            if (searcher.usesServeEmuRecognition() && pass == 1 && !atHome && !atWorld
+                    && searcher.locatePattern(TemplatesEnum.GAME_HOME_RECONNECT,
+                            SearchConfigConstants.DEFAULT_SINGLE).isFound()) {
+                throw new ProfileInReconnectStateException(accountName + " in reconnect state");
+            }
 
             checkpoint.run();
             // check if already at desired location

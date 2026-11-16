@@ -39,6 +39,24 @@ class TemplateAuditTests(unittest.TestCase):
             self.assertEqual(['DAILY_MISSIONS'],records['DAILY_MISSION_CLAIM_BUTTON']['tasks'])
             self.assertNotIn('private', str(records))
 
+    def test_task_method_profile_distinguishes_modes_from_emulator_instances(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            session=Path(tmp)/'2026-11-16'/'private-session'
+            session.mkdir(parents=True)
+            (session/'run.txt').write_text('task=TRAINING_TROOPS\nprofile=secret\n')
+            (session/'recognition-events.csv').write_text(
+                'template,method,hit\nGAME_HOME_RECONNECT,color,false\n'
+                'GAME_HOME_RECONNECT,multiscale,false\n'
+                'GAME_HOME_RECONNECT,mono,false\n'
+                'TRAINING_TRAIN_BUTTON,color,true\n')
+            profiles=audit.task_method_profiles(Path(tmp))
+            data=profiles['TRAINING_TROOPS']
+            self.assertEqual(1,data['sessions'])
+            self.assertEqual(4,data['observations'])
+            self.assertEqual({'color':2,'mono':1,'multiscale':1},data['method_counts'])
+            self.assertEqual('GAME_HOME_RECONNECT',data['most_checked'][0]['template'])
+            self.assertNotIn('secret',str(profiles))
+
     def test_outdated_exploration_and_income_templates_stay_out_of_hot_paths(self):
         # 20 real Task Coach sessions in Nov 2026 show the active 720x1280
         # NOV_2026 titles with 100% matches, old same-screen alternatives

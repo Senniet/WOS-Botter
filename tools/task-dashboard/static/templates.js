@@ -55,8 +55,24 @@
      node("div","","Taken met waarnemingen: "+((obs.tasks||[]).join(", ")||"nog geen")));
    return info;
  }
+ function renderTaskProfiles(profiles){
+   const target=el("template-task-profiles"),frag=document.createDocumentFragment();
+   const tasks=Object.entries(profiles||{}).sort((a,b)=>b[1].observations-a[1].observations);
+   for(const [task,sample] of tasks){
+     const counts=sample.method_counts||{};
+     const row=node("div","audit-method-profile");
+     row.append(node("strong","",task),
+       node("span","",sample.sessions+" runs · "+sample.observations+" metingen"),
+       node("span","","Kleur "+(counts.color||0)+" · Schaal "+(counts.multiscale||0)+
+         " · Grijs "+(counts.mono||0)));
+     frag.append(row);
+   }
+   if(!tasks.length)frag.append(node("div","audit-help","Geen Task Coach-metingen voor deze periode."));
+   target.replaceChildren(frag);
+ }
  function render(){
    const data=state.data;if(!data)return;
+   renderTaskProfiles(data.task_recognition_profiles);
    const s=data.summary;
    el("template-summary").replaceChildren(
      summary("Geregistreerd",s.registered),summary("Uitgeschakelde oude varianten",s.retired_from_runtime||0),
