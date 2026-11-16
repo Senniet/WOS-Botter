@@ -77,34 +77,29 @@ public class StaminaHelper {
         this.hudStaminaUi = new HudStaminaUi() {
             @Override
             public void openStaminaDialog(int settleMs) {
-                // Live 14:12 diagnostic: the modern HUD arrow occupies
-                // x~7..62,y~117..163. Legacy tap y=163..193 falls below it
-                // and repeatedly fails to open the stamina dialog. Only tap
-                // an explicitly matched control; never an arbitrary HUD spot.
-                RawImageData screen = device.captureScreen(deviceSlot);
-                var arrow = device.locatePattern(deviceSlot, screen,
-                        TemplatesEnum.SERVE_EMU_STAMINA_HUD_ARROW_2026,
-                        new dev.frostguard.api.domain.PointData(3, 110),
-                        new dev.frostguard.api.domain.PointData(90, 174), 90);
-                if (arrow.isFound()) {
-                    taps.tapInside(arrow, 1, settleMs);
-                    return;
+                // Reproduced on the live emulator 16-Nov: the old arrow at
+                // (34,140), despite matching at >90%, opens CITY BONUS.
+                // Only the green stamina HUD bar at (42,106) opens Obtain more.
+                // A positive root anchor is required by updateStaminaFromHud.
+                RawImageData first = device.captureScreen(deviceSlot);
+                var firstTarget = StaminaHudEntry.verifiedTarget(first);
+                if (firstTarget == null) {
+                    throw new IllegalStateException(
+                            "Stamina bar absent; refusing City Bonus arrow and legacy coordinates");
                 }
-                // Preserve the established click area for old interfaces only
-                // when their actual legacy root art is recognized.
-                AreaData legacyAnchor = AreaData.of(590, 1145, 715, 1275);
-                boolean legacyHud = device.locatePattern(deviceSlot, screen,
-                        TemplatesEnum.GAME_HOME_FURNACE,
-                        legacyAnchor.topLeft(), legacyAnchor.bottomRight(), 90).isFound()
-                        || device.locatePattern(deviceSlot, screen,
-                        TemplatesEnum.GAME_HOME_WORLD,
-                        legacyAnchor.topLeft(), legacyAnchor.bottomRight(), 90).isFound();
-                if (legacyHud) {
-                    taps.tapInside(CommonGameAreas.HUD_STAMINA_ENTRY, 1, settleMs);
-                    return;
+                try { Thread.sleep(160); }
+                catch (InterruptedException stop) {
+                    Thread.currentThread().interrupt();
+                    throw new java.util.concurrent.CancellationException(
+                            "Interrupted before verifying Stamina bar");
                 }
-                throw new IllegalStateException(
-                        "Stamina HUD entry was not verified; refusing legacy blind tap");
+                var secondTarget=StaminaHudEntry.verifiedTarget(
+                        device.captureScreen(deviceSlot));
+                if (!firstTarget.equals(secondTarget)) {
+                    throw new IllegalStateException(
+                            "Stamina bar changed before tap; refusing unverified HUD click");
+                }
+                taps.tapInside(AreaData.of(29,103,56,110),1,settleMs);
             }
 
             @Override

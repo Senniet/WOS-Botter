@@ -37,6 +37,11 @@ class KnownGameScreenResumeFrameTest {
                 KnownGameScreenResume.findSafeBackPage(frame("squad-settings-page-redacted.png")));
     }
 
+    @Test void recognizesCityBonusFromWrongInitialStaminaHudClick() throws Exception {
+        assertEquals(KnownGameScreenResume.Page.CITY_BONUS,
+                KnownGameScreenResume.findSafeBackPage(frame("city-bonus-header-20261116.png")));
+    }
+
     @Test void neverIssuesBackOnRewardsOrCityWithoutAConfirmedPageTitle() throws Exception {
         assertNull(KnownGameScreenResume.findSafeBackPage(frame("recruit-rewards-redacted.png")));
         assertNull(KnownGameScreenResume.findSafeBackPage(frame("recruit-city-redacted.png")));

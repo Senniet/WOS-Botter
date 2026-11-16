@@ -17,7 +17,7 @@ import java.util.function.Supplier;
  */
 final class KnownGameScreenResume {
     enum Page {
-        HERO_RECRUITMENT, HEROES, SQUAD_SETTINGS, DAILY, EXPLORATION, MAIL, VIP, ARENA, RESEARCH, ALLIANCE, ALLIANCE_TECH
+        HERO_RECRUITMENT, HEROES, SQUAD_SETTINGS, DAILY, EXPLORATION, MAIL, VIP, ARENA, RESEARCH, ALLIANCE, ALLIANCE_TECH, CITY_BONUS
     }
 
     record PagePattern(Page page, TemplatesEnum template, PointData topLeft, PointData bottomRight) { }
@@ -59,6 +59,17 @@ final class KnownGameScreenResume {
     static Page findSafeBackPage(RawImageData frame) {
         if (frame == null || !frame.isValid() || frame.getWidth() != 720 || frame.getHeight() != 1280) {
             return null;
+        }
+        // City Bonus was mistakenly opened by the old "stamina HUD arrow".
+        // It uses the upper-left back, outside the legacy y65..155 ROI.
+        // Require BOTH the unique title and real back arrow on this frame.
+        if (matches(frame, TemplatesEnum.SERVE_EMU_CITY_BONUS_TITLE_2026,
+                new PointData(75, 0), new PointData(315, 90))
+                && (matches(frame, TemplatesEnum.SERVE_EMU_ALLIANCE_BACK_LIVE_2026,
+                       new PointData(0,0), new PointData(105,90))
+                    || matches(frame, TemplatesEnum.GAME_HEADER_BACK_ARROW_CURRENT,
+                       new PointData(0,0), new PointData(105,90)))) {
+            return Page.CITY_BONUS;
         }
         // Cooldown Hero Recruitment is a known page, but its arrow is higher
         // than the original generic Back-header search window.
