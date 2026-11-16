@@ -9,9 +9,11 @@
   <link rel="stylesheet" href="/live.css">
   <link rel="stylesheet" href="/templates.css">
   <link rel="stylesheet" href="/qa.css">
+  <link rel="stylesheet" href="/autoqa.css">
   <script defer src="/app.js?v=qa-save-20261115b"></script>
   <script defer src="/live.js"></script>
   <script defer src="/templates.js"></script>
+  <script defer src="/autoqa.js"></script>
 </head>
 <body>
 <div id="login" class="login-overlay" hidden>
@@ -30,7 +32,7 @@
 <header class="topbar">
  <div class="topbar-inner">
   <div class="brand"><div class="brand-logo small">S<span>O</span></div><div><strong>SurvivalOps</strong><div class="brand-sub">QA Control Center <span class="bullet">·</span> Gedeelde takenlijst</div></div></div>
-  <div class="top-actions"><span class="private"><span class="dot"></span> LAN · webserver</span><button id="template-nav" class="ghost" type="button">▧ Templates</button><button id="live-nav" class="ghost" type="button">◉ Live diagnostiek</button><button id="refresh" class="ghost" type="button" title="Diagnostiek opnieuw inladen">↻ Vernieuwen</button><button id="logout" class="ghost" type="button">Uitloggen</button></div>
+  <div class="top-actions"><span class="private"><span class="dot"></span> LAN · webserver</span><button id="autoqa-nav" class="ghost" type="button">▣ Autotest</button><button id="template-nav" class="ghost" type="button">▧ Templates</button><button id="live-nav" class="ghost" type="button">◉ Live diagnostiek</button><button id="refresh" class="ghost" type="button" title="Diagnostiek opnieuw inladen">↻ Vernieuwen</button><button id="logout" class="ghost" type="button">Uitloggen</button></div>
  </div>
 </header>
 <main class="shell">
@@ -60,6 +62,21 @@
     <div id="detail" class="detail-inner"><div class="detail-placeholder">Selecteer een taak om verder te gaan.</div></div>
   </aside>
  </div>
+ <section id="autoqa-section" class="autoqa-panel" hidden>
+  <div class="autoqa-head">
+    <div><div class="eyebrow">SERVE-EMU · GEÏSOLEERDE TESTEMULATOR</div><h2>Autonome testcontroller</h2>
+    <p>Testwachtrij en screenshots per taak. De eerste fase is alleen observeren: geen klikken, uitgaven of automatische QA-goedkeuring.</p></div>
+    <button id="autoqa-back" type="button" class="ghost">Terug naar taken</button>
+  </div>
+  <div id="autoqa-device" class="autoqa-device"></div>
+  <div class="autoqa-actions"><label for="autoqa-task">Taak</label><select id="autoqa-task"></select>
+   <button id="autoqa-enqueue" type="button" class="primary">Observatietest starten</button>
+   <button id="autoqa-navigate" type="button" class="outline" hidden>Veilige Exploration-navigatie testen</button>
+   <button id="autoqa-refresh" type="button" class="outline">Vernieuwen</button></div>
+  <p id="autoqa-feedback" role="status" class="muted"></p>
+  <div class="autoqa-grid"><div><h3>Testwachtrij en resultaten</h3><div id="autoqa-runs" class="autoqa-runs"></div></div>
+  <div><h3>Testbewijs</h3><div id="autoqa-detail" class="autoqa-detail">Selecteer een run om het bewijs te bekijken.</div></div></div>
+ </section>
  <section id="live-section" class="live-dashboard" hidden>
    <div class="live-header">
      <div><div class="eyebrow">AUTOMATISCH UIT DE SURVIVALOPS DIAGNOSTIEK</div>

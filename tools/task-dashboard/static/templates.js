@@ -112,6 +112,7 @@
    if(notesDirty&&!confirm("Je niet-opgeslagen notities verlaten?"))return;
    notesDirty=false;
    window.LiveDiagnostics?.close();
+   window.AutoQA?.close();
    setView(true);
    if(!state.data)await refresh();else render();
  }

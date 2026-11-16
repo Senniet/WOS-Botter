@@ -1,0 +1,1021 @@
+{
+  "schema": 1,
+  "policy": {
+    "single_emulator": true,
+    "max_concurrent_tasks": 1,
+    "purchases": false,
+    "unsafe_clicks": false,
+    "auto_code_edits": false,
+    "auto_qa_signoff": false
+  },
+  "workflows": [
+    {
+      "task": "GAME_ANALYTICS_LABYRINTH",
+      "label": "Collect Alliance Labyrinth Ranking",
+      "factory": "GameAnalyticsRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "GAME_ANALYTICS_POWER",
+      "label": "Collect Alliance Power Ranking",
+      "factory": "GameAnalyticsRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "ALLIANCE_AUTOJOIN",
+      "label": "Alliance Autojoin",
+      "factory": "AllianceAutojoinRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "ALLIANCE_CHAMPIONSHIP",
+      "label": "Alliance Championship",
+      "factory": "AllianceChampionshipRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "ALLIANCE_CHESTS",
+      "label": "Alliance Chests",
+      "factory": "AllianceChestRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "ALLIANCE_HELP_REQUEST",
+      "label": "Alliance Help Request",
+      "factory": "AllianceHelpRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "ALLIANCE_MOBILIZATION",
+      "label": "Alliance Mobilization",
+      "factory": "AllianceMobilizationRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "ALLIANCE_PET_TREASURE",
+      "label": "Alliance Pet Treasure",
+      "factory": "PetAllianceTreasuresRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "ALLIANCE_SHOP",
+      "label": "Alliance Shop",
+      "factory": "AllianceShopRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "ALLIANCE_TECH",
+      "label": "Alliance Tech",
+      "factory": "AllianceTechRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "ALLIANCE_TRIUMPH",
+      "label": "Alliance Triumph",
+      "factory": "TriumphRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "BEAR_TRAP",
+      "label": "Bear Trap Event",
+      "factory": "BearTrapRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "CHIEF_ORDER_PRODUCTIVITY_DAY",
+      "label": "Chief Order: Productivity Day",
+      "factory": "ChiefOrderRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "CHIEF_ORDER_RUSH_JOB",
+      "label": "Chief Order: Rush Job",
+      "factory": "ChiefOrderRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "CHIEF_ORDER_URGENT_MOBILIZATION",
+      "label": "Chief Order: Urgent Mobilization",
+      "factory": "ChiefOrderRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "CITY_SURVIVORS",
+      "label": "City Survivors",
+      "factory": "NewSurvivorsRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "CITY_UPGRADE_FURNACE",
+      "label": "City Upgrade Furnace",
+      "factory": "UpgradeBuildingsRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "CITY_UPGRADE_PRIORITISE_FURNACE",
+      "label": "Prioritise Furnace",
+      "factory": "PrioritiseFurnaceRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "RESEARCH",
+      "label": "Research",
+      "factory": "ResearchRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "CUSTOM_TASK",
+      "label": "Custom Task",
+      "factory": null,
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "DAILY_MISSIONS",
+      "label": "Daily Missions",
+      "factory": "DailyMissionRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [
+        "daily_missions"
+      ],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "EXPERT_AGNES_INTEL",
+      "label": "Expert Agnes Intel",
+      "factory": "ExpertsAgnesIntelRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "EXPERT_ROMULUS_TAG",
+      "label": "Expert Romulus Tag",
+      "factory": "ExpertsRomulusTagRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "EXPERT_ROMULUS_TROOPS",
+      "label": "Expert Romulus Troops",
+      "factory": "ExpertsRomulusTroopsRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "EXPERT_SKILL_TRAINING",
+      "label": "Expert Skill Training",
+      "factory": "ExpertSkillTrainingRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "INTEL",
+      "label": "Intel",
+      "factory": "IntelligenceRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "MAIL_REWARDS",
+      "label": "Mail Rewards",
+      "factory": "MailRewardsRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "STOREHOUSE_CHEST",
+      "label": "Storehouse Chest",
+      "factory": "StorehouseChestRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "EVENT_BERSERK_CRYPTID",
+      "label": "Manual Rally Join",
+      "factory": "ManualRallyJoinRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "EVENT_HERO_MISSION",
+      "label": "Hero Mission Event",
+      "factory": "HeroMissionEventRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "EVENT_JOURNEY_OF_LIGHT",
+      "label": "Journey of Light Event",
+      "factory": "JourneyofLightRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "EVENT_MYRIAD_BAZAAR",
+      "label": "Myriad Bazaar Event",
+      "factory": "MyriadBazaarEventRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "EVENT_POLAR_TERROR",
+      "label": "Polar Terror Hunting",
+      "factory": "PolarTerrorHuntingRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "EVENT_TUNDRA_TRUCK",
+      "label": "Tundra Truck Event",
+      "factory": "TundraTruckEventRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "FISHING_MINIGAME",
+      "label": "Fishing Minigame",
+      "factory": "FishingMinigameRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "MERCENARY_EVENT",
+      "label": "Mercenary Event",
+      "factory": "MercenaryEventRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "TEST_HOOK_LOOP",
+      "label": "Test Hook Loop",
+      "factory": "TestHookLoopRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "CREATE_CHARACTER",
+      "label": "Create Character",
+      "factory": "CreateCharacterRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "DUMMY_TASK",
+      "label": "Dummy Task",
+      "factory": "DummyRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "GATHER_BOOST",
+      "label": "Gather Speed Boost",
+      "factory": "GatherSpeedRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "GATHER_RESOURCES",
+      "label": "Gather Resources",
+      "factory": "GatherRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "INITIALIZE",
+      "label": "Initialize",
+      "factory": "InitializeRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [
+        "city",
+        "world"
+      ],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "SKIP_TUTORIAL",
+      "label": "Skip Tutorial",
+      "factory": "SkipTutorialRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "TRAINING_TROOPS",
+      "label": "Training",
+      "factory": "TrainingRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "PET_SKILLS",
+      "label": "Pet Skills",
+      "factory": "PetSkillsRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "ARENA",
+      "label": "Arena",
+      "factory": "ArenaRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "BANK",
+      "label": "Bank",
+      "factory": "BankRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "BEAST_HUNTING",
+      "label": "Beast Hunting",
+      "factory": "BeastSlayRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "CRYSTAL_LABORATORY",
+      "label": "Crystal Laboratory",
+      "factory": "CrystalLaboratoryRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "DO_EXPLORATION",
+      "label": "Do Exploration",
+      "factory": "DoExplorationRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [
+        "city",
+        "world",
+        "exploration"
+      ],
+      "reviewed_action_steps": [
+        "verify_city_world_twice",
+        "optional_known_research_back",
+        "tap_exploration_entry_once",
+        "verify_exploration_title_and_explore_button"
+      ],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "EXPLORATION_CHEST",
+      "label": "Exploration Chest",
+      "factory": "ExplorationRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [
+        "exploration"
+      ],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "HERO_RECRUITMENT",
+      "label": "Hero Recruitment",
+      "factory": "HeroRecruitmentRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "LABYRINTH",
+      "label": "Labyrinth",
+      "factory": "DailyLabyrinthRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "LIFE_ESSENCE",
+      "label": "Life Essence",
+      "factory": "LifeEssenceRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "LIFE_ESSENCE_CARING",
+      "label": "Life Essence Caring",
+      "factory": "LifeEssenceCaringRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "NOMADIC_MERCHANT",
+      "label": "Nomadic Merchant",
+      "factory": "NomadicMerchantRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "PET_ADVENTURE",
+      "label": "Pet Adventure",
+      "factory": "PetAdventureChestRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "TREK_AUTOMATION",
+      "label": "Tundra Trek Automation",
+      "factory": "TundraTrekAutoRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "TREK_SUPPLIES",
+      "label": "Trek Supplies",
+      "factory": "TundraTrekRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "VIP_POINTS",
+      "label": "VIP Points",
+      "factory": "VipRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "WAR_ACADEMY",
+      "label": "War Academy Shards",
+      "factory": "WarAcademyRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    },
+    {
+      "task": "SHOP_MYSTERY",
+      "label": "Shop Mystery",
+      "factory": "MysteryShopRoutine",
+      "mode": "observe",
+      "steps": [
+        "verify_pinned_emulator",
+        "capture_before",
+        "recognize_current_screen",
+        "capture_after",
+        "write_evidence"
+      ],
+      "expected_screens": [],
+      "reviewed_action_steps": [],
+      "requires_review_for_actions": true
+    }
+  ]
+}
