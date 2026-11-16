@@ -1,0 +1,10 @@
+[Unit]
+Description=Queue read-only SurvivalOps emulator health observation
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/survivalops-autonomous-qa
+ExecStart=/usr/bin/python3 %h/survivalops-autonomous-qa/controller.py enqueue INITIALIZE
+NoNewPrivileges=yes
+UMask=0077

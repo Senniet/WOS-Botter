@@ -21,6 +21,7 @@ import threading
 import time
 from urllib.parse import urlsplit, parse_qs
 from qa_protocol import Protocol
+import autoqa_bridge
 
 HERE = Path(__file__).resolve().parent
 TEMPLATE_AUDIT_PATH = Path.home()/'.local/share/survivalops-template-audit/report.json'
@@ -540,16 +541,25 @@ class Handler(BaseHTTPRequestHandler):
         path=urlsplit(self.path).path
         if path=="/healthz":
             return self.reply(200,{"ok":True,"service":"SurvivalOps QA"})
-        if path in ("/","/index.html","/app.js","/live.js","/style.css","/live.css","/templates.js","/templates.css","/qa.css"):
+        if path in ("/","/index.html","/app.js","/live.js","/style.css","/live.css","/templates.js","/templates.css","/qa.css","/autoqa.js","/autoqa.css"):
             name = "index.html" if path=="/" else path.lstrip("/")
             target=HERE/"static"/name
-            if name not in {"index.html","app.js","live.js","style.css","live.css","templates.js","templates.css","qa.css"} or not target.is_file():
+            if name not in {"index.html","app.js","live.js","style.css","live.css","templates.js","templates.css","qa.css","autoqa.js","autoqa.css"} or not target.is_file():
                 return self.reply(404,{"error":"not_found"})
             mime= {"index.html":"text/html; charset=utf-8","app.js":"text/javascript; charset=utf-8","live.js":"text/javascript; charset=utf-8",
-                   "style.css":"text/css; charset=utf-8","live.css":"text/css; charset=utf-8","templates.js":"text/javascript; charset=utf-8","templates.css":"text/css; charset=utf-8","qa.css":"text/css; charset=utf-8"}[name]
+                   "style.css":"text/css; charset=utf-8","live.css":"text/css; charset=utf-8","templates.js":"text/javascript; charset=utf-8","templates.css":"text/css; charset=utf-8","qa.css":"text/css; charset=utf-8","autoqa.js":"text/javascript; charset=utf-8","autoqa.css":"text/css; charset=utf-8"}[name]
             return self.raw_reply(200,target.read_bytes(),mime)
         if not self.require_auth():return
         if path=="/api/session":return self.reply(200,{"authenticated":True})
+        if path=="/api/autoqa":return self.reply(200,autoqa_bridge.status())
+        if path=="/api/autoqa/detail":
+            query=parse_qs(urlsplit(self.path).query)
+            result=autoqa_bridge.detail(query.get("id",[""])[0])
+            return self.reply(200,result) if result else self.reply(404,{"error":"run_not_found"})
+        if path=="/api/autoqa/image":
+            query=parse_qs(urlsplit(self.path).query)
+            img=autoqa_bridge.image(query.get("id",[""])[0],query.get("name",[""])[0])
+            return self.raw_reply(200,img,"image/png") if img else self.reply(404,{"error":"screenshot_not_found"})
         if path=="/api/template-audit":
             audit=read_template_audit()
             return self.reply(200,audit) if audit else self.reply(503,{"error":"audit_not_ready"})
@@ -605,6 +615,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200,{"ok":True},{"Set-Cookie":"qa_session=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Strict"})
         if path=="/api/sync":
             return self.reply(200,{"imported":self.board.sync_diagnostics(force=True)})
+        if path=="/api/autoqa/enqueue":
+            if not set(payload).issubset({'task','mode'}) or 'task' not in payload or not isinstance(payload.get("task"),str):
+                return self.reply(400,{"error":"task_required"})
+            try:return self.reply(202,autoqa_bridge.enqueue(payload['task'],payload.get('mode','observe')))
+            except (ValueError,RuntimeError) as exc:
+                return self.reply(400,{"error":str(exc)[:140]})
         match=re.fullmatch(r"/api/tasks/([A-Z][A-Z0-9_]{1,79})/qa/(start|attach|check|operator-note|operator-sign)",path)
         if match:
             key,action=match.groups()

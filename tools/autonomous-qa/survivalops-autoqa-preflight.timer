@@ -1,0 +1,11 @@
+[Unit]
+Description=Monitor Serve-EMU every 30 minutes without game actions
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=30min
+Persistent=true
+Unit=survivalops-autoqa-preflight.service
+
+[Install]
+WantedBy=timers.target
