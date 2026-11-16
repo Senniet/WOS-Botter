@@ -6,7 +6,7 @@ This is the new **server-based test-control foundation**, separate from the Wind
 
 - A pinned Android 16 emulator at **720×1280 / DPI 320**, with Whiteout Survival running. No silent failover to another serial. First bind: `python3 controller.py discover`, then `python3 controller.py bind emulator-5554`. When serial changes, bind must be explicitly updated.
 - SQLite job queue, **one worker**, run IDs, screenshots, hashes, timing and current-template recognition scores. Every one of the **62 QA catalog tasks** has a separate exported manifest in `workflows.json`, currently **observe-only**.
-- One reviewed **active** scenario for `DO_EXPLORATION`: verifies City/World on two frames, taps only the bottom-left free Exploration shortcut once, then confirms current Exploration title and Explore CTA. Unknown pages stop **without clicking**.
+- One reviewed **active** scenario for `DO_EXPLORATION`: verifies City/World on two frames, or recovers exactly the positively recognized Tech Research title and header Back once, then taps only the bottom-left free Exploration shortcut once and confirms the current Exploration title and Explore CTA. Unknown pages stop **without clicking**.
 - SHA-based screenshots stored private under `~/.local/share/survivalops-autoqa/evidence/<run>/`; QA site serves them only to logged-in users. Run events are appended to the task's existing events history. **No operator notes, seven QA checkboxes, signoffs or verified status are modified.**
 - Read-only snapshot comparison uses current Serve-EMU template PNGs from the repository, NumPy and ImageMagick already available on the server. Matching diagnostics never authorize purchases or unknown clicks.
 - A half-hourly timer creates one observation of `INITIALIZE`. This checks emulator connectivity and records evidence without modifying the game.
@@ -53,3 +53,7 @@ The controller is deliberately Python stdlib + existing numpy/ImageMagick and re
 6. Templates only promoted after positive/negative replay, scored speed comparison, full Java build and full task-run evidence. Never auto-merge source changes without tests and review.
 
 The controller does **not** claim to be an always-on ChatGPT session or an autonomous code-writing model. Scheduled evidence collection runs without chat; code fixes, new action workflows and QA reviewer signoffs are still performed during an active assistant session or by a separately configured, audited local agent.
+
+### Performance telemetry
+
+The server uses a private 50-second OpenSSH multiplex connection for successive screenshot requests. Each new screenshot now records separate `capture_ms` and `recognition_ms` timings so transport latency can be addressed without lowering validation thresholds.

@@ -77,8 +77,16 @@ def save_config(config):
 
 def ssh(args: list[str],timeout=DEFAULT_TIMEOUT)->bytes:
     if any(not isinstance(x,str) for x in args):raise ValueError('Invalid SSH argument')
+    # Reuse the SSH transport for successive ADB screenshots. A new SSH/TLS
+    # handshake on every recognition frame was wasting time. UNIX socket is
+    # restricted to the service's own user; no connection to other servers.
+    mux_dir=HOME/'.cache/survivalops-autoqa-ssh'
+    mux_dir.mkdir(mode=0o700,parents=True,exist_ok=True)
+    os.chmod(mux_dir,0o700)
     cmd=['/usr/bin/ssh','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes',
-         '-o','ConnectTimeout=5','-i',str(SSH_KEY),HOST,*args]
+         '-o','ConnectTimeout=5','-o','ControlMaster=auto',
+         '-o','ControlPersist=50s','-o','ControlPath='+str(mux_dir/'mux-%r@%h-%p'),
+         '-i',str(SSH_KEY),HOST,*args]
     result=subprocess.run(cmd,capture_output=True,timeout=timeout,check=False)
     if result.returncode:
         raise RuntimeError('Remote command error: '+result.stderr.decode('utf-8','replace')[-250:])
@@ -158,8 +166,8 @@ def scenario(task:str)->dict:
             'mode':'observe','steps':['verify_pinned_emulator','capture_before',
                   'recognize_current_screen','capture_after','write_evidence'],
             'expected_screens':expected.get(task,[]),
-            'reviewed_action_steps':(['verify_city_world_twice','tap_exploration_entry_once',
-                'verify_exploration_title_and_explore_button'] if task=='DO_EXPLORATION' else []),
+            'reviewed_action_steps':(['verify_city_world_twice','optional_known_research_back',
+                'tap_exploration_entry_once','verify_exploration_title_and_explore_button'] if task=='DO_EXPLORATION' else []),
             'requires_review_for_actions':True}
 
 
@@ -256,7 +264,9 @@ def execute(row:dict)->dict:
         plan=scenario(row['task'])
         states=[]
         def evidence(name):
+            capture_started=time.monotonic()
             image=snapshot(rid,name,actual['serial'])
+            image['capture_ms']=round((time.monotonic()-capture_started)*1000)
             path=DATA/'evidence'/rid/image['file']
             started=time.monotonic()
             detection=recognition.analyze_file(path)
@@ -274,7 +284,31 @@ def execute(row:dict)->dict:
             # No spending, no automatic recovery, no guessing button pixels.
             if row['task']!='DO_EXPLORATION':raise RuntimeError('No reviewed navigation workflow for this task')
             if initial['state'] not in ('city','world') or initial['score']<0.87:
-                raise RuntimeError('No positively recognized City/World root; no tap')
+                # Only a known, non-purchase screen can be recovered. The
+                # existing Java Task Coach verified both Tech Research title
+                # and top-left Back on actual 2026 frames.
+                known=recognition.known_research_back(first_path)
+                if not known['ready']:
+                    raise RuntimeError('No positively recognized City/World root or reviewed Tech Research exit; no tap')
+                time.sleep(0.13)
+                before_back,preback_path,_=evidence('research-preflight')
+                confirmation=recognition.known_research_back(preback_path)
+                if not confirmation['ready']:
+                    raise RuntimeError('Tech Research Back changed; refusing unverified click')
+                bound_device()
+                adb('shell','input','tap','41','32',serial=actual['serial'],timeout=15)
+                report['actions']+=1
+                events.append({'time':stamp(),'type':'tap','detail':'Verified Tech Research Back x41 y32 (no spending)'})
+                resolved=False
+                for count in range(6):
+                    time.sleep(0.35)
+                    _,_,fresh=evidence('research-exit-'+str(count))
+                    if fresh['state'] in ('city','world') and fresh['score']>=0.87:
+                        initial=fresh
+                        resolved=True
+                        break
+                if not resolved:
+                    raise RuntimeError('Tech Research closed but no verified City/World root; stopping safely')
             time.sleep(0.15)
             second,_,verified=evidence('preflight2')
             if verified['state']!=initial['state'] or verified['score']<0.87:
@@ -282,7 +316,7 @@ def execute(row:dict)->dict:
             # Re-evaluate pinned identity immediately before the single action.
             bound_device()
             adb('shell','input','tap','70','1220',serial=actual['serial'],timeout=15)
-            report['actions']=1
+            report['actions']+=1
             events.append({'time':stamp(),'type':'tap','detail':'Verified Exploration shortcut x70 y1220'})
             found=False
             for index in range(8):
@@ -335,6 +369,30 @@ def execute(row:dict)->dict:
                       (report['outcome'],report['finished_at'],report['reason'],report['checks'],report['actions'],report['duration_ms'],rid))
         record_board_event(report)
     return report
+
+
+def reconcile_action_counters()->dict:
+    """Fix stale counters from actual persisted tap events; never infer taps.
+    Never alter original screenshots, recognition evidence or task signoffs.
+    """
+    fixed=0
+    for folder in (DATA/'evidence').glob('*'):
+        if not folder.is_dir() or not ID.fullmatch(folder.name):continue
+        file=folder/'result.json'
+        if not file.is_file():continue
+        try:
+            report=json.loads(file.read_text())
+            count=sum(e.get('type')=='tap' for e in report.get('events',[]))
+            if count==report.get('actions',0):continue
+            report['actions']=count
+            report.setdefault('events',[]).append({'time':stamp(),'type':'metrics_corrected',
+                'detail':'Action count reconciled against explicit stored tap events'})
+            file.write_text(json.dumps(report,indent=2))
+            with db() as c:
+                c.execute('update runs set actions=? where id=?',(count,folder.name))
+            fixed+=1
+        except (OSError,ValueError,sqlite3.Error):continue
+    return {'corrected_runs':fixed,'game_actions':0}
 
 
 def recheck_evidence()->dict:
@@ -400,6 +458,7 @@ def main():
     w=sub.add_parser('worker');w.add_argument('--once',action='store_true')
     sub.add_parser('workflows')
     sub.add_parser('recheck-evidence')
+    sub.add_parser('reconcile-counters')
     a=p.parse_args()
     if a.cmd=='discover':result=devices()
     elif a.cmd=='bind':result=bind(a.serial,a.force)
@@ -408,6 +467,7 @@ def main():
     elif a.cmd=='detail':result=details(a.id)
     elif a.cmd=='workflows':result=[scenario(t['key']) for t in tasks()]
     elif a.cmd=='recheck-evidence':result=recheck_evidence()
+    elif a.cmd=='reconcile-counters':result=reconcile_action_counters()
     elif a.cmd=='worker':worker(a.once);result={'ok':True}
     print(json.dumps(result,indent=2,ensure_ascii=False))
 

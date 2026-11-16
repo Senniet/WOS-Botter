@@ -95,6 +95,14 @@ def normalized_match(image:np.ndarray,patch:np.ndarray,roi:tuple[int,int,int,int
             'reason':'diagnostic_match_only'}
 
 
+def known_research_back(path:Path)->dict:
+    image=grayscale(path)
+    title=normalized_match(image,template('SERVE_EMU_RESEARCH_TITLE'),(0,0,350,125))
+    back=normalized_match(image,template('GAME_HEADER_BACK_ARROW_CURRENT'),(0,0,115,115))
+    return {'ready':title['score']>=0.93 and back['score']>=0.93,
+            'title_score':title['score'],'back_score':back['score']}
+
+
 def exploration_ready(path:Path)->dict:
     image=grayscale(path)
     title=normalized_match(image,template('SERVE_EMU_EXPLORATION_TITLE_NOV_2026'),(65,0,660,230))

@@ -17,7 +17,7 @@ def status():return controller.status()
 def enqueue(task,mode='observe'):return {'id':controller.new_run(task,mode)}
 def detail(run_id):return controller.details(run_id)
 def image(run_id,name):
-    if not controller.ID.fullmatch(run_id) or name not in ('before','after','preflight2','candidate') and not __import__('re').fullmatch(r'transition-[0-7]',name):
+    if not controller.ID.fullmatch(run_id) or name not in ('before','after','preflight2','candidate','research-preflight') and not __import__('re').fullmatch(r'(?:transition-[0-7]|research-exit-[0-5])',name):
         return None
     item=controller.details(run_id)
     if not item:return None

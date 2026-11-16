@@ -64,7 +64,8 @@
        pic.alt='Automatisch vastgelegde '+image.name+'-screenshot';pic.loading='lazy';
        const match=image.recognition;
        figure.append(node("figcaption","",image.name+" · "+(match?.state||"onbekend")+
-           " · score "+(match?.score??"—")+" · "+(image.recognition_ms??"—")+"ms herkennen"),pic);
+           " · score "+(match?.score??"—")+" · "+(image.capture_ms??"—")+
+           "ms screenshot · "+(image.recognition_ms??"—")+"ms herkennen"),pic);
        box.append(figure);
      }
      for(const candidate of d.result?.proposals||[]){

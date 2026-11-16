@@ -817,6 +817,7 @@
       ],
       "reviewed_action_steps": [
         "verify_city_world_twice",
+        "optional_known_research_back",
         "tap_exploration_entry_once",
         "verify_exploration_title_and_explore_button"
       ],

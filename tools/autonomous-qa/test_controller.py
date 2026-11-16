@@ -18,8 +18,8 @@ class ControllerTest(unittest.TestCase):
             self.assertEqual(plan['mode'],'observe')
             self.assertTrue(plan['requires_review_for_actions'])
         self.assertEqual(controller.scenario('DO_EXPLORATION')['reviewed_action_steps'],
-                         ['verify_city_world_twice','tap_exploration_entry_once',
-                          'verify_exploration_title_and_explore_button'])
+                         ['verify_city_world_twice','optional_known_research_back',
+                          'tap_exploration_entry_once','verify_exploration_title_and_explore_button'])
         self.assertEqual(controller.scenario('TRAINING_TROOPS')['reviewed_action_steps'],[])
 
     def test_no_anonymous_or_non_reviewed_actions(self):
@@ -51,12 +51,55 @@ class ControllerTest(unittest.TestCase):
                 mock.patch.object(controller,'snapshot',return_value={'file':'before.png','name':'before'}),\
                 mock.patch.object(recognition,'analyze_file',return_value={
                     'state':'unknown','score':0.12,'matches':{}}),\
+                mock.patch.object(recognition,'known_research_back',return_value={'ready':False}),\
                 mock.patch.object(controller,'adb') as adb,                mock.patch.object(controller,'record_board_event'):
             run={'id':'abcd0123456789ef','task':'DO_EXPLORATION','device':'emulator-5554','mode':'navigate'}
             report=controller.execute(run)
             self.assertEqual(report['outcome'],'blocked')
             self.assertEqual(report['actions'],0)
             adb.assert_not_called()
+
+    def test_research_exit_and_exploration_tap_count_as_two_actions(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            images=iter([
+                ('unknown',0.55),('unknown',0.55),
+                ('city',0.99),('city',0.99),('exploration',0.94)])
+            def capture(run_id,name,device):
+                d=root/'evidence'/run_id;d.mkdir(parents=True,exist_ok=True)
+                (d/(name+'.png')).write_bytes(b'PNG')
+                return {'name':name,'file':name+'.png'}
+            def state(_):
+                name,score=next(images)
+                return {'state':name,'score':score,'matches':{}}
+            with mock.patch.object(controller,'DATA',root),\
+                 mock.patch.object(controller,'bound_device',return_value={'serial':'emulator-5554'}),\
+                 mock.patch.object(controller,'snapshot',side_effect=capture),\
+                 mock.patch.object(recognition,'analyze_file',side_effect=state),\
+                 mock.patch.object(recognition,'known_research_back',return_value={'ready':True}),\
+                 mock.patch.object(recognition,'exploration_ready',return_value={
+                     'ready':True,'title':{'score':0.95},'explore_button':{'score':0.88}}),\
+                 mock.patch.object(controller,'adb') as adb,\
+                 mock.patch.object(controller,'record_board_event'),\
+                 mock.patch.object(controller.time,'sleep'):
+                report=controller.execute({'id':'12345678abcdef12','task':'DO_EXPLORATION',
+                                           'device':'emulator-5554','mode':'navigate'})
+                self.assertEqual(report['outcome'],'navigation_verified')
+                self.assertEqual(report['actions'],2)
+                self.assertEqual(adb.call_count,2)
+                self.assertEqual(sum(e['type']=='tap' for e in report['events']),2)
+
+    def test_reviewed_tech_research_exit_needs_both_title_and_back(self):
+        with tempfile.TemporaryDirectory() as d:
+            sample=Path(d)/'research.png'
+            subprocess=__import__('subprocess')
+            sample.write_bytes((controller.REPO/'tools/autonomous-qa/fixtures/tech-research-header.png').read_bytes())
+            check=recognition.known_research_back(sample)
+            self.assertGreater(check['title_score'],0.93)
+            self.assertGreater(check['back_score'],0.93)
+            self.assertTrue(check['ready'])
+        other=controller.REPO/'modules/tasks/src/test/resources/initialize/home-world-anchor-redacted.png'
+        self.assertFalse(recognition.known_research_back(other)['ready'])
 
     def test_uniform_ui_region_cannot_generate_a_false_100_percent_match(self):
         rng=np.random.default_rng(31)
