@@ -22,6 +22,7 @@ import time
 from urllib.parse import urlsplit, parse_qs
 from qa_protocol import Protocol
 import autoqa_bridge
+import inspector
 
 HERE = Path(__file__).resolve().parent
 TEMPLATE_AUDIT_PATH = Path.home()/'.local/share/survivalops-template-audit/report.json'
@@ -541,13 +542,13 @@ class Handler(BaseHTTPRequestHandler):
         path=urlsplit(self.path).path
         if path=="/healthz":
             return self.reply(200,{"ok":True,"service":"SurvivalOps QA"})
-        if path in ("/","/index.html","/app.js","/live.js","/style.css","/live.css","/templates.js","/templates.css","/qa.css","/autoqa.js","/autoqa.css"):
+        if path in ("/","/index.html","/app.js","/live.js","/style.css","/live.css","/templates.js","/templates.css","/qa.css","/autoqa.js","/autoqa.css","/inspector.js","/inspector.css"):
             name = "index.html" if path=="/" else path.lstrip("/")
             target=HERE/"static"/name
-            if name not in {"index.html","app.js","live.js","style.css","live.css","templates.js","templates.css","qa.css","autoqa.js","autoqa.css"} or not target.is_file():
+            if name not in {"index.html","app.js","live.js","style.css","live.css","templates.js","templates.css","qa.css","autoqa.js","autoqa.css","inspector.js","inspector.css"} or not target.is_file():
                 return self.reply(404,{"error":"not_found"})
             mime= {"index.html":"text/html; charset=utf-8","app.js":"text/javascript; charset=utf-8","live.js":"text/javascript; charset=utf-8",
-                   "style.css":"text/css; charset=utf-8","live.css":"text/css; charset=utf-8","templates.js":"text/javascript; charset=utf-8","templates.css":"text/css; charset=utf-8","qa.css":"text/css; charset=utf-8","autoqa.js":"text/javascript; charset=utf-8","autoqa.css":"text/css; charset=utf-8"}[name]
+                   "style.css":"text/css; charset=utf-8","live.css":"text/css; charset=utf-8","templates.js":"text/javascript; charset=utf-8","templates.css":"text/css; charset=utf-8","qa.css":"text/css; charset=utf-8","autoqa.js":"text/javascript; charset=utf-8","autoqa.css":"text/css; charset=utf-8","inspector.js":"text/javascript; charset=utf-8","inspector.css":"text/css; charset=utf-8"}[name]
             return self.raw_reply(200,target.read_bytes(),mime)
         if not self.require_auth():return
         if path=="/api/session":return self.reply(200,{"authenticated":True})
@@ -563,6 +564,33 @@ class Handler(BaseHTTPRequestHandler):
             query=parse_qs(urlsplit(self.path).query)
             img=autoqa_bridge.image(query.get("id",[""])[0],query.get("name",[""])[0])
             return self.raw_reply(200,img,"image/png") if img else self.reply(404,{"error":"screenshot_not_found"})
+        if path=="/api/inspector/sessions":
+            query=parse_qs(urlsplit(self.path).query)
+            return self.reply(200,{"sessions":inspector.sessions(query.get('task',[None])[0])})
+        if path=="/api/inspector/run":
+            query=parse_qs(urlsplit(self.path).query)
+            result=inspector.run_detail(query.get('id',[''])[0])
+            return self.reply(200,result) if result else self.reply(404,{"error":"run_not_found"})
+        if path=="/api/inspector/run-image":
+            query=parse_qs(urlsplit(self.path).query)
+            image=inspector.coach_image(query.get('id',[''])[0],query.get('file',[''])[0])
+            return self.raw_reply(200,image,'image/jpeg') if image else self.reply(404,{"error":"capture_not_found"})
+        if path=="/api/inspector/extras":return self.reply(200,{"files":inspector.unregistered_assets()})
+        if path=="/api/inspector/extra-image":
+            query=parse_qs(urlsplit(self.path).query)
+            img=inspector.extra_png(query.get('path',[''])[0])
+            return self.raw_reply(200,img,'image/png') if img else self.reply(404,{"error":"asset_not_found"})
+        if path=="/api/inspector/template-image":
+            query=parse_qs(urlsplit(self.path).query)
+            image=inspector.template_png(query.get('name',[''])[0])
+            return self.raw_reply(200,image,'image/png') if image else self.reply(404,{"error":"template_not_found"})
+        if path=="/api/inspector/review":
+            return self.reply(200,{"choices":inspector.review(),"runtime_unchanged":True})
+        if path=="/api/inspector/flow":
+            query=parse_qs(urlsplit(self.path).query)
+            result=inspector.java_flow(query.get('task',[''])[0])
+            return self.reply(200,result) if result else self.reply(404,{"error":"unknown_task"})
+        if path=="/api/inspector/ocr":return self.reply(200,inspector.ocr_health())
         if path=="/api/template-audit":
             audit=read_template_audit()
             return self.reply(200,audit) if audit else self.reply(503,{"error":"audit_not_ready"})
@@ -618,6 +646,11 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200,{"ok":True},{"Set-Cookie":"qa_session=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Strict"})
         if path=="/api/sync":
             return self.reply(200,{"imported":self.board.sync_diagnostics(force=True)})
+        if path=="/api/inspector/review":
+            if set(payload)!={'name','action'} or not isinstance(payload['name'],str) or not isinstance(payload['action'],str):
+                return self.reply(400,{"error":"name_action_required"})
+            try:return self.reply(200,inspector.review_update(payload['name'],payload['action']))
+            except ValueError as exc:return self.reply(400,{"error":str(exc)[:100]})
         if path=="/api/autoqa/pause":
             if set(payload)!={'paused'} or type(payload.get('paused')) is not bool:
                 return self.reply(400,{'error':'boolean_paused_required'})

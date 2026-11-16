@@ -10,10 +10,12 @@
   <link rel="stylesheet" href="/templates.css">
   <link rel="stylesheet" href="/qa.css">
   <link rel="stylesheet" href="/autoqa.css">
+  <link rel="stylesheet" href="/inspector.css">
   <script defer src="/app.js?v=qa-save-20261115b"></script>
   <script defer src="/live.js"></script>
   <script defer src="/templates.js"></script>
   <script defer src="/autoqa.js"></script>
+  <script defer src="/inspector.js"></script>
 </head>
 <body>
 <div id="login" class="login-overlay" hidden>
@@ -137,8 +139,26 @@
        <option value="retired">Uitgeschakeld (vervangen)</option><option value="protected_guard">Behouden veiligheidscontroles</option>
        <option value="review_observed_misses">Alleen missers in steekproef</option>
        <option value="observed_hit">Minstens één herkenning</option><option value="not_observed">Nog geen runbewijs</option>
-     </select><button id="template-refresh" class="outline" type="button">↻ Ophalen</button>
+     </select><label class="inspect-small"><input type="checkbox" id="inspector-show-hidden"> Toon verborgen templates</label>
+       <button id="template-refresh" class="outline" type="button">↻ Ophalen</button>
    </div>
+   <details class="inspect-tool" open><summary>OCR-status en fouten</summary>
+     <div id="inspector-ocr" class="inspect-help">OCR-diagnose laden…</div>
+     <button id="inspector-ocr-refresh" type="button" class="outline">OCR opnieuw controleren</button>
+   </details>
+   <details class="inspect-tool" open><summary>Taakflow en Task Coach-runviewer</summary>
+     <div class="inspect-controls"><label for="inspector-task">Taak</label><select id="inspector-task"></select>
+       <button id="inspector-flow-btn" type="button" class="outline">Toon volledige codeflow</button>
+       <label for="inspector-run">Task Coach-run</label><select id="inspector-run"></select>
+       <button id="inspector-run-btn" type="button" class="outline">Bekijk herkenningen en beelden</button></div>
+     <div class="inspect-cols"><div id="inspector-flow" class="inspect-detail">Selecteer een taak voor de stappen en voorwaarden.</div>
+       <div id="inspector-run-result" class="inspect-detail">Selecteer een Task Coach-run voor de scores.</div></div>
+   </details>
+   <p class="audit-help">Klik hieronder op een template om de originele PNG te zien en hem omkeerbaar te verbergen of als verwijderkandidaat te markeren. Dit verwijdert niets uit SurvivalOps of GitHub.</p>
+   <details class="inspect-tool"><summary>Extra PNG-bestanden die niet in het template-register staan</summary>
+     <p class="muted">Ook niet-geregistreerde afbeeldingen worden hier getoond. Verwijderen is niet beschikbaar zolang niet is gecontroleerd of ze dynamisch worden gebruikt.</p>
+     <div id="inspector-extras" class="inspect-gallery"></div>
+   </details>
    <div id="template-count" class="muted"></div>
    <div id="template-list" class="audit-list" aria-live="polite"></div>
    <button id="template-more" class="outline" type="button" hidden>Meer templates tonen</button>
