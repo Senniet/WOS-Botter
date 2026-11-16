@@ -47,6 +47,7 @@ public class DoExplorationRoutine extends DelayedTask {
     private static final PointData VICTORY_CONTINUE_BOTTOM_RIGHT = new PointData(430, 1205);
 
     private boolean battleOutcomeUnknown;
+    private boolean squadReadyOnLastQuickProbe;
 
     private static final long MAX_FIGHTING_WINDOW_MS = ExplorationBattleTiming.SESSION_WINDOW_MS;
     private static final long RESULT_SEARCH_START_DELAY_MS = 350L;
@@ -502,6 +503,12 @@ public class DoExplorationRoutine extends DelayedTask {
         for (int attempt = 0; attempt < 4; attempt++) {
             QuickDialogOutcome outcome = inspectQuickExplorationConfirmation();
             if (outcome != QuickDialogOutcome.NOT_PRESENT) return outcome;
+            // A verified Squad Settings screen is the normal continuation;
+            // stop scanning for a modal that cannot coexist with that page.
+            if (squadReadyOnLastQuickProbe) {
+                logDebug("Squad Settings already visible; proceeding directly to Fight verification");
+                return QuickDialogOutcome.NOT_PRESENT;
+            }
             if (attempt < 3) sleepTask(350);
         }
         return QuickDialogOutcome.NOT_PRESENT;
@@ -517,12 +524,14 @@ public class DoExplorationRoutine extends DelayedTask {
     }
 
     private QuickDialogOutcome inspectQuickExplorationConfirmation(RawImageData captured) {
+        squadReadyOnLastQuickProbe=false;
         // Latest Task Coach: the Squad Settings heroes and badges form an
         // orange/blue false-positive for the quick-modal geometry (y~=1025).
         // Two precise known templates confirm this is NOT a confirmation:
         // the Squad Settings header and the independently visible Fight CTA.
         // The actual Fight action still goes through its two-frame gate.
         if (ExplorationSquadFrame.isSquadReady(captured)) {
+            squadReadyOnLastQuickProbe=true;
             logDebug("Squad Settings and Fight CTA confirmed; skipping false Quick modal OCR");
             return QuickDialogOutcome.NOT_PRESENT;
         }
@@ -708,7 +717,11 @@ public class DoExplorationRoutine extends DelayedTask {
             // not OCR continuously once a normal battle is underway.
             if(ExplorationBattleTiming.mayInspectLateQuick(
                     (System.nanoTime()-detectionStartedAt)/1_000_000L)) {
-                var modal=inspectQuickExplorationConfirmation();
+                // Inspect the SAME battle frame for a late modal. The
+                // confirmation routine obtains a second fresh frame only
+                // when the modal geometry actually exists. Previously every
+                // inconclusive poll fetched a second remote screenshot.
+                var modal=inspectQuickExplorationConfirmation(frame);
                 if(modal==QuickDialogOutcome.UNRESOLVED)return BattleResult.CONFIRMATION_UNRESOLVED;
                 if(modal==QuickDialogOutcome.CONFIRMED)return BattleResult.QUICK_CONFIRMED;
             }
