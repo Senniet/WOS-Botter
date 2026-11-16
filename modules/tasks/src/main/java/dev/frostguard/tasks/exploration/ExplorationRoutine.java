@@ -75,11 +75,11 @@ public class ExplorationRoutine extends DelayedTask {
                 : noRewardAvailable ? ExplorationClaimOutcome.NONE_AVAILABLE
                 : ExplorationClaimOutcome.UNKNOWN;
         rescheduleFromConfiguredOffset(outcome);
-        if (isExplorationMainScreenVisible()) {
-            // Verified Exploration page has its own header arrow; don't send
-            // Android Back when an unexpected screen is shown instead.
-            tapInside(AreaData.of(12, 78, 73, 135));
-            sleepTask(300);
+        // Previous code tapped y78..135 even though the live Exploration
+        // Back arrow is at y0..70. This sometimes hit scenery, leaving the
+        // task on Exploration and still logging SUCCEEDED.
+        if (!returnHomeAfterExploration()) {
+            markWorkIncomplete("Exploration Chest: claim flow ended without verified City Home");
         }
         if (outcome == ExplorationClaimOutcome.UNKNOWN) {
             throw new TaskOutcomeUnknownException(
@@ -90,6 +90,38 @@ public class ExplorationRoutine extends DelayedTask {
 	private String routineLogExplorationLine(String note) {
 		return "ExplorationRoutine | " + note;
 	}
+
+    private boolean returnHomeAfterExploration() {
+        var firstFrame=emuManager.captureScreen(EMULATOR_NUMBER);
+        if (ExplorationPageFrame.title(firstFrame)) {
+            var first=ExplorationPageFrame.verifiedBackCandidate(firstFrame);
+            if(!first.isFound()) {
+                logWarning(routineLogExplorationLine("Exploration Back arrow missing on known page"));
+                return false;
+            }
+            sleepTask(180);
+            var second=ExplorationPageFrame.verifiedBackCandidate(
+                    emuManager.captureScreen(EMULATOR_NUMBER));
+            if (!dev.frostguard.engine.helper.RecognitionConsensus.agrees(first,second,15)) {
+                logWarning(routineLogExplorationLine("Exploration Back arrow changed; no stale tap"));
+                return false;
+            }
+            tapNear(second.getPoint());
+            sleepTask(550);
+            if (ExplorationPageFrame.title(emuManager.captureScreen(EMULATOR_NUMBER))) {
+                logWarning(routineLogExplorationLine("Exploration still open after verified Back; no blind retry"));
+                return false;
+            }
+        }
+        try {
+            navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME,this::checkPreemption);
+            logInfo(routineLogExplorationLine("City Home verified after claim/no-claim outcome"));
+            return true;
+        } catch (dev.frostguard.engine.error.HomeNotFoundException missing) {
+            logWarning(routineLogExplorationLine("Unable to return Home safely: "+missing.getMessage()));
+            return false;
+        }
+    }
 
     private boolean openExplorationScreen() {
         // A previously opened Exploration/Idle Income page is already the

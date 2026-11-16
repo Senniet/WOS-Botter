@@ -73,6 +73,11 @@ public class TriumphRoutine extends DelayedTask {
                 // disappear or turn into a different UI after the first click.
                 tapped = tapInside(claim);
                 sleepTask(1000);
+                // The real Triumph claim often opens *Weekly Rewards — Tap
+                // anywhere to close*, obscuring the Claimed indicator.
+                // Dismiss only this double-confirmed named overlay, never an
+                // unknown popup or premium confirmation.
+                dismissVerifiedWeeklyRewards();
                 claimedAfter = templateSearchHelper.locatePattern(
                         TemplatesEnum.ALLIANCE_TRIUMPH_DAILY_CLAIMED,
                         SearchConfigConstants.DEFAULT_SINGLE).isFound();
@@ -112,6 +117,7 @@ public class TriumphRoutine extends DelayedTask {
         if (weekly.isFound()) {
             if (tapInside(weekly)) {
                 sleepTask(1500);
+                dismissVerifiedWeeklyRewards();
                 boolean stillVisible = templateSearchHelper.locatePattern(
                         TemplatesEnum.ALLIANCE_TRIUMPH_WEEKLY,
                         SearchConfigConstants.DEFAULT_SINGLE).isFound();
@@ -133,9 +139,29 @@ public class TriumphRoutine extends DelayedTask {
             logInfo(line("Weekly claim not detected (may be unavailable or already claimed)"));
         }
 
-        // Use the existing screen-aware navigation rather than blindly sending
-        // two Android Back presses, which could open a Quit game dialog.
-        navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME, this::checkPreemption);
+        // An additional payout modal can appear after the weekly-check.
+        // Handle that exact overlay before invoking generic Home recovery.
+        dismissVerifiedWeeklyRewards();
+        try {
+            navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME, this::checkPreemption);
+            logInfo(line("Home verified after Triumph rewards"));
+        } catch (dev.frostguard.engine.error.HomeNotFoundException missing) {
+            markWorkIncomplete("Alliance Triumph reward flow ended outside Home");
+            logWarning(line("Home unverified after Triumph: "+missing.getMessage()));
+        }
+    }
+
+    private void dismissVerifiedWeeklyRewards() {
+        var result=TriumphWeeklyRewardsFrame.dismiss(
+                ()->{checkPreemption();return emuManager.captureScreen(EMULATOR_NUMBER);},
+                point->{checkPreemption();tapNear(point);},
+                ()->sleepTask(250));
+        if(result==TriumphWeeklyRewardsFrame.Result.DISMISSED) {
+            logInfo(line("Exact Weekly Rewards overlay closed in one verified tap"));
+        } else if(result==TriumphWeeklyRewardsFrame.Result.UNVERIFIED) {
+            markWorkIncomplete("Alliance Triumph Weekly Rewards overlay exit not confirmed");
+            logWarning(line("Weekly Rewards changed or remained visible, no repeat tap"));
+        }
     }
 
     private ChestProgress readStableChestProgress() {

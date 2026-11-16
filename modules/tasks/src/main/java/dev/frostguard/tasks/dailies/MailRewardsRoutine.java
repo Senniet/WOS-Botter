@@ -318,6 +318,10 @@ private void openUnreadSystemReports(Evidence initialEvidence) {
     }
 
 private boolean confirmMailMenuOpened() {
+        // Current 720x1280 Mail label is centered at (128,41). The old
+        // SERVE_EMU_MAIL_TITLE ROI y75..150 always missed (~44%), causing
+        // repeated fallback checks. First verify this exact, correct header.
+        if (isCurrentMailMenuVisible()) return true;
         ImageSearchResultData inMailMenu = templateSearchHelper.locatePattern(
                 TemplatesEnum.MAIL_MENU_OPEN,
                 SearchConfig.builder()
@@ -329,8 +333,8 @@ private boolean confirmMailMenuOpened() {
         if (!inMailMenu.isFound()) {
             inMailMenu = templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_MAIL_TITLE,
                     SearchConfig.builder().withMaxAttempts(2).withDelay(120).withThreshold(90)
-                            .withArea(new AreaData(new PointData(75, 75),
-                                    new PointData(210, 150))).build());
+                            .withArea(new AreaData(new PointData(65, 0),
+                                    new PointData(245, 100))).build());
             if (!inMailMenu.isFound()) {
                 logError(routineLogMailRewardsLine("Mail menu title unrecognized; refusing actions"));
                 return false;
@@ -407,7 +411,7 @@ private boolean dismissMailMenu() {
 private boolean isCurrentMailMenuVisible() {
         return templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_MAIL_TITLE,
                 SearchConfig.builder().withMaxAttempts(1).withThreshold(90)
-                        .withArea(AreaData.of(75, 75, 210, 150)).build()).isFound();
+                        .withArea(AreaData.of(65, 0, 245, 100)).build()).isFound();
     }
 
 private boolean openUpMailMenu() {

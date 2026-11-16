@@ -278,6 +278,7 @@ public class ArenaRoutine extends DelayedTask {
 
         if (!navigateToArena()) {
             logWarning("Failed to navigate to arena; " + captureArenaDiagnostic("navigation-failed"));
+            markWorkIncomplete("Arena: page not reached or visible; no challenge attempted");
             reschedule(java.time.LocalDateTime.now().plusMinutes(10));
             return;
         }
@@ -291,12 +292,14 @@ public class ArenaRoutine extends DelayedTask {
 
         if (!openChallengeList()) {
             logWarning("Failed to open challenge list; " + captureArenaDiagnostic("challenge-list-not-open"));
+            markWorkIncomplete("Arena: Challenge button/list not verified, no battle performed");
             reschedule(java.time.LocalDateTime.now().plusMinutes(10));
             returnHomeAfterArena();
             return;
         }
 
         if (!readInitialAttempts()) {
+            markWorkIncomplete("Arena: remaining attempts unknown; challenge battle not performed");
             logWarning("Failed to read initial attempts; " + captureArenaDiagnostic("attempts-unreadable"));
             // A broken attempt-counter OCR must not block a chest that is
             // already available after the five free challenges. The chest
@@ -347,6 +350,7 @@ public class ArenaRoutine extends DelayedTask {
             navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME, this::checkPreemption);
             logInfo("Arena closed and Home verified after Daily Challenges pass");
         } catch (dev.frostguard.engine.error.HomeNotFoundException missing) {
+            markWorkIncomplete("Arena: Home not verified after arena task");
             logWarning("Arena finished but Home recovery is not yet verified: " + missing.getMessage());
         }
     }
@@ -398,9 +402,11 @@ public class ArenaRoutine extends DelayedTask {
     }
 
     private boolean arenaHomeVisible() {
+        // Live 720x1280 frame: Arena of Exploration header is at y~40.
+        // Previous y70..150 search scored only 31.93%; corrected ROI 99.28%.
         if (templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_ARENA_TITLE,
-                SearchConfig.builder().withMaxAttempts(2).withDelay(150)
-                        .withThreshold(90).withArea(AreaData.of(70, 70, 470, 150)).build()).isFound())
+                SearchConfig.builder().withMaxAttempts(1)
+                        .withThreshold(90).withArea(AreaData.of(70, 0, 470, 105)).build()).isFound())
             return true;
         // Classic BlueStacks art has no 2026 title template; keep its
         // proven Challenge control as the home-screen fallback.

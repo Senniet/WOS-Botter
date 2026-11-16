@@ -101,12 +101,14 @@ public class GatherSpeedRoutine extends DelayedTask {
 		logInfo(String.format("Starting gather speed boost (%s).", boostType.getName()));
 
 		if (!navigateToGatheringSpeed()) {
+            markWorkIncomplete("Gather Speed: actual Growth/Gathering Speed screen not verified");
 			logWarning("Failed to navigate to gathering speed menu. Rescheduling in 5 minutes.");
 			rescheduleDefault();
 			return;
 		}
 
 		if (!activateBoost()) {
+            markWorkIncomplete("Gather Speed: boost activation not verified");
 			logWarning("Failed to activate boost. Rescheduling in 5 minutes.");
 			rescheduleDefault();
 			return;
@@ -139,10 +141,32 @@ public class GatherSpeedRoutine extends DelayedTask {
 		tapNear(GROWTH_TAB);
 		sleepTask(1000); // Wait for tab to load
 
-		logDebug("Opening Gathering Speed section");
+        // On current Serve-EMU, the legacy blind Frostguard coordinates can
+        // open only the Chief HUD. Do not continue to a Use or gem button
+        // until the actual Growth context has been observed.
+        if (emuManager.getSelectedEmulatorType()
+                == dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU) {
+            String growth=readStringValue(new PointData(170,68),new PointData(660,250),null);
+            if (!GatherBoostScreenEvidence.isGrowthTitle(growth)) {
+                logWarning("Gather Speed Growth title not confirmed; "
+                        + dev.frostguard.tasks.diagnostics.TaskDiagnosticSnapshots.capture(
+                           emuManager,EMULATOR_NUMBER,"gather-boost","growth-screen-unknown"));
+                return false;
+            }
+        }
+        logDebug("Opening Gathering Speed section");
 		tapNear(GATHERING_SPEED_SECTION);
 		sleepTask(1000); // Wait for section to open
-
+        if (emuManager.getSelectedEmulatorType()
+                == dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU) {
+            String section=readStringValue(new PointData(90,145),new PointData(620,690),null);
+            if (!GatherBoostScreenEvidence.isGatheringSpeedScreen(section)) {
+                logWarning("Gathering Speed page not text-verified; "
+                        + dev.frostguard.tasks.diagnostics.TaskDiagnosticSnapshots.capture(
+                           emuManager,EMULATOR_NUMBER,"gather-boost","boost-section-unverified"));
+                return false;
+            }
+        }
 		return true;
 	}
 
@@ -156,8 +180,8 @@ public class GatherSpeedRoutine extends DelayedTask {
 				? BOOST_8H_USE_BUTTON
 				: BOOST_24H_USE_BUTTON;
 
-		logInfo(String.format("Activating %s boost (%d gems)",
-				boostType.getName(), boostType.getGemCost()));
+        logInfo(String.format("Attempting owned %s boost; purchase is disabled (listed cost %d gems)",
+                boostType.getName(), boostType.getGemCost()));
 
 		tapNear(useButton);
 		sleepTask(500); // Wait for dialog to appear
@@ -168,15 +192,26 @@ public class GatherSpeedRoutine extends DelayedTask {
 			return false;
 		}
 
-		// Handle potential boost replacement confirmation
-		handleBoostReplacementDialog();
+		// Do not automatically replace an existing boost. Replacing it can
+        // consume an inventory item and is not a free harmless screen tap.
+        if (!handleBoostReplacementDialog()) return false;
 
+        if (emuManager.getSelectedEmulatorType()
+                == dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU) {
+            String state=readStringValue(new PointData(120,265),new PointData(660,1000),null);
+            if (!GatherBoostScreenEvidence.isAppliedBoost(state)) {
+                logWarning("Gather Speed use clicked, but no confirmed active boost text; "
+                        + dev.frostguard.tasks.diagnostics.TaskDiagnosticSnapshots.capture(
+                           emuManager,EMULATOR_NUMBER,"gather-boost","boost-outcome-unknown"));
+                return false;
+            }
+        }
 		return true;
 	}
 
 	/**
 	 * Handles the "Obtain" dialog that appears when boost item is not in inventory.
-	 * Purchases the boost item with gems if the dialog appears.
+	 * Detects a missing inventory item and defers; never purchases with gems.
 	 * 
 	 * @return true if dialog was handled or didn't appear, false if error occurred
 	 */
@@ -201,67 +236,31 @@ public class GatherSpeedRoutine extends DelayedTask {
 			return true;
 		}
 
-		logInfo("Obtain dialog detected. Purchasing boost item.");
-
-		// Click buy button
-		tapNear(OBTAIN_BUY_BUTTON);
-		sleepTask(800); // Wait for purchase confirmation dialog
-
-		// Handle purchase confirmation
-		return handlePurchaseConfirmation();
+		// Never auto-spend gems in task QA. An Obtain dialog only proves the
+        // inventory item is absent; it is NOT a successful boost activation.
+        logWarning("Gather Speed requires an item purchase; no gems spent automatically");
+        markWorkIncomplete("Gather Speed: Obtain dialog needs purchase, not authorized");
+        return false;
 
 	}
 
 	/**
-	 * Handles the purchase confirmation dialog.
-	 * Checks "Don't show again today" and confirms purchase.
+	 * Rejects purchase confirmations: unattended gem spending is disabled.
 	 * 
 	 * @return true if dialog was handled or didn't appear, false if error occurred
 	 */
-	private boolean handlePurchaseConfirmation() {
-		logDebug("Checking for purchase confirmation dialog");
-
-		String purchaseText = readStringValue(
-				PURCHASE_DIALOG_TEXT_TOP_LEFT,
-				PURCHASE_DIALOG_TEXT_BOTTOM_RIGHT,
-				null);
-
-		if (purchaseText == null || purchaseText.isEmpty()) {
-			logDebug("No purchase confirmation dialog");
-			return true;
-		}
-
-		String cleanText = purchaseText.toLowerCase().trim();
-		logDebug("Purchase confirmation OCR: '" + purchaseText + "'");
-
-		if (!cleanText.contains("purchase")) {
-			logDebug("Purchase confirmation not present");
-			return true;
-		}
-
-		logInfo("Purchase confirmation dialog detected.");
-
-		// Click "Don't show this confirmation again today" checkbox
-		logDebug("Checking 'Don't show again' checkbox");
-		tapNear(PURCHASE_DONT_SHOW_CHECKBOX);
-		sleepTask(300); // Wait for checkbox animation
-
-		// Click confirm button
-		logDebug("Confirming purchase");
-		tapNear(PURCHASE_CONFIRM_BUTTON);
-		sleepTask(800); // Wait for purchase to complete
-
-		logInfo("Purchase confirmed.");
-		return true;
-
-	}
+    private boolean handlePurchaseConfirmation() {
+        // Purchasing was removed from unattended boost automation. Never
+        // confirm a gem purchase via fixed screen coordinates.
+        markWorkIncomplete("Gather Speed: gem purchase disabled");
+        return false;
+    }
 
 	/**
-	 * Handles the boost replacement confirmation dialog.
-	 * This appears when a boost is already active and user tries to apply a new
-	 * one.
+	 * Refuses automatic replacement of an already active boost; replacement
+	 * can waste inventory items and is not a verified free action.
 	 */
-	private void handleBoostReplacementDialog() {
+	private boolean handleBoostReplacementDialog() {
 		logDebug("Checking for boost replacement dialog");
 
 		String confirmText = readStringValue(
@@ -271,7 +270,7 @@ public class GatherSpeedRoutine extends DelayedTask {
 
 		if (confirmText == null || confirmText.isEmpty()) {
 			logDebug("No boost replacement dialog");
-			return;
+			return true;
 		}
 
 		String cleanText = confirmText.toLowerCase().trim();
@@ -283,16 +282,11 @@ public class GatherSpeedRoutine extends DelayedTask {
 		boolean hasBonus = cleanText.contains("bonus");
 
 		if (hasActivating || hasAnother || hasBonus) {
-			logInfo("Boost replacement dialog detected. Confirming replacement.");
-
-			tapNear(BOOST_REPLACE_CONFIRM_BUTTON);
-			sleepTask(800); // Wait for confirmation
-
-			logInfo("Confirmed replacing existing boost.");
-		} else {
-			logDebug("Boost replacement dialog not present");
-		}
-
+            logWarning("An existing boost would be replaced; refusing an unverified resource-spending confirmation");
+            markWorkIncomplete("Gather Speed: replacement confirmation not authorized");
+            return false;
+        }
+        return true;
 	}
 
 	/**

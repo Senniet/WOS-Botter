@@ -45,13 +45,13 @@ final class KnownGameScreenResume {
         new PagePattern(Page.EXPLORATION, TemplatesEnum.SERVE_EMU_EXPLORATION_TITLE_NOV_2026,
                 new PointData(65, 0), new PointData(335, 115)),
         new PagePattern(Page.MAIL, TemplatesEnum.SERVE_EMU_MAIL_TITLE,
-                new PointData(75, 75), new PointData(210, 150)),
+                new PointData(65, 0), new PointData(245, 100)),
         new PagePattern(Page.VIP, TemplatesEnum.SERVE_EMU_VIP_TITLE,
                 new PointData(78, 70), new PointData(195, 150)),
         new PagePattern(Page.ARENA, TemplatesEnum.SERVE_EMU_ARENA_TITLE,
                 new PointData(70, 70), new PointData(470, 150)),
         new PagePattern(Page.RESEARCH, TemplatesEnum.SERVE_EMU_RESEARCH_TITLE,
-                new PointData(75, 65), new PointData(380, 155))
+                new PointData(75, 0), new PointData(380, 100))
     };
 
     private KnownGameScreenResume() { }

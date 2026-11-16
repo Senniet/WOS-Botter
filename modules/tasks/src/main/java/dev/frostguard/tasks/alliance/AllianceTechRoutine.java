@@ -125,15 +125,34 @@ private void returnToHomeAfterAllianceContributions() {
                 sleepTask(550);
                 String after = emuManager.readText(EMULATOR_NUMBER, topLeft, bottomRight, titleOcr, false);
                 if (AllianceContributionExitPolicy.isVerifiedContributionTitle(after, after)) {
+                    markWorkIncomplete("Alliance Tech: contribution popup not dismissed");
                     logWarning("Alliance contribution pop-up stayed open; no repeat or blind Back");
                     return;
                 }
             }
+            // The last live run spent 40+ unrelated overlay checks while it
+            // was plainly on Alliance Tech, then Alliance, both with the
+            // same verified top-left back arrow. Return in at most 2 taps.
+            var scoped=AlliancePageExit.returnHome(
+                    ()->{checkPreemption();return emuManager.captureScreen(EMULATOR_NUMBER);},
+                    point->{checkPreemption();tapNear(point);},
+                    ()->sleepTask(450));
+            if (scoped==AlliancePageExit.Result.HOME) {
+                logInfo("Alliance Tech -> Alliance -> verified City via scoped headers");
+                return;
+            }
+            if (scoped==AlliancePageExit.Result.UNVERIFIED) {
+                markWorkIncomplete("Alliance Tech: known-page return to Home not verified");
+                logWarning("Alliance Tech known-page exit changed; no unrelated recovery taps");
+                return;
+            }
             navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME, this::checkPreemption);
-            logInfo("Alliance donation flow returned to verified Home");
+            logInfo("Alliance donation flow returned to verified Home via fallback");
         } catch (dev.frostguard.engine.error.HomeNotFoundException missing) {
+            markWorkIncomplete("Alliance Tech: Home unverified after contributions");
             logWarning("Alliance contributions finished; Home was not verified: " + missing.getMessage());
         } catch (java.io.IOException | dev.frostguard.vision.ocr.OcrException failure) {
+            markWorkIncomplete("Alliance Tech: contribution popup OCR unknown; Home unverified");
             logWarning("Alliance contribution screen OCR unavailable; refusing unknown close tap");
         }
     }

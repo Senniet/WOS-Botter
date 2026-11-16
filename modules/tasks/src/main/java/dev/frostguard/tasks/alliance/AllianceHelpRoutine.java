@@ -33,7 +33,7 @@ public final class AllianceHelpRoutine extends DelayedTask {
     @Override protected void execute() {
         try {
             RawImageData first=emuManager.captureScreen(EMULATOR_NUMBER);
-            ImageSearchResultData pending=locateHelp(first);
+            ImageSearchResultData pending=locateHelpWithCoachEvidence(first);
             if (!pending.isFound()) {
                 if (!isCity(first)) {
                     markWorkIncomplete("Alliance Help: city home not confirmed");
@@ -45,7 +45,7 @@ public final class AllianceHelpRoutine extends DelayedTask {
             }
             sleepTask(220);
             RawImageData second=emuManager.captureScreen(EMULATOR_NUMBER);
-            ImageSearchResultData ready=locateHelp(second);
+            ImageSearchResultData ready=locateHelpWithCoachEvidence(second);
             if (!AllianceHelpVerification.sameVisibleButton(pending, ready)) {
                 markWorkIncomplete("Alliance Help: request vanished or moved before click");
                 logWarning("Alliance Help: changed shortcut, refusing stale click");
@@ -55,7 +55,7 @@ public final class AllianceHelpRoutine extends DelayedTask {
             sleepTask(650);
             RawImageData after=emuManager.captureScreen(EMULATOR_NUMBER);
             if (!AllianceHelpVerification.verifiedClaim(
-                    true, isCity(after), locateHelp(after).isFound())) {
+                    true, isCity(after), locateHelpWithCoachEvidence(after).isFound())) {
                 markWorkIncomplete("Alliance Help: click not verified by shortcut disappearance");
                 logWarning("Alliance Help: input sent but no verified completed help request");
                 return;
@@ -64,6 +64,20 @@ public final class AllianceHelpRoutine extends DelayedTask {
         } finally {
             reschedule(LocalDateTime.now().plusMinutes(SCHEDULE_MINUTES));
         }
+    }
+
+    private ImageSearchResultData locateHelpWithCoachEvidence(RawImageData screen) {
+        if (!isCorrectViewport(screen))return ImageSearchResultData.miss();
+        // The earlier Task Coach run only captured City matches, never the
+        // Help button itself: the raw OpenCV call bypassed coach evidence.
+        // Reuse the SAME frame and central controller so the actual button
+        // hit/miss (before + after click) is recorded for independent QA.
+        var city=emuManager.locatePattern(EMULATOR_NUMBER,screen,
+                TemplatesEnum.SERVE_EMU_CITY_ANCHOR, HOME_MIN,HOME_MAX,THRESHOLD);
+        if (!city.isFound())return ImageSearchResultData.miss();
+        return emuManager.locatePattern(EMULATOR_NUMBER,screen,
+                TemplatesEnum.GAME_HOME_SHORTCUTS_HELP_REQUEST2,
+                new PointData(0,0),new PointData(720,1280),THRESHOLD);
     }
 
     static boolean isCity(RawImageData screen) {

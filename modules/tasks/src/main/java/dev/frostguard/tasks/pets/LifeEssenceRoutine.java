@@ -335,6 +335,7 @@ public class LifeEssenceRoutine extends DelayedTask {
 	}
 
 	private void scheduleRetry(String reason) {
+        markWorkIncomplete("Life Essence: "+reason);
 		LifeEssenceRetryPolicy.Decision decision =
 				LifeEssenceRetryPolicy.afterFailure(consecutiveFailures);
 		consecutiveFailures = decision.persistedFailures();
