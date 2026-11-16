@@ -50,6 +50,7 @@
      }
      if(!data.files.length)host.textContent='Geen extra niet-geregistreerde PNGs.';
    }catch(e){host.textContent='Extra afbeeldingen niet beschikbaar: '+e.message;}}
+ function updateFlowLink(){el('inspector-flow-btn').href=url('/taskflow',{task:el('inspector-task').value});}
  async function sessions(){
    const task=el('inspector-task').value,select=el('inspector-run');select.replaceChildren();
    try{const data=await get(url('/api/inspector/sessions',{task}));
@@ -141,9 +142,9 @@
      for(const t of [...tasks].sort((a,b)=>a.label.localeCompare(b.label,'nl'))){const o=make('option','',t.label);o.value=t.key;target.append(o);}
      target.value='TRAINING_TROOPS';loaded=true;
    }
+   updateFlowLink();
    await Promise.all([ocr(),sessions(),extras()]);await flow();}
- el('inspector-task').addEventListener('change',()=>{sessions();flow();});
- el('inspector-flow-btn').addEventListener('click',flow);
+ el('inspector-task').addEventListener('change',()=>{updateFlowLink();sessions();flow();});
  el('inspector-run-btn').addEventListener('click',run);
  el('inspector-ocr-refresh').addEventListener('click',ocr);
  window.VisualInspector={open,decorateTemplate,isHidden:name=>choices[name]==='hidden'};
