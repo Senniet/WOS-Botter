@@ -52,7 +52,6 @@ public class DoExplorationRoutine extends DelayedTask {
     private static final long RESULT_SEARCH_START_DELAY_MS = 350L;
     private static final long RESULT_DETECTION_WINDOW_MS = ExplorationBattleTiming.RESULT_WINDOW_MS;
     private static final long RESULT_DETECTION_DELAY_MS = ExplorationBattleTiming.POLL_MS;
-    private static final long EXPLORATION_SCREEN_LOAD_DELAY_MS = 180L;
     private static final long EXPLORE_BUTTON_TAP_DELAY_MS = 100L;
     private static final long QUICK_DEPLOY_DELAY_MS = 120L;
     private static final long VICTORY_CONTINUE_DELAY_MS = 200L;
@@ -98,10 +97,18 @@ public class DoExplorationRoutine extends DelayedTask {
         // Both City and World expose the same bottom-left Exploration shortcut.
         // The old code always forced City→World first, wasting multiple root
         // and reconnect checks despite the visible direct City shortcut.
-        if (!explorationTitleVisible() && !verifiedRootShortcutAvailable()) {
-            navigationHelper.ensureCorrectScreenLocation(LaunchPoint.WORLD);
+        // A fresh page may still be loading. Do not infer a broken Home and
+        // invoke broad unrelated navigation while the Exploration header
+        // and cart animation are visible. If a known root is present, the
+        // direct shortcut can be tapped immediately; otherwise passively
+        // wait for a verified Exploration page before any recovery.
+        boolean alreadyReady=ExplorationEntryFrame.ready(emuManager.captureScreen(EMULATOR_NUMBER));
+        boolean rootShortcut=!alreadyReady && verifiedRootShortcutAvailable();
+        if (!alreadyReady && !rootShortcut) {
+            if (awaitExplorationReady(3)) alreadyReady=true;
+            else navigationHelper.ensureCorrectScreenLocation(LaunchPoint.WORLD);
         }
-        if (!openExplorationScreen()) {
+        if (!alreadyReady && !openExplorationScreen()) {
             markWorkIncomplete("Exploration: page not opened or title unverified");
             logWarning("Exploration page could not be verified; " + TaskDiagnosticSnapshots.capture(
                     emuManager, EMULATOR_NUMBER, "exploration", "entry-unverified"));
@@ -276,23 +283,21 @@ public class DoExplorationRoutine extends DelayedTask {
     }
 
     private boolean openExplorationScreen() {
-        if (explorationTitleVisible()) return true;
-        logInfo("Tapping exploration entry area...");
+        if (ExplorationEntryFrame.ready(emuManager.captureScreen(EMULATOR_NUMBER)))return true;
+        logInfo("Opening Exploration from verified root shortcut once...");
         tapInside(EXPLORATION_ENTRY_TOP_LEFT, EXPLORATION_ENTRY_BOTTOM_RIGHT);
-        sleepTask(EXPLORATION_SCREEN_LOAD_DELAY_MS);
-        return explorationTitleVisible();
+        // Task Coach 20261116-203812: image transitions for several seconds.
+        // Old code waited 180ms, missed the moving header, then ran 20+
+        // Reconnect/Welcome Back/Offer/Rewards scans while the page had loaded.
+        // Wait passively for 2 consecutive complete Exploration + Explore CTA
+        // frames. NO extra tap and NO generic navigation during this window.
+        return awaitExplorationReady(12);
     }
 
-    private boolean explorationTitleVisible() {
-        // Current 720x1280 page: NOV_2026 matched 100% in live Task Coach.
-        // Earlier SERVE_EMU_EXPLORATION_TITLE and original
-        // EXPLORATION_SCREEN_TITLE scored 37-50% on that exact page.
-        // They are retained as archived assets but no longer scanned in a
-        // fallback cascade. If the current title fails, do not infer a page.
-        return templateSearchHelper.locatePattern(
-                TemplatesEnum.SERVE_EMU_EXPLORATION_TITLE_NOV_2026,
-                SearchConfig.builder().withMaxAttempts(1).withThreshold(92)
-                        .withArea(AreaData.of(65, 0, 335, 115)).build()).isFound();
+    private boolean awaitExplorationReady(int maxFrames) {
+        return ExplorationEntryWait.untilReady(
+                ()->{checkPreemption();return emuManager.captureScreen(EMULATOR_NUMBER);},
+                ()->sleepTask(200),maxFrames);
     }
 
     private ImageSearchResultData detectExploreButton() {
