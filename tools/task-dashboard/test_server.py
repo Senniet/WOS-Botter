@@ -284,6 +284,7 @@ class BoardTests(unittest.TestCase):
             self.assertEqual(401,req("GET","/api/tasks")[0])
             self.assertEqual(401,req("GET","/api/template-audit")[0])
             self.assertEqual(401,req("GET","/api/autoqa")[0])
+            self.assertEqual(401,req("GET","/api/autoqa/audit")[0])
             self.assertEqual(401,req("GET","/api/autoqa/image?id=abcd0123456789ef&name=before")[0])
             self.assertEqual(401,req("POST","/api/login",{"password":"bad"})[0])
             status,_,headers=req("POST","/api/login",{"password":self.password})
@@ -292,6 +293,9 @@ class BoardTests(unittest.TestCase):
             session=headers["Set-Cookie"].split(";",1)[0].split("=",1)[1]
             status,data,_=req("GET","/api/tasks",cookie=session)
             self.assertEqual(200,status);self.assertEqual(62,data["total"])
+            with patch('server.autoqa_bridge.audit',return_value={'schema':1,'tasks':[]}):
+                status,data,_=req('GET','/api/autoqa/audit',cookie=self.board.make_cookie())
+                self.assertEqual(200,status);self.assertEqual([],data['tasks'])
             with patch('server.autoqa_bridge.status',return_value={'mode':'observe','runs':[]}):
                 status,data,_=req('GET','/api/autoqa',cookie=session)
                 self.assertEqual(200,status);self.assertEqual([],data['runs'])
@@ -300,7 +304,16 @@ class BoardTests(unittest.TestCase):
                 self.assertEqual(202,status);self.assertEqual('abcdef0123456789',queued['id'])
                 enqueue.assert_called_once_with('INITIALIZE','observe')
             self.assertEqual(400,req('POST','/api/autoqa/enqueue',{'task':'TRAINING_TROOPS','mode':'navigate'},session)[0])
+            with patch('server.autoqa_bridge.enqueue',return_value={'id':'abcdef0123456789'}) as claim:
+                status,response,_=req('POST','/api/autoqa/enqueue',{'task':'DAILY_MISSIONS','mode':'claim_free'},session)
+                self.assertEqual(202,status);claim.assert_called_once_with('DAILY_MISSIONS','claim_free')
             self.assertEqual(400,req('POST','/api/autoqa/enqueue',{'task':'DO_EXPLORATION','mode':'delete'},session)[0])
+            with patch('server.autoqa_bridge.set_paused',return_value={'paused':True}) as pause:
+                status,response,_=req('POST','/api/autoqa/pause',{'paused':True},session)
+                self.assertEqual(200,status);self.assertTrue(response['paused'])
+                pause.assert_called_once_with(True)
+            self.assertEqual(401,req('POST','/api/autoqa/pause',{'paused':True})[0])
+            self.assertEqual(400,req('POST','/api/autoqa/pause',{'paused':'true'},session)[0])
             self.assertEqual(403,req('POST','/api/autoqa/enqueue',{'task':'INITIALIZE'},session,'https://evil.example')[0])
             with patch('server.autoqa_bridge.image',return_value=b'\x89PNG\r\n\x1a\nDATA'):
                 status,img,_=req('GET','/api/autoqa/image?id=abcdef0123456789&name=before',cookie=session)

@@ -25,3 +25,17 @@ def image(run_id,name):
     if not path.is_file() or path.stat().st_size>controller.MAX_PNG:return None
     data=path.read_bytes()
     return data if data.startswith(b'\x89PNG\r\n\x1a\n') else None
+
+
+def audit():
+    import json
+    path=controller.DATA/'task-audit.json'
+    if not path.is_file() or path.stat().st_size>4_000_000:return None
+    try:
+        data=json.loads(path.read_text())
+        if data.get('schema')!=1 or not isinstance(data.get('tasks'),list):return None
+        return data
+    except (OSError,ValueError):return None
+
+
+def set_paused(value):return controller.pause(value)

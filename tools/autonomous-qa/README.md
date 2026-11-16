@@ -10,11 +10,11 @@ This is the new **server-based test-control foundation**, separate from the Wind
 - SHA-based screenshots stored private under `~/.local/share/survivalops-autoqa/evidence/<run>/`; QA site serves them only to logged-in users. Run events are appended to the task's existing events history. **No operator notes, seven QA checkboxes, signoffs or verified status are modified.**
 - Read-only snapshot comparison uses current Serve-EMU template PNGs from the repository, NumPy and ImageMagick already available on the server. Matching diagnostics never authorize purchases or unknown clicks.
 - A half-hourly timer creates one observation of `INITIALIZE`. This checks emulator connectivity and records evidence without modifying the game.
-- The QA site includes an **Autotest** tab, live queue view and before/after screenshots; enqueue supports observation for every task and a narrowly reviewed navigation-only Exploration test.
+- The QA site includes an **Autotest** tab, live queue view, run duration, screenshots, visual scores, and an ordered 62-task audit. Enqueue supports observation for every task and narrowly reviewed actions for Exploration navigation and free Daily Missions Claim All.
 
 ## Limits to be addressed in subsequent phases
 
-This is **not yet a replacement for the Windows task engine**. The remaining 61 task plans do not execute arbitrary game actions, automatically rewrite Java code or auto-approve QA. Each needs a real recorded positive action and verified visual preconditions/postconditions. Start with Initialize, Daily Missions, Exploration and Training; then roll the same engine across the rest. The UI clearly distinguishes `observed` from `navigation_verified`, neither of which means the complete task works.
+This is **not yet a replacement for the Windows task engine**. Most task plans do not execute game actions, automatically rewrite Java code or auto-approve QA. Each needs a real recorded positive action and verified visual preconditions/postconditions. Start with Initialize, Daily Missions, Exploration and Training; then roll the same engine across the rest. The UI clearly distinguishes `observed` from `navigation_verified`, neither of which means the complete task works.
 
 Unknown, changing or blocked screens are not tapped. No in-app purchases, gems/keys, quitting the game or emulator switching. A server-side AI/code-fix loop would require an explicitly configured agent and review/test gates; it is not silently running.
 
@@ -57,3 +57,17 @@ The controller does **not** claim to be an always-on ChatGPT session or an auton
 ### Performance telemetry
 
 The server uses a private 50-second OpenSSH multiplex connection for successive screenshot requests. Each new screenshot now records separate `capture_ms` and `recognition_ms` timings so transport latency can be addressed without lowering validation thresholds.
+
+## Extended safety and task analysis (16 November 2026)
+
+- Authenticated **Pauzeren** control on the QA website blocks new runs and is checked before **every** approved ADB tap; resuming requires an authenticated action. Actions already transmitted cannot be cancelled.
+- The UI now shows **the last actual verified emulator heartbeat**, not simply that an ADB serial was once configured. The 30-minute observation timer refreshes connectivity; observations are never considered complete game tasks.
+- An independent **15-minute Task Coach audit timer** inspects all 62 catalog entries, 52 historical uploaded sessions for 19 tasks (2,646 template method observations), and current QA issues. It ranks investigations while preserving verified statuses and operator notes. Safety guard misses (Reconnect, Welcome Back, critical dialogs) are excluded from obsolete-template recommendations.
+- `DAILY_MISSIONS --mode claim_free` may claim free rewards only when **current Daily Missions title and Claim All are visible twice** at the proven location, Rewards banner plus **Tap anywhere to exit** are each confirmed twice, and Claim All has disappeared on the final Daily screen. Optional milestone chests, individual claims and other tasks are intentionally excluded. If the page is not already open, it stops with **zero taps**. Tests replay the exact 2026-11-16 Coach hit, Rewards and post-claim screenshots as positive/negative fixtures.
+- Live A16 test on City correctly blocked Daily Claim All without a tap. The full free-claim sequence has been tested on replay fixtures and mocked ADB actions but **not yet end-to-end on the live Daily screen**. No score or claim of full task completion is assigned.
+
+### Backlog priorities from actual evidence
+
+Highest-ranked investigations are `TRAINING_TROOPS`, `ALLIANCE_TECH`, `DO_EXPLORATION`, `CITY_UPGRADE_FURNACE`, `ARENA`, and `ALLIANCE_TRIUMPH`. This is **prioritization, not a claim that the most frequently missed button is broken**. Examples: `TRAINING_CAMP_INFANTRY_TAB_LABEL_2026` often missed, Exploration's Victory scan can be correctly absent during an ongoing battle, and `GAME_HOME_RECONNECT` misses may be the desired result when the game is healthy.
+
+The next implementation gates are: activate the Daily Missions route only on an observed live Daily page; complete optional 160-point rewards and Home return as separate validated stages; expand normal/Quick Exploration (including delayed fights and two-button Victory); then training completion/claim and remaining game tasks. **No autonomous Java rewrite or automatic release is advertised or active.**
