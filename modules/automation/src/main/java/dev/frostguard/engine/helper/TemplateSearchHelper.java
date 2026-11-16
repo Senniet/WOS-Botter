@@ -5,6 +5,7 @@ import dev.frostguard.api.configs.TpMessageSeverityEnum;
 import dev.frostguard.api.domain.AreaData;
 import dev.frostguard.api.domain.ImageSearchResultData;
 import dev.frostguard.api.domain.PointData;
+import dev.frostguard.vision.match.OpenCvPatternLocator;
 import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.engine.emulator.EmulatorController;
 import dev.frostguard.engine.service.LoggingService;
@@ -207,6 +208,14 @@ public class TemplateSearchHelper {
      * using a single weak match. Both methods retain the caller's search area.
      */
     private ImageSearchResultData verifiedFallback(TemplatesEnum tpl, SearchConfig cfg) {
+        // Serve-EMU lives across the network. An absent template previously
+        // caused two additional full ADB screencaps (scale then mono), even
+        // though both methods inspected an unchanged screen. Run both methods
+        // locally against ONE fresh captured frame instead. A possible hit
+        // is still confirmed against another independent fresh frame before
+        // any action can use it. Other emulator backends remain untouched.
+        if (recognitionPolicy().isServeEmu())
+            return verifiedFallbackSharedFrame(tpl,cfg);
         for (boolean greyscale : new boolean[]{false, true}) {
             preemptionHook.run();
             ImageSearchResultData first = greyscale ? doSearchGrey(tpl, cfg) : doSearchMultiScale(tpl, cfg);
@@ -223,6 +232,22 @@ public class TemplateSearchHelper {
                     + (greyscale ? "greyscale" : "multiscale"));
         }
         return null;
+    }
+
+    private ImageSearchResultData verifiedFallbackSharedFrame(TemplatesEnum tpl, SearchConfig cfg) {
+        return ServeEmuFrameFallback.confirm(() -> emu.captureScreen(device),
+                (frame,mono) -> {
+                    PointData start=cfg.hasArea() ? cfg.getArea().topLeft()
+                            : cfg.hasCoordinates() ? cfg.getStartPoint() : new PointData(0,0);
+                    PointData end=cfg.hasArea() ? cfg.getArea().bottomRight()
+                            : cfg.hasCoordinates() ? cfg.getEndPoint()
+                            : new PointData(frame.getWidth(),frame.getHeight());
+                    return mono
+                            ? OpenCvPatternLocator.locatePatternMono(frame,tpl.getTemplate(),
+                                    start,end,cfg.getThreshold())
+                            : OpenCvPatternLocator.locatePatternMultiScale(frame,tpl.getTemplate(),
+                                    start,end,cfg.getThreshold());
+                },preemptionHook,() -> sleepWithPreemption(120),FALLBACK_CONFIRMATION_DISTANCE);
     }
 
     private static String score(ImageSearchResultData match) {

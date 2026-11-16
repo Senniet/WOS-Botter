@@ -70,8 +70,12 @@ public class DoExplorationRoutine extends DelayedTask {
         // A previous run may have ended after Confirm while Quick Exploration
         // was still animating or already showing its completed Rewards. That
         // is not a new normal battle and must be resolved before any navigation.
+        // One initial frame serves the pending Quick result, optional modal
+        // geometry and already-open page/root probes. Previously those
+        // passive checks each triggered their own remote ADB screencap.
+        RawImageData initialFrame=emuManager.captureScreen(EMULATOR_NUMBER);
         QuickExplorationFrame.State existing=QuickExplorationFrame.classify(
-                emuManager.captureScreen(EMULATOR_NUMBER),EMULATOR_NUMBER);
+                initialFrame,EMULATOR_NUMBER);
         if (existing!=QuickExplorationFrame.State.OTHER) {
             logInfo("Resuming pending Quick Exploration result, state="+existing);
             completeQuickRouteAndSchedule();
@@ -79,7 +83,7 @@ public class DoExplorationRoutine extends DelayedTask {
         }
         // Resume a confirmation left by a previous run instead of navigating
         // blindly through a pending modal or starting another battle.
-        QuickDialogOutcome pending = inspectQuickExplorationConfirmation();
+        QuickDialogOutcome pending = inspectQuickExplorationConfirmation(initialFrame);
         if (pending != QuickDialogOutcome.NOT_PRESENT) {
             if (pending == QuickDialogOutcome.CONFIRMED) {
                 logInfo("Resumed Quick Exploration started; verifying the result and Rewards");
@@ -102,13 +106,13 @@ public class DoExplorationRoutine extends DelayedTask {
         // and cart animation are visible. If a known root is present, the
         // direct shortcut can be tapped immediately; otherwise passively
         // wait for a verified Exploration page before any recovery.
-        boolean alreadyReady=ExplorationEntryFrame.ready(emuManager.captureScreen(EMULATOR_NUMBER));
-        boolean rootShortcut=!alreadyReady && verifiedRootShortcutAvailable();
+        boolean alreadyReady=ExplorationEntryFrame.ready(initialFrame);
+        boolean rootShortcut=!alreadyReady && verifiedRootShortcutAvailable(initialFrame);
         if (!alreadyReady && !rootShortcut) {
             if (awaitExplorationReady(3)) alreadyReady=true;
             else navigationHelper.ensureCorrectScreenLocation(LaunchPoint.WORLD);
         }
-        if (!alreadyReady && !openExplorationScreen()) {
+        if (!alreadyReady && !openExplorationScreen(rootShortcut)) {
             markWorkIncomplete("Exploration: page not opened or title unverified");
             logWarning("Exploration page could not be verified; " + TaskDiagnosticSnapshots.capture(
                     emuManager, EMULATOR_NUMBER, "exploration", "entry-unverified"));
@@ -273,7 +277,11 @@ public class DoExplorationRoutine extends DelayedTask {
     }
 
     private boolean verifiedRootShortcutAvailable() {
-        var first=ExplorationRootFrame.root(emuManager.captureScreen(EMULATOR_NUMBER));
+        return verifiedRootShortcutAvailable(emuManager.captureScreen(EMULATOR_NUMBER));
+    }
+
+    private boolean verifiedRootShortcutAvailable(RawImageData initialFrame) {
+        var first=ExplorationRootFrame.root(initialFrame);
         if (first==ExplorationRootFrame.Root.UNKNOWN)return false;
         sleepTask(140);
         var second=ExplorationRootFrame.root(emuManager.captureScreen(EMULATOR_NUMBER));
@@ -282,8 +290,11 @@ public class DoExplorationRoutine extends DelayedTask {
         return stable;
     }
 
-    private boolean openExplorationScreen() {
-        if (ExplorationEntryFrame.ready(emuManager.captureScreen(EMULATOR_NUMBER)))return true;
+    private boolean openExplorationScreen() {return openExplorationScreen(false);}
+
+    private boolean openExplorationScreen(boolean rootVerified) {
+        if (!rootVerified && ExplorationEntryFrame.ready(
+                emuManager.captureScreen(EMULATOR_NUMBER)))return true;
         logInfo("Opening Exploration from verified root shortcut once...");
         tapInside(EXPLORATION_ENTRY_TOP_LEFT, EXPLORATION_ENTRY_BOTTOM_RIGHT);
         // Task Coach 20261116-203812: image transitions for several seconds.
@@ -301,36 +312,43 @@ public class DoExplorationRoutine extends DelayedTask {
     }
 
     private ImageSearchResultData detectExploreButton() {
-        ImageSearchResultData existing = templateSearchHelper.locatePattern(
-                TemplatesEnum.EXPLORATION_BUTTON,
-                SearchConfig.builder().withMaxAttempts(1).withThreshold(86)
-                        .withArea(AreaData.of(160, 1100, 540, 1230)).build());
-        if (existing.isFound()) {
-            sleepTask(90);
-            var second = templateSearchHelper.locatePattern(TemplatesEnum.EXPLORATION_BUTTON,
-                    SearchConfig.builder().withMaxAttempts(1).withThreshold(86)
-                            .withArea(AreaData.of(160, 1100, 540, 1230)).build());
-            if (RecognitionConsensus.agrees(existing, second, 10)) return second;
-        }
-        // Current 2026 UI uses a different rendering from explore.png.
-        // The screenshot-grounded fallback requires the right blue button and
-        // its light label on two independent normalized frames.
-        var first = BlueLabelActionDetector.detect(
-                ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER)), EXPLORE_BLUE_BUTTON);
-        if (!first.isFound()) {
-            logWarning("Exploration button not matched; " + TaskDiagnosticSnapshots.capture(
-                    emuManager, EMULATOR_NUMBER, "exploration", "explore-button-missing"));
+        // Both current-artwork matching and the geometry fallback must read
+        // the same first screenshot. Each separate remote ADB capture is
+        // expensive; only a candidate action earns a second fresh frame.
+        var firstFrame=emuManager.captureScreen(EMULATOR_NUMBER);
+        if(firstFrame==null || !firstFrame.isValid())return ImageSearchResultData.miss();
+        var areaStart=new PointData(160,1100);
+        var areaEnd=new PointData(540,1230);
+        var exact=dev.frostguard.vision.match.OpenCvPatternLocator.locatePattern(
+                firstFrame,TemplatesEnum.EXPLORATION_BUTTON.getTemplate(),
+                areaStart,areaEnd,86);
+        boolean useBlue=!exact.isFound();
+        var candidate=useBlue ? BlueLabelActionDetector.detect(
+                ImageConverter.toBufferedImage(firstFrame),EXPLORE_BLUE_BUTTON) : exact;
+        if(!candidate.isFound() || candidate.getPoint()==null){
+            logWarning("Exploration action not recognized on current frame; "
+                    +TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+                            "exploration","explore-button-missing"));
             return ImageSearchResultData.miss();
         }
+        // A new independent screenshot confirms that the button has not
+        // shifted during the animation; do not click stale positions.
         sleepTask(100);
-        var second = BlueLabelActionDetector.detect(
-                ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER)), EXPLORE_BLUE_BUTTON);
-        if (RecognitionConsensus.agrees(first, second, 8)) {
-            logInfo("Explore action verified by two-frame blue-button geometry");
-            return second;
+        var secondFrame=emuManager.captureScreen(EMULATOR_NUMBER);
+        if(secondFrame==null || !secondFrame.isValid())return ImageSearchResultData.miss();
+        var confirmed=useBlue ? BlueLabelActionDetector.detect(
+                ImageConverter.toBufferedImage(secondFrame),EXPLORE_BLUE_BUTTON)
+                : dev.frostguard.vision.match.OpenCvPatternLocator.locatePattern(
+                    secondFrame,TemplatesEnum.EXPLORATION_BUTTON.getTemplate(),
+                    areaStart,areaEnd,86);
+        if(RecognitionConsensus.agrees(candidate,confirmed,useBlue?8:10)){
+            logInfo("Explore button confirmed via "+(useBlue?"blue geometry":"template")
+                    +" using two fresh frames");
+            return confirmed;
         }
-        logWarning("Exploration blue action not confirmed in two frames; "
-                + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER, "exploration", "explore-unconfirmed"));
+        logWarning("Exploration button changed between frames; no stale tap; "
+                +TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+                        "exploration","explore-unconfirmed"));
         return ImageSearchResultData.miss();
     }
 
@@ -495,7 +513,10 @@ public class DoExplorationRoutine extends DelayedTask {
      * Never confirm any other orange/blue modal without matching its text.
      */
     QuickDialogOutcome inspectQuickExplorationConfirmation() {
-        RawImageData captured = emuManager.captureScreen(EMULATOR_NUMBER);
+        return inspectQuickExplorationConfirmation(emuManager.captureScreen(EMULATOR_NUMBER));
+    }
+
+    private QuickDialogOutcome inspectQuickExplorationConfirmation(RawImageData captured) {
         // Latest Task Coach: the Squad Settings heroes and badges form an
         // orange/blue false-positive for the quick-modal geometry (y~=1025).
         // Two precise known templates confirm this is NOT a confirmation:
