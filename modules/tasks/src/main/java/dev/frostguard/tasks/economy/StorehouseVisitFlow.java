@@ -39,6 +39,7 @@ final class StorehouseVisitFlow<T> {
         CONFIRMED,
         UNCONFIRMED,
         BLOCKED_CAPACITY,
+        DEFERRED_UNACCEPTED,
         UNKNOWN
     }
 
@@ -175,11 +176,14 @@ final class StorehouseVisitFlow<T> {
             if (stamina.state() == ObservationState.FOUND) {
                 actions.onPhase(ActivityPhase.COLLECTING_STAMINA);
                 CollectionState result = Objects.requireNonNull(actions.collectStamina(stamina.value()));
-                if (result == CollectionState.BLOCKED_CAPACITY) {
+                if (result == CollectionState.BLOCKED_CAPACITY
+                        || result == CollectionState.DEFERRED_UNACCEPTED) {
                     // A proven full-capacity notice is neither a collected reward
                     // nor an uncertain click. Do not repeat this action immediately.
                     return decision(VisitState.WAITING_CAPACITY, CAPACITY_RETRY_DELAY,
-                            "Stamina is at capacity; visit deferred until capacity may free up.");
+                            result == CollectionState.BLOCKED_CAPACITY
+                                ? "Stamina at verified capacity; reward not collected."
+                                : "Stamina Claim not accepted; full capacity is possible; no immediate retry.");
                 }
                 if (result != CollectionState.CONFIRMED) {
                     return retry("Stamina collection was " + result.name().toLowerCase() + ".");

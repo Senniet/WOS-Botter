@@ -82,8 +82,8 @@ public class StorehouseChestRoutine extends DelayedTask {
 
     // ========== Constants ==========
     private static final int TIMER_OCR_MAX_ATTEMPTS = 3;
-    private static final int BUBBLE_SEARCH_ATTEMPTS = 6;
-    private static final long BUBBLE_SEARCH_DELAY_MILLIS = 250L;
+    private static final int BUBBLE_SEARCH_ATTEMPTS = 3;
+    private static final long BUBBLE_SEARCH_DELAY_MILLIS = 180L;
     private static final int CLAIM_CLOSE_SETTLE_MILLIS = 800;
     private static final int BUBBLE_CONFIRMATION_MARGIN = 24;
     private static final int CLAIM_BUTTON_POLL_INTERVAL_MILLIS = 250;
@@ -365,7 +365,12 @@ public class StorehouseChestRoutine extends DelayedTask {
                     captureInterfaceFailure("stamina-claim-dialog-close-unconfirmed");
                 }
                 pendingAgnesStamina = null;
-                return StorehouseVisitFlow.CollectionState.UNCONFIRMED;
+                // When Claim remains visible, the game refused the action.
+                // A full stamina bar can cause this without a recognizable
+                // max-capacity toast. Never count or immediately reattempt it.
+                return rejection == StorehouseStaminaClaimRecovery.Outcome.DISMISSED
+                        ? StorehouseVisitFlow.CollectionState.DEFERRED_UNACCEPTED
+                        : StorehouseVisitFlow.CollectionState.UNKNOWN;
             }
             StorehouseVisitFlow.CollectionState confirmation = confirmBubbleDisappeared(
                     candidate, StorehouseBubbleDetector.Kind.STAMINA);
@@ -415,21 +420,25 @@ public class StorehouseChestRoutine extends DelayedTask {
 
     private StorehouseVisitFlow.Observation<StorehouseBubbleDetector.Candidate> observeBubble(
             StorehouseBubbleDetector.Kind kind, AreaData area) {
-        ImageSearchResultData cityAnchor = templateSearchHelper.locatePattern(
-                TemplatesEnum.GAME_HOME_FURNACE, SearchConfigConstants.DEFAULT_SINGLE);
-        if (cityAnchor == null || !cityAnchor.isFound()) {
-            captureInterfaceFailure(kind.name().toLowerCase(Locale.ROOT) + "-scan-not-in-city");
-            logWarning("Storehouse " + kind.name().toLowerCase(Locale.ROOT)
-                    + " scan is unknown: city anchor missing.");
-            return StorehouseVisitFlow.Observation.unknown();
-        }
-
         boolean captureFailed = false;
+        boolean cityConfirmed = false;
+        // One screenshot per attempt for both the City anchor and bubble.
+        // Previously the city anchor was searched with a separate ADB round
+        // before another six screenshots, including on empty Storehouses.
         for (int attempt = 1; attempt <= BUBBLE_SEARCH_ATTEMPTS; attempt++) {
             try {
                 RawImageData capture = emuManager.captureScreen(EMULATOR_NUMBER);
+                ImageSearchResultData city = emuManager.locatePattern(EMULATOR_NUMBER,
+                        capture, TemplatesEnum.SERVE_EMU_CITY_ANCHOR,
+                        new PointData(590, 1145), new PointData(715, 1275), 90);
+                if (city == null || !city.isFound()) {
+                    logWarning("Storehouse bubble scan is not on verified City HUD");
+                    return StorehouseVisitFlow.Observation.unknown();
+                }
+                cityConfirmed = true;
                 BufferedImage frame = ImageConverter.toBufferedImage(capture);
-                List<StorehouseBubbleDetector.Candidate> candidates = StorehouseBubbleDetector.locate(frame, area);
+                List<StorehouseBubbleDetector.Candidate> candidates =
+                        StorehouseBubbleDetector.locate(frame, area);
                 for (StorehouseBubbleDetector.Candidate candidate : candidates) {
                     if (candidate.kind() == kind) {
                         logDebug("Storehouse " + kind.name().toLowerCase(Locale.ROOT) + " bubble found");
@@ -439,18 +448,16 @@ public class StorehouseChestRoutine extends DelayedTask {
             } catch (RuntimeException failure) {
                 TaskControlSignals.rethrowControlSignal(failure);
                 captureFailed = true;
-                logWarning("Storehouse " + kind.name().toLowerCase(Locale.ROOT)
-                        + " scan capture failed: " + failure.getClass().getSimpleName() + ": " + failure.getMessage());
+                logWarning("Storehouse bubble scan failed: " + failure.getClass().getSimpleName());
             }
-            if (attempt < BUBBLE_SEARCH_ATTEMPTS) {
-                sleepTask(BUBBLE_SEARCH_DELAY_MILLIS);
-            }
+            if (attempt < BUBBLE_SEARCH_ATTEMPTS) sleepTask(BUBBLE_SEARCH_DELAY_MILLIS);
         }
-        if (captureFailed) {
+        if (captureFailed || !cityConfirmed) {
             captureInterfaceFailure(kind.name().toLowerCase(Locale.ROOT) + "-scan-unknown");
             return StorehouseVisitFlow.Observation.unknown();
         }
-        logDebug("Storehouse " + kind.name().toLowerCase(Locale.ROOT) + " bubble absent after stable scan");
+        logDebug("Storehouse " + kind.name().toLowerCase(Locale.ROOT)
+                + " bubble absent on verified City HUD");
         return StorehouseVisitFlow.Observation.absent();
     }
 
