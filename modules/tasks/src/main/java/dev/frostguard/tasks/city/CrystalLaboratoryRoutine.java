@@ -75,11 +75,10 @@ public CrystalLaboratoryRoutine(AccountDescriptor profile, TpDailyTaskEnum tpDai
     }
 
 protected void loadConfiguration() {
-        this.useDiscountedDailyRFC = profile.getConfig(
-                BOOL_CRYSTAL_LAB_DAILY_DISCOUNTED_RFC,
-                Boolean.class);
-
-        this.weeklyRFCTarget = profile.getConfig(INT_WEEKLY_RFC, Integer.class);
+        this.useDiscountedDailyRFC = Boolean.TRUE.equals(profile.getConfig(
+                BOOL_CRYSTAL_LAB_DAILY_DISCOUNTED_RFC, Boolean.class));
+        Integer target = profile.getConfig(INT_WEEKLY_RFC, Integer.class);
+        this.weeklyRFCTarget = target == null ? 0 : Math.max(0, target);
 
         logInfo(routineLogCrystalLaboratoryLine(String.format("Configuration loaded - Discounted RFC: %s, Weekly target: %d",
                 useDiscountedDailyRFC, weeklyRFCTarget)));
@@ -98,12 +97,22 @@ protected void loadConfiguration() {
 
         redeemAllCrystals();
 
+        // This Serve-EMU production profile authorizes free Crystal claims
+        // only. Refined Fire Crystal purchase paths spend Fire Crystals even
+        // when their checkbox is retained from older profile settings.
+        // Keep the entire paid route out of this execution, including the
+        // "discounted" daily purchase.
+        boolean fcAllowed = allowFireCrystalSpending(
+                emuManager.getSelectedEmulatorType());
+        if (!fcAllowed && (useDiscountedDailyRFC || weeklyRFCTarget > 0))
+            logInfo(routineLogCrystalLaboratoryLine(
+                    "Skipping optional RFC spending on Serve-EMU; free Crystal claims only"));
         boolean discountedSettled = true;
-        if (useDiscountedDailyRFC) {
+        if (fcAllowed && useDiscountedDailyRFC) {
             discountedSettled = purchaseDiscountedRFCFlow();
         }
 
-        if (hasMonday() && weeklyRFCTarget > 0) {
+        if (fcAllowed && hasMonday() && weeklyRFCTarget > 0) {
             WeeklyRFCResultShape result = handleWeeklyRFC();
 
             if (result == WeeklyRFCResultShape.INSUFFICIENT_FC
@@ -131,6 +140,10 @@ protected void loadConfiguration() {
         }
 
         reschedule(dailyResetTime());
+    }
+
+    static boolean allowFireCrystalSpending(dev.frostguard.engine.emulator.EmulatorType type) {
+        return type != dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU;
     }
 
 @Override
