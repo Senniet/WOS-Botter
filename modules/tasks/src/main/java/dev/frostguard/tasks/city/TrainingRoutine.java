@@ -15,6 +15,7 @@ import dev.frostguard.engine.service.TaskManagementService;
 import dev.frostguard.vision.convert.GameTimeUtils;
 import dev.frostguard.vision.convert.ImageConverter;
 import dev.frostguard.vision.convert.RegexNumberParser;
+import dev.frostguard.vision.match.OpenCvPatternLocator;
 import dev.frostguard.vision.ocr.ResilientOcrExecutor;
 import java.awt.*;
 import java.time.*;
@@ -1321,8 +1322,6 @@ private List<QueueSlot> retryUnknownQueuesFlow(List<QueueSlot> initialResults) {
             logInfo(routineLogTrainingLine("Retry attempt " + attempt + "/" + MAX_QUEUE_STATUS_RETRIES_LIMIT));
 
             marchHelper.openLeftMenuCitySection(true);
-            emuManager.captureScreen(EMULATOR_NUMBER);
-
             unknownIndices = retryUnknownQueuesOnceFlow(initialResults, unknownIndices);
         }
 
@@ -1728,6 +1727,73 @@ private void dismissPopupsFlow() {
     }
 
 private boolean pressTrainButton() {
+        // Keep BlueStacks/MuMu/LDPlayer/MEmu's original action strategy;
+        // only the measured 720x1280 Serve-EMU uses the accelerated path.
+        if(emuManager.getSelectedEmulatorType()
+                != dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU)
+            return pressTrainButtonClassic();
+        // This is a REAL task action. If the 2026 selected highest tier and
+        // its blue Train button have already passed two independent frame
+        // checks, tap promptly: scanning the old TRAINING_TRAIN_BUTTON twice
+        // and probing 11 obsolete tiers adds latency but no protection.
+        boolean selectedHighest=isVerifiedPreselectedHighestTier();
+        ImageSearchResultData target=ImageSearchResultData.miss();
+        if (!selectedHighest) {
+            if (!isTrainingCampInterfaceVisible()) {
+                logWarning(routineLogTrainingLine("Train refused: troop panel not visible"));
+                return false;
+            }
+            PointData topLeft=new PointData(330,1040);
+            PointData bottomRight=new PointData(705,1190);
+            // On older layouts retain the real button template, but search
+            // ONLY its footer rather than every visually similar blue item.
+            var first=templateSearchHelper.locatePattern(TRAINING_TRAIN_BUTTON,
+                    SearchConfig.builder().withMaxAttempts(1).withThreshold(90)
+                            .withCoordinates(topLeft,bottomRight).build());
+            if (!first.isFound()) {
+                logWarning(routineLogTrainingLine("No verified Train CTA; "
+                        + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+                                "training", "train-button-unverified")));
+                return false;
+            }
+            sleepTask(100);
+            RawImageData frame=emuManager.captureScreen(EMULATOR_NUMBER);
+            target=OpenCvPatternLocator.locatePattern(frame,TRAINING_TRAIN_BUTTON.getTemplate(),
+                    topLeft,bottomRight,90);
+            if (!dev.frostguard.engine.helper.RecognitionConsensus.agrees(first,target,12)) {
+                logWarning(routineLogTrainingLine("Train button changed before input; no stale click"));
+                return false;
+            }
+        }
+        if (selectedHighest) {
+            logInfo(routineLogTrainingLine("Highest unlocked tier and blue Train CTA verified on two frames; tapping immediately"));
+            tapNear(VERIFIED_BLUE_TRAIN_POINT,7);
+        } else {
+            tapInside(target.getPoint(),target.getPoint(),1,250);
+        }
+        // A single fresh post-tap frame is enough to detect the real resource
+        // top-up dialog. On an ordinary successful Train it is ABSENT: old
+        // default color+scale+mono retries wasted multiple ADB captures.
+        // A successful training still requires the sidebar queue transition.
+        RawImageData after=emuManager.captureScreen(EMULATOR_NUMBER);
+        if (after == null || !after.isValid() || after.getWidth() != 720
+                || after.getHeight() != 1280) {
+            markWorkIncomplete("Training: post-Train screen could not be verified");
+            logWarning(routineLogTrainingLine("Post-Train capture invalid; queue result unknown"));
+            return false;
+        }
+        ImageSearchResultData replenish=OpenCvPatternLocator.locatePattern(after,
+                REPLENISH_ALL_BUTTON.getTemplate(),new PointData(0,0),
+                new PointData(after.getWidth(),after.getHeight()),90);
+        if(replenish.isFound()){
+            logWarning(routineLogTrainingLine("Resource replenishment dialog visible; refusing premium/resource spending"));
+            markWorkIncomplete("Training: replenishment dialog blocks start");
+            return false;
+        }
+        return true;
+    }
+
+private boolean pressTrainButtonClassic() {
         // A fallback location is only allowed when the correct selected tier
         // and the blue Train CTA were independently verified on two frames.
         boolean verifiedSelected = isVerifiedPreselectedHighestTier();
@@ -1813,8 +1879,8 @@ private List<QueueSlot> inspectAllQueues() {
                     + (currentLayout ? "2026 serve-emu" : "classic") + "; OCR regions refreshed"));
             List<QueueSlot> result = new ArrayList<>();
 
-            emuManager.captureScreen(EMULATOR_NUMBER);
-
+            // OCR will request the current frame per queue. An unused
+            // screenshot here only held up every troop inspection.
             for (int i = 0; i < queuesToCheck.size(); i++) {
                 AreaData queueArea = queuesToCheck.get(i);
                 TroopTypeShape troopType = enabledTroopTypes.get(i);
