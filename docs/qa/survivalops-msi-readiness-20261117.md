@@ -63,4 +63,3 @@ Each row records a source implementation or tested change. A manually performed 
 - Validate app image includes SurvivalOps.exe, SurvivalOpsWatcher.exe and Java runtime before creating the installer.
 - Verify installer version, SHA-256 and file size against the project-signed stable update manifest, and test actual MSI update on Windows.
 - Do not publish a stable channel from this source candidate before those Windows gates are complete.
-
