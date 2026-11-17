@@ -46,11 +46,15 @@ public AllianceChestRoutine(AccountDescriptor profile, TpDailyTaskEnum tpDailyTa
 
 
         if (!gatherLootChests()) {
-            deferAndExit("Loot Claim All outcome not confirmed");
+            // A failed claim must not strand the next scheduled task in Alliance.
+            // Navigate via the existing verified Home helper, never blind Back.
+            boolean home = restoreHomeScreen();
+            deferAndExit("Loot Claim All outcome not confirmed; Home restored=" + home);
             return;
         }
         if (!gatherAllianceGifts()) {
-            deferAndExit("Alliance Gift claim not confirmed");
+            boolean home = restoreHomeScreen();
+            deferAndExit("Alliance Gift claim not confirmed; Home restored=" + home);
             return;
         }
         gatherHonorChest();
