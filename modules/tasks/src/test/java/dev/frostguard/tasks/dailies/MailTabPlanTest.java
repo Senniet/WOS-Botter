@@ -19,6 +19,22 @@ class MailTabPlanTest {
         assertFalse(plan.get(4).systemReports());
     }
 
+    @Test void currentMailEmptyListIsNotRescannedThreeTimesPerTab() {
+        assertEquals(1, MailRewardsRoutine.unreadMarkerSearchAttempts(
+                dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU));
+        for (var emulator : dev.frostguard.engine.emulator.EmulatorType.values()) {
+            if (emulator != dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU)
+                assertEquals(3, MailRewardsRoutine.unreadMarkerSearchAttempts(emulator));
+        }
+    }
+
+    @Test void mailCannotReportSuccessBeforeVerifiedReturnHome() {
+        assertTrue(MailRewardsRoutine.mailRunVerified(true, true, true));
+        assertFalse(MailRewardsRoutine.mailRunVerified(true, true, false));
+        assertFalse(MailRewardsRoutine.mailRunVerified(true, false, true));
+        assertFalse(MailRewardsRoutine.mailRunVerified(false, true, true));
+    }
+
     @Test void olderThreeTabInterfaceRetainsItsOriginalOrderAndCoordinates() {
         var plan=MailRewardsRoutine.tabPlan(false);
         assertEquals(List.of("Alliance", "System", "Reports"),

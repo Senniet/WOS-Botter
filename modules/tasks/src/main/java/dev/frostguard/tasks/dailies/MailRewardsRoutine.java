@@ -8,6 +8,8 @@ import dev.frostguard.api.domain.AreaData;
 import dev.frostguard.api.domain.ImageSearchResultData;
 import dev.frostguard.api.domain.PointData;
 import dev.frostguard.api.domain.OcrSettingsData;
+import dev.frostguard.api.domain.RawImageData;
+import dev.frostguard.vision.match.OpenCvPatternLocator;
 import dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig;
 import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.schedule.LaunchPoint;
@@ -25,9 +27,9 @@ private static final int MAX_MAIL_CLAIM_PASSES = 3;
 
 private static final int MAX_UNREAD_REPORT_OPENS = 3;
 
-private static final int MAIL_MENU_SEARCH_RETRIES_VALUE = 5;
+private static final int MAIL_MENU_SEARCH_RETRIES_VALUE = 2;
 
-private static final int MAIL_MENU_OPEN_VERIFICATION_RETRIES_VALUE = 5;
+private static final int MAIL_MENU_OPEN_VERIFICATION_RETRIES_VALUE = 2;
 
 private static final int UNCLAIMED_REWARDS_SEARCH_RETRIES_VALUE = 3;
 
@@ -95,24 +97,32 @@ public MailRewardsRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
         }
 
         boolean allTabsVerified = handleAllMailTabs();
+        // dismissMailMenu() already confirms that its visible page disappeared.
+        // Re-checking the Mail title here cost an unnecessary ADB capture.
         boolean mailClosed = dismissMailMenu();
-        if (mailClosed && !isCurrentMailMenuVisible()) {
+        boolean homeVerified = false;
+        if (mailClosed) {
             try {
                 navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME, this::checkPreemption);
+                homeVerified = true;
             } catch (dev.frostguard.engine.error.HomeNotFoundException missing) {
-                logWarning(routineLogMailRewardsLine("Mail closed, Home not yet verified: "
+                logWarning(routineLogMailRewardsLine("Mail closed, Home not verified: "
                         + missing.getMessage()));
             }
         }
-        if (!allTabsVerified || !mailClosed) {
+        if (!mailRunVerified(allTabsVerified, mailClosed, homeVerified)) {
             LocalDateTime retryAt = LocalDateTime.now().plusMinutes(ERROR_RETRY_MINUTES_VALUE);
             logWarning(routineLogMailRewardsLine("One or more mail tabs remained unverified; "
                     + "retrying at " + retryAt.format(DATETIME_FORMATTER)));
-            markWorkIncomplete("Mail: one or more tabs could not be verified");
+            markWorkIncomplete("Mail: tab processing, close, or return Home not verified");
             reschedule(retryAt);
             return;
         }
         queueNextRun();
+    }
+
+static boolean mailRunVerified(boolean allTabsVerified, boolean mailClosed, boolean homeVerified) {
+        return allTabsVerified && mailClosed && homeVerified;
     }
 
 @Override
@@ -157,16 +167,11 @@ private boolean redeemAllVisibleRewards() {
             logWarning(routineLogMailRewardsLine("Read & Claim All control unverified; no blind footer taps"));
             return false;
         }
-        sleepTask(150);
-        ImageSearchResultData after = templateSearchHelper.locateAction(
-                TemplatesEnum.SERVE_EMU_MAIL_READ_CLAIM, claimRegion,
-                TemplatesEnum.SERVE_EMU_MAIL_READ_CLAIM_LEGACY);
-        if (!dev.frostguard.engine.helper.RecognitionConsensus.agrees(before, after, 12)) {
-            logWarning(routineLogMailRewardsLine("Mail claim action unstable between frames"));
-            return false;
-        }
-        logInfo(routineLogMailRewardsLine("Read & Claim All confirmed; tapping once"));
-        tapInside(after);
+        // locateAction already confirms on a second independent screenshot.
+        // The previous code repeated that entire two-frame fallback twice
+        // (at least four ADB captures) before pressing a visibly ready button.
+        logInfo(routineLogMailRewardsLine("Read & Claim All confirmed on two frames; tapping once"));
+        tapInside(before);
         sleepTask(350);
         boolean rewardsVisible = false;
         for (int attempt = 0; attempt < 3; attempt++) {
@@ -194,12 +199,31 @@ private boolean redeemAllVisibleRewards() {
     }
 
 private boolean mailRewardsOverlayVisible() {
+        if (emuManager.getSelectedEmulatorType()
+                == dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU) {
+            RawImageData frame=emuManager.captureScreen(EMULATOR_NUMBER);
+            if(frame==null || !frame.isValid() || frame.getWidth()!=720 || frame.getHeight()!=1280)
+                return false;
+            PointData start=new PointData(40,245),end=new PointData(680,425);
+            return OpenCvPatternLocator.locatePattern(frame,
+                    TemplatesEnum.SERVE_EMU_REWARDS_BANNER.getTemplate(),start,end,90).isFound()
+                    || OpenCvPatternLocator.locatePattern(frame,
+                    TemplatesEnum.SHARED_REWARDS_BANNER_CURRENT.getTemplate(),start,end,90).isFound();
+        }
         SearchConfig titleRegion = SearchConfig.builder().withMaxAttempts(1)
                 .withThreshold(90).withArea(AreaData.of(40, 245, 680, 425)).build();
         return templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_REWARDS_BANNER,
                 titleRegion).isFound()
                 || templateSearchHelper.locatePattern(TemplatesEnum.SHARED_REWARDS_BANNER_CURRENT,
                         titleRegion).isFound();
+    }
+
+static int unreadMarkerSearchAttempts(dev.frostguard.engine.emulator.EmulatorType emulator) {
+        // The current Mail list is stationary by the time a tab is selected.
+        // On live Serve-EMU, three repeated empty-list scans on five tabs
+        // generated 15 misses without improving detection or verification.
+        return emulator == dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU
+                ? 1 : UNCLAIMED_REWARDS_SEARCH_RETRIES_VALUE;
     }
 
 private Evidence findUnreadMailEvidence() {
@@ -209,7 +233,7 @@ private Evidence findUnreadMailEvidence() {
                         .withArea(new AreaData(
                                 MAIL_LIST_INDICATORS_TOP_LEFT_VALUE,
                                 MAIL_LIST_INDICATORS_BOTTOM_RIGHT_VALUE))
-                        .withMaxAttempts(UNCLAIMED_REWARDS_SEARCH_RETRIES_VALUE)
+                        .withMaxAttempts(unreadMarkerSearchAttempts(emuManager.getSelectedEmulatorType()))
                         .withDelay(100L)
                         .withMaxResults(20)
                         .build());
@@ -409,6 +433,14 @@ private boolean dismissMailMenu() {
     }
 
 private boolean isCurrentMailMenuVisible() {
+        if (emuManager.getSelectedEmulatorType()
+                == dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU) {
+            RawImageData frame=emuManager.captureScreen(EMULATOR_NUMBER);
+            return frame!=null && frame.isValid() && frame.getWidth()==720 && frame.getHeight()==1280
+                    && OpenCvPatternLocator.locatePattern(frame,
+                    TemplatesEnum.SERVE_EMU_MAIL_TITLE.getTemplate(),
+                    new PointData(65,0),new PointData(245,100),90).isFound();
+        }
         return templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_MAIL_TITLE,
                 SearchConfig.builder().withMaxAttempts(1).withThreshold(90)
                         .withArea(AreaData.of(65, 0, 245, 100)).build()).isFound();
