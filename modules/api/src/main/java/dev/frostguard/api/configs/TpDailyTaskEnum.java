@@ -85,6 +85,7 @@ public enum TpDailyTaskEnum {
 
     /* ── military ── */
 
+    HEAL_TROOPS            (61,  "Heal Troops",                  ConfigurationKeyEnum.HEAL_TROOPS_BOOL,                      RoutineCategory.MILITARY),
     TRAINING_TROOPS        (60,  "Training",                     ConfigurationKeyEnum.TRAIN_BOOL,                              RoutineCategory.MILITARY),
 
     /* ── pet ── */

@@ -6,11 +6,15 @@ import dev.frostguard.api.configs.ConfigurationKeyEnum;
 import dev.frostguard.app.shared.AbstractProfileController;
 import javafx.fxml.FXML;
 import javafx.scene.control.CheckBox;
+import javafx.scene.control.ComboBox;
 
 public class TrainingLayoutController extends AbstractProfileController {
 
-	@FXML
-	private CheckBox checkBoxEnableTraining;
+    @FXML private CheckBox checkBoxEnableHealing;
+    @FXML private CheckBox checkBoxHealAllianceHelp;
+    @FXML private ComboBox<String> comboHealBatchMode;
+    @FXML
+    private CheckBox checkBoxEnableTraining;
 
 	@FXML
 	private CheckBox checkBoxAppointMinister;
@@ -31,8 +35,12 @@ public class TrainingLayoutController extends AbstractProfileController {
 
 	@FXML
 	private void initialize() {
-		registerTrainingSettings();
-		initializeChangeEvents();
+        registerTrainingSettings();
+        comboHealBatchMode.getItems().setAll("Full - Quick Select", "Small - Current selection");
+        registerCheckBox(checkBoxEnableHealing, ConfigurationKeyEnum.HEAL_TROOPS_BOOL);
+        registerCheckBox(checkBoxHealAllianceHelp, ConfigurationKeyEnum.HEAL_REQUEST_ALLIANCE_HELP_BOOL);
+        registerComboBox(comboHealBatchMode, ConfigurationKeyEnum.HEAL_BATCH_MODE_STRING);
+        initializeChangeEvents();
 		wireMasterToggle();
 	}
 

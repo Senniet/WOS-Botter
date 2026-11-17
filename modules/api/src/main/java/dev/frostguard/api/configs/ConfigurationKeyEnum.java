@@ -345,6 +345,9 @@ public enum ConfigurationKeyEnum {
 
     /* ─────────── training ─────────── */
 
+    HEAL_TROOPS_BOOL                    ("false",   Boolean.class,  ConfigCategory.TRAINING),
+    HEAL_BATCH_MODE_STRING              ("Full - Quick Select", String.class, ConfigCategory.TRAINING),
+    HEAL_REQUEST_ALLIANCE_HELP_BOOL     ("true",    Boolean.class,  ConfigCategory.TRAINING),
     TRAIN_BOOL                          ("false",   Boolean.class,  ConfigCategory.TRAINING),
     TRAIN_INFANTRY_BOOL                 ("false",   Boolean.class,  ConfigCategory.TRAINING),
     TRAIN_LANCER_BOOL                   ("false",   Boolean.class,  ConfigCategory.TRAINING),

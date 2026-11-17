@@ -56,6 +56,22 @@
                 </VBox>
             </VBox>
 
+            <!-- Infirmary healing is intentionally opt-in; gem Finish is never used. -->
+            <VBox styleClass="content-card">
+                <HBox alignment="CENTER_LEFT" maxWidth="Infinity" styleClass="header-blue">
+                    <Label text="Infirmary - Heal Troops" />
+                </HBox>
+                <VBox spacing="10" styleClass="task-section-inner">
+                    <CheckBox fx:id="checkBoxEnableHealing" text="Enable automatic troop healing" />
+                    <Label text="Normal resource healing only; no gems or speed-ups." wrapText="true" />
+                    <HBox spacing="12" alignment="CENTER_LEFT">
+                        <Label text="Batch size" />
+                        <ComboBox fx:id="comboHealBatchMode" prefWidth="225" />
+                    </HBox>
+                    <CheckBox fx:id="checkBoxHealAllianceHelp" text="Request alliance help when available" />
+                    <Label text="Full: Quick Select all eligible wounded. Small: preserve the game's smaller initial selection." wrapText="true" />
+                </VBox>
+            </VBox>
         </VBox>
     </ScrollPane>
 </StackPane>
