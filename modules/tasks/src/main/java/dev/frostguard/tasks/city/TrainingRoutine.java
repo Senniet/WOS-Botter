@@ -924,7 +924,9 @@ private Integer extractMaxTroopCountFlow() {
                 marchHelper.openLeftMenuCitySection(true);
                 AreaData areaToTap = resolvePipelineArea(queue.type());
                 tapInside(areaToTap.topLeft(), areaToTap.bottomRight(), 1, 500);
-                tapInside(TRAINING_CAMP_TAP_MIN_VALUE, TRAINING_CAMP_TAP_MAX_VALUE, 10, 100);
+                // One deliberate building tap; repeating it ten times can reopen
+                // overlays or cause redundant work on slow emulator frames.
+                tapInside(TRAINING_CAMP_TAP_MIN_VALUE, TRAINING_CAMP_TAP_MAX_VALUE, 1, 100);
                 if (openUpTrainingInterface()) {
                     inTrainingInterface = true;
                 }
@@ -959,7 +961,19 @@ private Integer extractMaxTroopCountFlow() {
             }
 
             if (!trainingStartedSuccessfully) {
-                logWarning(routineLogTrainingLine("Multi-tab flow failed for " + queue.type().name() + ". Falling back to single queue flow."));
+                // A training action may have reached the game even when its
+                // confirmation timed out. Reopening and pressing Train again
+                // risks duplicate starts, wasted resources and many seconds
+                // of redundant sidebar navigation.
+                if (inTrainingInterface) {
+                    logWarning(routineLogTrainingLine("Training panel reached but action for "
+                            + queue.type().name() + " was unconfirmed; skipping duplicate single-queue fallback"));
+                    ensureHomeAfterTrainingPanel();
+                    inTrainingInterface = false;
+                    continue;
+                }
+                logWarning(routineLogTrainingLine("Training panel was not entered for " + queue.type().name()
+                        + "; recovering through single queue flow."));
                 
                 // Recover from our own verified training page first. If the
                 // screen is not a training page, use the general safe recovery.
@@ -1549,7 +1563,9 @@ private LocalDateTime trainSingleQueueFlow(QueueSlot queue) {
         logInfo(routineLogTrainingLine("Preparing to train " + queue.type().name()));
         tapInside(areaToTap.topLeft(), areaToTap.bottomRight(), 1, 500);
 
-        tapInside(TRAINING_CAMP_TAP_MIN_VALUE, TRAINING_CAMP_TAP_MAX_VALUE, 10, 100);
+        // One deliberate building tap; repeating it ten times can reopen
+                // overlays or cause redundant work on slow emulator frames.
+                tapInside(TRAINING_CAMP_TAP_MIN_VALUE, TRAINING_CAMP_TAP_MAX_VALUE, 1, 100);
 
         if (!openUpTrainingInterface()) {
             return manageTrainingButtonNotFound(queue);
