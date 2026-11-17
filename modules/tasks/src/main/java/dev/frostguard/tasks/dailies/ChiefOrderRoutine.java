@@ -6,6 +6,10 @@ import dev.frostguard.api.configs.TemplatesEnum;
 import dev.frostguard.api.configs.TpDailyTaskEnum;
 import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.api.domain.ImageSearchResultData;
+import dev.frostguard.api.domain.PointData;
+import dev.frostguard.engine.emulator.EmulatorType;
+import dev.frostguard.engine.error.HomeNotFoundException;
+import dev.frostguard.engine.error.TaskPreemptedException;
 import dev.frostguard.engine.helper.BlueLabelActionDetector;
 import dev.frostguard.engine.helper.RecognitionConsensus;
 import dev.frostguard.vision.convert.ImageConverter;
@@ -52,6 +56,7 @@ public enum ChiefOrderType {
 private static final int ERROR_RETRY_MINUTES_VALUE = 10;
 
 private final ChiefOrderType chiefOrderType;
+private boolean enactDeferred;
 
 public ChiefOrderRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask, ChiefOrderType chiefOrderType) {
 		super(profile, tpTask);
@@ -64,32 +69,65 @@ public ChiefOrderRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask, Chie
 	}
 
 @Override
-	protected void execute() {
-		logInfo(routineLogChiefOrderLine("Initiating Chief Order : " + chiefOrderType.getDescription() +
-				" (Cooldown: " + chiefOrderType.getCooldownHours() + " hours)"));
+    protected void execute() {
+        boolean preempted = false;
+        try {
+            executeChiefOrderWork();
+        } catch (TaskPreemptedException | java.util.concurrent.CancellationException stop) {
+            preempted = true;
+            throw stop;
+        } finally {
+            if (!preempted && !Thread.currentThread().isInterrupted()) {
+                returnHomeAfterChiefOrderIfVisible();
+            }
+        }
+    }
 
-		if (!openUpChiefOrderMenu()) {
-			manageTaskFailure("Failed to open Chief Order menu");
-			return;
-		}
+    private void executeChiefOrderWork() {
+        enactDeferred = false;
+        logInfo(routineLogChiefOrderLine("Starting " + chiefOrderType.getDescription()));
 
-		if (!chooseOrderType()) {
-			manageTaskFailure("Order type not available (likely on cooldown)");
-			return;
-		}
-
-		if (!enactOrderFlow()) {
-			manageTaskFailure("Failed to enact order");
-			return;
-		}
-        // A vanished Enact control does not prove the order was collected.
-        // Confirm actual Rewards and close it before normal cooldown.
+        if (!openUpChiefOrderMenu()) {
+            manageTaskFailure("Chief Order menu not verified");
+            return;
+        }
+        if (!chooseOrderType()) {
+            manageTaskFailure("Chief Order preview unavailable or wrong order selected");
+            return;
+        }
+        if (!enactOrderFlow()) {
+            if (!enactDeferred) manageTaskFailure("Enact did not produce a verified transition");
+            return;
+        }
+        // An Enact button disappearing is not proof of a reward/activation.
         if (!dismissVerifiedChiefOrderReward()) {
-            manageTaskFailure("Chief Order Rewards not confirmed or not closed");
+            manageTaskFailure("Rewards not verified or could not be dismissed");
             return;
         }
         queueNextRun();
-	}
+    }
+
+    private void returnHomeAfterChiefOrderIfVisible() {
+        if (emuManager.getSelectedEmulatorType() == EmulatorType.SERVE_EMU) {
+            var frame = emuManager.captureScreen(EMULATOR_NUMBER);
+            if (ChiefOrderLiveFrame.isOrderBook(frame, chiefOrderType.getDescription())) {
+                tapNear(new PointData(44, 35)); // verified book Back only
+                sleepTask(360);
+                frame = emuManager.captureScreen(EMULATOR_NUMBER);
+            }
+            if (ChiefOrderLiveFrame.isChiefOrderList(frame)) {
+                tapNear(new PointData(44, 35)); // verified menu Back only
+                sleepTask(360);
+            }
+        }
+        try {
+            navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME, this::checkPreemption);
+            logInfo(routineLogChiefOrderLine("Home verified after Chief Order"));
+        } catch (HomeNotFoundException missing) {
+            markWorkIncomplete("Chief Order: Home not verified");
+            logWarning(routineLogChiefOrderLine("Failed to verify Home: " + missing.getMessage()));
+        }
+    }
 
     static boolean completedWithVerifiedRewards(ChiefOrderRewardFrame.Exit exit) {
         return exit == ChiefOrderRewardFrame.Exit.DISMISSED;
@@ -127,11 +165,15 @@ private boolean openUpChiefOrderMenu() {
 		}
 
 		logInfo(routineLogChiefOrderLine("Chief Order menu button detected. Pressing to open menu"));
-		tapInside(menuButton);
-		sleepTask(2000);
-
-
-		return true;
+        tapInside(menuButton);
+        sleepTask(420);
+        if (emuManager.getSelectedEmulatorType() == EmulatorType.SERVE_EMU
+                && !ChiefOrderLiveFrame.isChiefOrderList(
+                        emuManager.captureScreen(EMULATOR_NUMBER))) {
+            logWarning(routineLogChiefOrderLine("Menu button tapped but actual Chief Order list is missing"));
+            return false;
+        }
+        return true;
 	}
 
 private void manageTaskFailure(String reason) {
@@ -145,8 +187,12 @@ private void manageTaskFailure(String reason) {
 	}
 
 private boolean chooseOrderType() {
-		sleepTask(1500);
-
+        if (emuManager.getSelectedEmulatorType() == EmulatorType.SERVE_EMU
+                && !ChiefOrderLiveFrame.isChiefOrderList(
+                        emuManager.captureScreen(EMULATOR_NUMBER))) {
+            logWarning(routineLogChiefOrderLine("Refusing order selection outside verified Chief Order list"));
+            return false;
+        }
 
 		logInfo(routineLogChiefOrderLine("Scanning for Chief Order type: " + chiefOrderType.getDescription()));
 
@@ -161,17 +207,43 @@ private boolean chooseOrderType() {
 		}
 
 		logInfo(routineLogChiefOrderLine(chiefOrderType.getDescription() + " button detected. Pressing to activate"));
-		tapInside(orderButton);
-		sleepTask(1500);
-
-
-		return true;
+        tapInside(orderButton);
+        sleepTask(580);
+        if (emuManager.getSelectedEmulatorType() == EmulatorType.SERVE_EMU
+                && !ChiefOrderLiveFrame.isOrderBook(
+                        emuManager.captureScreen(EMULATOR_NUMBER),
+                        chiefOrderType.getDescription())) {
+            logWarning(routineLogChiefOrderLine(
+                    "Wrong/unverified order book after selection; no Enact input"));
+            return false;
+        }
+        return true;
 	}
 
 private boolean enactOrderFlow() {
-		sleepTask(1500);
-
-
+        // Chief Order Enact is not a free button: the live Productivity Day
+        // offer consumes 50,000 order points. The old routine clicked Enact
+        // solely from a blue button template, without looking at price.
+        // Serve-EMU is restricted to explicitly FREE actions.
+        if (emuManager.getSelectedEmulatorType() == EmulatorType.SERVE_EMU) {
+            ChiefOrderLiveFrame.Inspection inspection = ChiefOrderLiveFrame.inspect(
+                    emuManager.captureScreen(EMULATOR_NUMBER),
+                    chiefOrderType.getDescription());
+            if (inspection.action() != ChiefOrderLiveFrame.Action.FREE) {
+                enactDeferred = true;
+                String why = inspection.action() == ChiefOrderLiveFrame.Action.COSTS_POINTS
+                        ? "Costs " + inspection.cost() + " Chief Order points; paid Enact blocked"
+                        : "Enact price or order identity could not be verified free";
+                markWorkIncomplete("Chief Order: " + why);
+                LocalDateTime retry = inspection.action() == ChiefOrderLiveFrame.Action.COSTS_POINTS
+                        ? LocalDateTime.now().plusHours(chiefOrderType.getCooldownHours())
+                        : LocalDateTime.now().plusMinutes(ERROR_RETRY_MINUTES_VALUE);
+                reschedule(retry);
+                logWarning(routineLogChiefOrderLine(why + "; next check " + retry
+                        + "; no Enact tap or resource consumption"));
+                return false;
+            }
+        }
 		logInfo(routineLogChiefOrderLine("Scanning for Chief Order Enact button"));
 
 		ImageSearchResultData enactButton = locateEnactAction();
