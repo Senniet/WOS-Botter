@@ -168,6 +168,7 @@ public class ArenaRoutine extends DelayedTask {
     private int gemRefreshCount;
     private boolean extraAttemptsPurchased;
     private boolean noDailyChallengesDetected;
+    private boolean unknownBattleResult;
     private final Set<Integer> attemptedOpponentSlots = new HashSet<>();
 
     public ArenaRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
@@ -191,6 +192,14 @@ public class ArenaRoutine extends DelayedTask {
         Boolean configuredRefresh = profile.getConfig(
                 ConfigurationKeyEnum.ARENA_TASK_REFRESH_WITH_GEMS_BOOL, Boolean.class);
         this.refreshWithGems = configuredRefresh != null ? configuredRefresh : DEFAULT_REFRESH_WITH_GEMS;
+        // Retained profile settings from another emulator must never spend
+        // diamonds on the live Serve-EMU free-challenges-only account.
+        if (!arenaPaidActionsAllowed(emuManager.getSelectedEmulatorType())) {
+            if (extraAttempts > 0 || refreshWithGems)
+                logInfo("Serve-EMU Arena: ignoring stored gem refresh/extra attempt settings");
+            extraAttempts = 0;
+            refreshWithGems = false;
+        }
 
         this.alliancePolicy = resolveAlliancePolicy();
 
@@ -218,6 +227,10 @@ public class ArenaRoutine extends DelayedTask {
                 profileServer != null ? profileServer : "not set"));
     }
 
+    static boolean arenaPaidActionsAllowed(dev.frostguard.engine.emulator.EmulatorType backend) {
+        return backend != dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU;
+    }
+
     private void resetExecutionState() {
         this.attempts = 0;
         this.firstRun = false;
@@ -225,6 +238,7 @@ public class ArenaRoutine extends DelayedTask {
         this.gemRefreshCount = 0;
         this.extraAttemptsPurchased = false;
         this.noDailyChallengesDetected = false;
+        this.unknownBattleResult = false;
         this.attemptedOpponentSlots.clear();
         logDebug("Execution state reset");
     }
@@ -311,6 +325,15 @@ public class ArenaRoutine extends DelayedTask {
         }
 
         processChallenges();
+        if (unknownBattleResult) {
+            // An unknown Arena battle must never fall through to a chest tap:
+            // the UI might still be on Formation, an animated result or
+            // another unexpected panel. Record incompletion and stop safely.
+            markWorkIncomplete("Arena: battle state/exit could not be confirmed");
+            reschedule(java.time.LocalDateTime.now().plusMinutes(10));
+            returnHomeAfterArena();
+            return;
+        }
         // Retain the state after free challenges too: the daily chest may only
         // become claimable once the daily attempts have been exhausted.
         logInfo("Arena Daily Challenges chest after challenge attempts: "
@@ -323,6 +346,13 @@ public class ArenaRoutine extends DelayedTask {
 
     /** Leave Arena cleanly, including its separate floating Challenge List. */
     private void returnHomeAfterArena() {
+        if (emuManager.getSelectedEmulatorType()
+                == dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU) {
+            if (returnFromLiveArena())return;
+            markWorkIncomplete("Arena: verified City/World return failed");
+            logWarning("Arena return Home: unexpected page or back action, no blind navigation");
+            return;
+        }
         try {
             if (challengeListVisible()) {
                 var config = SearchConfig.builder().withMaxAttempts(1).withThreshold(90)
@@ -353,6 +383,42 @@ public class ArenaRoutine extends DelayedTask {
             markWorkIncomplete("Arena: Home not verified after arena task");
             logWarning("Arena finished but Home recovery is not yet verified: " + missing.getMessage());
         }
+    }
+
+    /** Direct Arena→City route observed on emulator-5554, 17-Nov-2026.
+     * Close the Challenge List, press the Arena header Back once, verify City.
+     * No generic 20+ popup probes or Android Back on an unknown screen. */
+    private boolean returnFromLiveArena() {
+        RawImageData frame=emuManager.captureScreen(EMULATOR_NUMBER);
+        if (ArenaLiveFrame.cityOrWorld(frame))return true;
+        if (ArenaLiveFrame.challengeList(frame)) {
+            var close=ArenaLiveFrame.listClose(frame);
+            if(!close.isFound())return false;
+            sleepTask(120);
+            var second=ArenaLiveFrame.listClose(emuManager.captureScreen(EMULATOR_NUMBER));
+            if(!dev.frostguard.engine.helper.RecognitionConsensus.agrees(close,second,10))return false;
+            tapNear(second.getPoint());
+            boolean arenaVisible=false;
+            for(int i=0;i<10;i++){
+                sleepTask(150);
+                frame=emuManager.captureScreen(EMULATOR_NUMBER);
+                if(ArenaLiveFrame.arenaHome(frame)){arenaVisible=true;break;}
+            }
+            if(!arenaVisible)return false;
+        } else if (!ArenaLiveFrame.arenaHome(frame)) {
+            return false;
+        }
+        // In the verified current Arena Home screenshot this Back arrow is
+        // at (40,35); only use that coordinate after the unique Arena title.
+        tapNear(new PointData(40,35));
+        for(int i=0;i<12;i++){
+            sleepTask(140);
+            if(ArenaLiveFrame.cityOrWorld(emuManager.captureScreen(EMULATOR_NUMBER))){
+                logInfo("Arena Challenge List closed and City/World Home verified via direct back route");
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean isWithinExecutionWindow() {
@@ -537,6 +603,11 @@ public class ArenaRoutine extends DelayedTask {
                     if (outcome == ChallengeOutcome.NO_ATTEMPTS) {
                         break;
                     }
+                    if (outcome == ChallengeOutcome.UNKNOWN) {
+                        logWarning("Arena result not verified; stop rather than spending another attempt or tapping unknown UI");
+                        unknownBattleResult=true;
+                        return;
+                    }
                     if (outcome == ChallengeOutcome.DEFEAT) {
                         if (!shouldRefreshAfterDefeat(attempts)) {
                             logInfo(String.format(
@@ -624,8 +695,10 @@ public class ArenaRoutine extends DelayedTask {
         tapNear(REWARDS_DISMISS_POINT);
         sleepTask(REWARDS_PANEL_SETTLE_MS);
         if (rewardsPanelVisible()) {
+            markWorkIncomplete("Arena: daily chest Rewards did not close");
             logWarning("Daily Challenges chest reward was displayed, but the panel did not close; "
                     + captureArenaDiagnostic("daily-chest-reward-overlay-stuck"));
+            return;
         }
 
         StatisticsService.obtain().addToCounter(profile, "Arena Chests", 1);
@@ -1221,8 +1294,22 @@ public class ArenaRoutine extends DelayedTask {
 
         attemptedOpponentSlots.add(opponent.number());
         tapNear(new PointData(OPPONENT_CHALLENGE_BUTTON_X, opponent.opponentY()));
+        if (emuManager.getSelectedEmulatorType()
+                == dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU) {
+            ArenaLiveFrame.Result outcome=executeServeEmuBattleSequence();
+            if (outcome != ArenaLiveFrame.Result.VICTORY
+                    && outcome != ArenaLiveFrame.Result.DEFEAT) return ChallengeOutcome.UNKNOWN;
+            attempts--;
+            firstRun=false;
+            if(outcome == ArenaLiveFrame.Result.VICTORY){
+                StatisticsService.obtain().addToCounter(profile,"Arena Battles Won",1);
+                attemptedOpponentSlots.clear();
+                return ChallengeOutcome.VICTORY;
+            }
+            StatisticsService.obtain().addToCounter(profile,"Arena Battles Lost",1);
+            return ChallengeOutcome.DEFEAT;
+        }
         sleepTask(2000);
-
         executeBattleSequence();
         attempts--;
 
@@ -1262,6 +1349,71 @@ public class ArenaRoutine extends DelayedTask {
                 opponent.number(), saturatedBluePixels, greyPixels, darkPixels));
 
         return saturatedBluePixels > scaleSampledThreshold(250) && saturatedBluePixels > greyPixels;
+    }
+
+    /** Execute actual 2026 Arena controls on live Serve-EMU, no blind Pause
+     * or Retreat. A completed battle result returns to Challenge List by the
+     * verified on-screen 'Tap anywhere to exit' footer. */
+    private ArenaLiveFrame.Result executeServeEmuBattleSequence() {
+        RawImageData formation=null;
+        for(int check=0;check<14;check++){
+            checkPreemption();
+            RawImageData current=emuManager.captureScreen(EMULATOR_NUMBER);
+            if(ArenaLiveFrame.formation(current)){formation=current;break;}
+            sleepTask(150);
+        }
+        if(formation==null){
+            logWarning("Arena challenge did not open the verified Offensive Formation Setup");
+            return ArenaLiveFrame.Result.NONE;
+        }
+        boolean equalize=Boolean.TRUE.equals(profile.getConfig(
+                ConfigurationKeyEnum.ARENA_TASK_ATTACK_QUICK_DEPLOY_BOOL,Boolean.class));
+        if(equalize){
+            // Real 17-Nov screen: Equalize at (296,1200), NOT the legacy
+            // Quick Deploy (180,1200). The old tap was hitting empty space.
+            var button=ArenaLiveFrame.equalize(formation);
+            if(!button.isFound()){
+                logWarning("Arena Equalize not recognized on verified formation; no blind action");
+                return ArenaLiveFrame.Result.NONE;
+            }
+            tapNear(button.getPoint());
+            sleepTask(120);
+            formation=emuManager.captureScreen(EMULATOR_NUMBER);
+            if(!ArenaLiveFrame.balanced(formation)){
+                logWarning("Arena Equalize tapped but all three troop allocation bars were not confirmed");
+                return ArenaLiveFrame.Result.UNKNOWN;
+            }
+        }
+        var fight=ArenaLiveFrame.fight(formation);
+        if(!fight.isFound()){
+            logWarning("Arena Fight action not found on current offensive formation");
+            return ArenaLiveFrame.Result.NONE;
+        }
+        tapNear(fight.getPoint());
+        logInfo("Arena Fight tapped after verified formation; awaiting actual result instead of blind Pause/Retreat");
+        for(int attempt=0;attempt<75;attempt++){
+            checkPreemption();
+            RawImageData current=emuManager.captureScreen(EMULATOR_NUMBER);
+            var state=ArenaLiveFrame.outcome(current);
+            if(state==ArenaLiveFrame.Result.VICTORY || state==ArenaLiveFrame.Result.DEFEAT){
+                sleepTask(140);
+                RawImageData second=emuManager.captureScreen(EMULATOR_NUMBER);
+                if(ArenaLiveFrame.outcome(second)!=state)continue;
+                tapNear(new PointData(365,1216)); // actual blank exit footer
+                for(int settle=0;settle<12;settle++){
+                    sleepTask(160);
+                    if(ArenaLiveFrame.challengeList(emuManager.captureScreen(EMULATOR_NUMBER))){
+                        logInfo("Arena "+state+" confirmed and Challenge List returned");
+                        return state;
+                    }
+                }
+                logWarning("Arena "+state+" displayed but Challenge List did not return after exit");
+                return ArenaLiveFrame.Result.UNKNOWN;
+            }
+            sleepTask(200);
+        }
+        logWarning("Arena battle result never appeared; no blind Back/Retreat");
+        return ArenaLiveFrame.Result.NONE;
     }
 
     void executeBattleSequence() {
@@ -1615,6 +1767,7 @@ public class ArenaRoutine extends DelayedTask {
     private enum ChallengeOutcome {
         VICTORY,
         DEFEAT,
+        UNKNOWN,
         NO_ATTEMPTS
     }
 
