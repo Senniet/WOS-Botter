@@ -256,7 +256,17 @@ public class PetSkillsRoutine extends DelayedTask {
         // The current Serve-EMU Pet Skill page orders tiles by owned beasts.
         // Do not reuse the old fixed tile-to-skill mapping on that layout.
         RawImageData current = emuManager.captureScreen(EMULATOR_NUMBER);
-        if (isCurrentServeEmuMenu(current)) {
+        if (emuManager.getSelectedEmulatorType() == EmulatorType.SERVE_EMU) {
+            if (!isCurrentServeEmuMenu(current)) {
+                // The legacy layout uses fixed tile coordinates that can
+                // activate the wrong skill on the current Serve-EMU UI.
+                // Fail closed instead of falling back to that unsafe path.
+                markWorkIncomplete("Pet Skills: current Serve-EMU skill menu not verified; legacy taps disabled");
+                updateEarliestCooldown(LocalDateTime.now().plusMinutes(FALLBACK_RESCHEDULE_MINUTES));
+                closePetsMenu();
+                finalizeRescheduling();
+                return;
+            }
             processCurrentPetSkillMenu(enabledSkills, current);
         } else {
             processAllSkills(enabledSkills);
