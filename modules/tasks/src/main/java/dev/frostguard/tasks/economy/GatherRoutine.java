@@ -814,9 +814,12 @@ public class GatherRoutine extends DelayedTask {
 
     private boolean openSearchMenu() {
         tapInside(SEARCH_BTN_TL, SEARCH_BTN_BR);
-        sleepTask(2000);
+        // A previous gather leaves the search panel positioned at its
+        // resource tabs; do not swipe away when Meat/Wood is already visible.
+        sleepTask(450);
+        if (isResourceSearchPanelVisible()) return true;
         swipe(RES_TAB_SWIPE_START, RES_TAB_SWIPE_END);
-        sleepTask(500);
+        sleepTask(300);
         boolean opened = isResourceSearchPanelVisible();
         if (!opened) {
             logWarning("Gather resource search did not open or show Meat/Wood after swipe; "
@@ -885,14 +888,14 @@ public class GatherRoutine extends DelayedTask {
 
     private boolean executeSearch() {
         tapInside(SEARCH_EXEC_TL, SEARCH_EXEC_BR);
-        sleepTask(1500);
+        sleepTask(550);
         // Do not treat the Search tap alone as a located resource. The actual
         // Lv.1 Meat panel keeps the resource-search sidebar open, but adds a
         // visible Gather action in the node modal. Absence is a bounded
         // no-node result and can use the existing lower-level fallback.
         for (int attempt = 0; attempt < 2; attempt++) {
             if (locateGatherButton().isFound()) return true;
-            if (attempt == 0) sleepTask(650);
+            if (attempt == 0) sleepTask(350);
         }
         logWarning("Gather search did not produce a verified Gather action; "
                 + "not proceeding to formation or deployment");
@@ -975,35 +978,47 @@ public class GatherRoutine extends DelayedTask {
     }
 
     private ImageSearchResultData locateConfirmedGatherDeployButton() {
-        // Modern 720x1280 UI has different anti-aliasing; two-frame consensus
-        // is required and the search is restricted to the bottom Deploy area.
-        ImageSearchResultData current = templateSearchHelper.locateAction(
-                TemplatesEnum.SERVE_EMU_GATHER_DEPLOY,
-                SearchConfig.builder().withMaxAttempts(2).withDelay(140)
-                        .withThreshold(90).withArea(AreaData.of(400, 1140, 705, 1270)).build());
+        // The current Serve-EMU formation has an exact Deploy template.
+        // Task Coach observed 8 positive hits; the remaining eight misses
+        // were on transitions or other screens. Never scan the full image
+        // through several expensive legacy multiscale fallbacks on Serve-EMU.
+        SearchConfig liveArea=SearchConfig.builder().withMaxAttempts(1)
+                .withThreshold(90).withArea(AreaData.of(400,1140,705,1270)).build();
+        if (emuManager.getSelectedEmulatorType()
+                == dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU) {
+            RawImageData first=emuManager.captureScreen(EMULATOR_NUMBER);
+            ImageSearchResultData candidate=emuManager.locatePattern(EMULATOR_NUMBER,
+                    first,TemplatesEnum.SERVE_EMU_GATHER_DEPLOY,
+                    new PointData(400,1140),new PointData(705,1270),90);
+            if (candidate==null || !candidate.isFound()) return ImageSearchResultData.miss();
+            sleepTask(120);
+            RawImageData second=emuManager.captureScreen(EMULATOR_NUMBER);
+            ImageSearchResultData confirmed=emuManager.locatePattern(EMULATOR_NUMBER,
+                    second,TemplatesEnum.SERVE_EMU_GATHER_DEPLOY,
+                    new PointData(400,1140),new PointData(705,1270),90);
+            if (confirmed!=null && confirmed.isFound()
+                    && candidate.getPoint().manhattanDistanceTo(confirmed.getPoint())<=12)
+                return confirmed;
+            return ImageSearchResultData.miss();
+        }
+        ImageSearchResultData current=templateSearchHelper.locateAction(
+                TemplatesEnum.SERVE_EMU_GATHER_DEPLOY,liveArea);
         if (current.isFound()) return current;
-        TemplatesEnum button = TemplatesEnum.GATHER_DEPLOY_BUTTON;
-        ImageSearchResultData exact = templateSearchHelper.locatePattern(button,
+        // Retain compatibility for non-Serve-EMU emulators only.
+        ImageSearchResultData exact=templateSearchHelper.locatePattern(
+                TemplatesEnum.GATHER_DEPLOY_BUTTON,
                 SearchConfig.builder().withMaxAttempts(2).build());
         if (exact.isFound()) return exact;
-        ImageSearchResultData scaled = templateSearchHelper.locatePatternMultiScale(button,
-                SearchConfig.builder().withThreshold(90).withMaxAttempts(2).build());
-        if (scaled.isFound()) return scaled;
-        ImageSearchResultData first = templateSearchHelper.locatePatternMultiScale(button,
-                SearchConfig.builder().withThreshold(86).build());
-        if (first.isFound() && first.getPoint() != null) {
-            sleepTask(350);
-            ImageSearchResultData second = templateSearchHelper.locatePatternMultiScale(button,
-                    SearchConfig.builder().withThreshold(86).build());
-            if (second.isFound() && second.getPoint() != null
-                    && first.getPoint().manhattanDistanceTo(second.getPoint()) <= 20) {
-                logInfo(String.format(java.util.Locale.ROOT,
-                        "Gather Deploy button confirmed in two frames (%.1f / %.1f)",
-                        first.getMatchScore(), second.getMatchScore()));
-                return second;
-            }
-        }
-        return scaled;
+        ImageSearchResultData first=templateSearchHelper.locatePatternMultiScale(
+                TemplatesEnum.GATHER_DEPLOY_BUTTON,
+                SearchConfig.builder().withThreshold(86).withMaxAttempts(1).build());
+        if (!first.isFound()) return ImageSearchResultData.miss();
+        sleepTask(180);
+        ImageSearchResultData second=templateSearchHelper.locatePatternMultiScale(
+                TemplatesEnum.GATHER_DEPLOY_BUTTON,
+                SearchConfig.builder().withThreshold(86).withMaxAttempts(1).build());
+        return second.isFound() && first.getPoint().manhattanDistanceTo(second.getPoint())<=20
+                ? second : ImageSearchResultData.miss();
     }
 
     private void saveGatherFormationScreenshot(String reason, GatherType type, int level) {
