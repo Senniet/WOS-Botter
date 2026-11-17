@@ -13,8 +13,13 @@ from pathlib import Path
 import re
 
 HOME=Path.home()
-REPO=Path(os.environ.get('SURVIVALOPS_REPO',HOME/'projects/WOS-Botter'))
-AUDIT=HOME/'.local/share/survivalops-template-audit/report.json'
+_SOURCE_REPO=Path(__file__).resolve().parents[2]
+REPO=Path(os.environ.get('SURVIVALOPS_REPO',
+    str(_SOURCE_REPO if (_SOURCE_REPO/'modules').is_dir() else HOME/'projects/WOS-Botter')))
+# CI uses the same read-only audit output as the QA dashboard, without
+# assuming that the test runner has the maintainer's private home directory.
+AUDIT=Path(os.environ.get('SURVIVALOPS_TEMPLATE_AUDIT_REPORT',
+    str(HOME/'.local/share/survivalops-template-audit/report.json')))
 COACH=HOME/'survivalops-diagnostics/taskcoach'
 INBOX=HOME/'survivalops-diagnostics/inbox'
 DB=HOME/'.local/share/survivalops-qa/template-review.json'
