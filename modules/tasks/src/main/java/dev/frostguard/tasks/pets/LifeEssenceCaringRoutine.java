@@ -53,8 +53,10 @@ public class LifeEssenceCaringRoutine extends DelayedTask {
 			return;
 		}
 
-		int islandsCared = 0;
-		for (int i = 0; i < 4; i++) {
+        int islandsCared = 0;
+        // Only three confirmed care actions are needed per daily cycle.
+        // A fourth scan cannot add a daily reward and wastes navigation.
+        for (int i = 0; i < 3; i++) {
 			// Check if daily attempts are available
 			if (!checkDailyAttemptsAvailable()) {
 				closeAllMenus();
