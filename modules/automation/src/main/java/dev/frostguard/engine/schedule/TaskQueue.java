@@ -319,7 +319,8 @@ public class TaskQueue {
 
     // ---- lifecycle ---------------------------------------------------------
 
-    public void start() {
+    public synchronized void start() {
+        // Two simultaneous UI Start requests must not race to create workers.
         if (statusModel.isRunning()) return;
         if (executor.isAlive()) {
             throw new IllegalStateException("Cannot start queue while its previous worker is still alive: "
@@ -333,13 +334,21 @@ public class TaskQueue {
         idleWakeInitializationPending = false;
         idleWakeInitializationForceNow = false;
         statusModel.setRunning(true);
-        executor.start(this::mainLoop, "TaskQueue-" + profile.getName());
+        try {
+            executor.start(this::mainLoop, "TaskQueue-" + profile.getName());
+        } catch (RuntimeException startupFailure) {
+            // Never leave the UI in Running if no worker was launched.
+            statusModel.setRunning(false);
+            throw startupFailure;
+        }
     }
 
     public void requestStop() {
         shuttingDown = true;
         statusModel.setRunning(false);
-        sessionOrigin = null;
+        // Keep the lease marker until the queue worker has truly stopped.
+        // Clearing it here prevents mainLoop.finally from releasing the
+        // emulator slot and can block the next profile indefinitely.
         ExecutionContext context = runningContext;
         if (context != null) {
             context.cancel();
@@ -409,6 +418,12 @@ public class TaskQueue {
     public synchronized void runNow(TpDailyTaskEnum kind, boolean recurring) {
         DelayedTask ref = DelayedTaskRegistry.create(kind, profile);
         if (ref == null) { emitWarn("Task not found: " + kind); return; }
+        // A second Run Now for the task currently controlling the game must
+        // not create a duplicate task immediately after the current run.
+        if (isExecutingTask(kind)) {
+            emitWarn("Run Now ignored: " + kind.getName() + " is already executing");
+            return;
+        }
         statusModel.setNeedsReconnect(true);
 
         DelayedTask present = taskBacklog.stream().filter(ref::equals).findFirst().orElse(null);
@@ -427,11 +442,26 @@ public class TaskQueue {
             emitInfoTask(ref, "Enqueued " + kind + " for immediate execution");
         }
 
-        TaskStateData st = new TaskStateData();
-        st.setProfileId(profile.getId()); st.setTaskId(kind.getId());
-        st.setScheduled(true); st.setExecuting(false);
-        st.setLastExecutionTime(LocalDateTime.now()); st.setNextExecutionTime(ref.getScheduled());
+        // Queuing is NOT executing: preserve last attempt, last successful
+        // completion, and the last real execution outcome in the task UI.
+        TaskStateData previous = TaskManagementService.shared().lookupTaskState(
+                profile.getId(), kind.getId(), null);
+        TaskStateData st = queuedRunNowState(previous, profile.getId(), kind.getId(),
+                present != null ? present.getScheduled() : ref.getScheduled());
         TaskManagementService.shared().recordTaskState(profile.getId(), st);
+    }
+
+    static TaskStateData queuedRunNowState(TaskStateData previous, long profileId,
+                                           int taskId, LocalDateTime scheduled) {
+        TaskStateData state = previous == null ? new TaskStateData() : previous;
+        state.setProfileId(profileId);
+        state.setTaskId(taskId);
+        state.setScheduled(true);
+        state.setExecuting(false);
+        state.setNextExecutionTime(scheduled);
+        // In particular, DO NOT set lastExecutionTime here. That timestamp
+        // is written only by recordPreExecution/recordPostExecution.
+        return state;
     }
 
     // ========================================================================
@@ -439,9 +469,37 @@ public class TaskQueue {
     // ========================================================================
 
     private void mainLoop() {
-        acquireSlot();
-        while (statusModel.isRunning() && !shuttingDown) {
-            runSchedulerTick();
+        try {
+            acquireSlot();
+            while (statusModel.isRunning() && !shuttingDown) {
+                runSchedulerTick();
+            }
+        } catch (RuntimeException fatal) {
+            // A scheduler-level exception used to kill the worker while the
+            // task manager still showed Running. Stop accepting new work
+            // until a fresh queue can initialize the emulator safely.
+            statusModel.setRunning(false);
+            logger.error("Fatal TaskQueue workflow failure for {}", profile.getName(), fatal);
+            try {
+                broadcastStatus("STOPPED - scheduler failure: "
+                        + fatal.getClass().getSimpleName());
+                LoggingService.obtain().emit(TpMessageSeverityEnum.ERROR, "TaskQueue",
+                        profile.getName(), "Scheduler stopped: " + fatal.getMessage());
+            } catch (RuntimeException reportingFailure) {
+                logger.warn("Could not publish TaskQueue failure status", reportingFailure);
+            }
+        } finally {
+            // Also release the device slot on an ordinary stop. Otherwise a
+            // dead queue can hold the lease and block the next profile.
+            statusModel.setRunning(false);
+            if (sessionOrigin != null) {
+                try {
+                    releaseActiveSlotLease();
+                } catch (RuntimeException releaseFailure) {
+                    logger.warn("Could not release TaskQueue emulator lease for {}",
+                            profile.getName(), releaseFailure);
+                }
+            }
         }
     }
 
@@ -699,6 +757,17 @@ public class TaskQueue {
                     profile.getId(), profile.getEmulatorNumber(), task.getTpTask());
             task.setLastExecutionTime(LocalDateTime.now());
             task.run();
+            // If a recurring task returned without a future schedule, there
+            // is no proof the workflow finished. Previously this path wrote
+            // SUCCEEDED and hot-looped the same task at NOW, starving other
+            // queued tasks. Move it to a bounded retry and keep last-success.
+            LocalDateTime now = LocalDateTime.now();
+            if (TaskWorkflowRetryPolicy.needsRetry(task.getTpTask(),
+                    task.isRecurring(), priorSchedule, task.getScheduled(), now)
+                    && task.getIncompleteWorkReason() == null) {
+                task.markWorkIncomplete("Task workflow returned without a valid future run");
+                task.reschedule(TaskWorkflowRetryPolicy.nextRetryAt(now));
+            }
             // Keep the initial force flag until Initialize reports success. A profile cooldown
             // persists and re-enqueues Initialize for the requested retry time instead.
             if (task.getTpTask() == TpDailyTaskEnum.INITIALIZE && !task.isRecurring()) {
@@ -755,7 +824,7 @@ public class TaskQueue {
                     profile.getId(), profile.getEmulatorNumber(), task.getTpTask(), outcome.name());
             synchronized (this) { if (runningContext != null) runningContext.clear(); runningContext = null; }
             if (!shuttingDown) {
-                handleReschedule(task, priorSchedule);
+                handleReschedule(task, priorSchedule, outcome);
                 st.setExecutionOutcome(outcome);
                 if (outcome == TaskStateData.ExecutionOutcome.SUCCEEDED)
                     st.setLastSuccessfulAt(LocalDateTime.now());
@@ -866,15 +935,30 @@ public class TaskQueue {
         }
     }
 
-    private void handleReschedule(DelayedTask task, LocalDateTime before) {
+    private void handleReschedule(DelayedTask task, LocalDateTime before,
+                                  TaskStateData.ExecutionOutcome outcome) {
         task.setProfile(profile);
         ConfigurationKeyEnum configKey = task.getTpTask().getConfigKey();
         if (configKey != null && !Boolean.TRUE.equals(profile.getConfig(configKey, Boolean.class))) {
             task.setRecurring(false);
         }
-        if (Objects.equals(before, task.getScheduled()) && task.isRecurring()) task.reschedule(LocalDateTime.now());
-        if (task.isRecurring()) { emitInfoTask(task, "Next run in: " + GameTimeUtils.formatCountdown(task.getScheduled())); enqueue(task); }
-        else emitInfoTask(task, "Task removed from queue");
+        // A preempted task should resume immediately after the high-priority
+        // event. All OTHER unfinished/failed recurring workflows require a
+        // bounded future retry so they cannot monopolize the emulator.
+        if (outcome != TaskStateData.ExecutionOutcome.PREEMPTED
+                && TaskWorkflowRetryPolicy.needsRetry(task.getTpTask(),
+                        task.isRecurring(), before, task.getScheduled(), LocalDateTime.now())) {
+            LocalDateTime retryAt = TaskWorkflowRetryPolicy.nextRetryAt(LocalDateTime.now());
+            emitWarnTask(task, "No valid next run after " + outcome
+                    + "; deferring instead of immediate retry until " + retryAt.format(TS_FMT));
+            task.reschedule(retryAt);
+        }
+        if (task.isRecurring()) {
+            emitInfoTask(task, "Next run in: " + GameTimeUtils.formatCountdown(task.getScheduled()));
+            enqueue(task);
+        } else {
+            emitInfoTask(task, "Task removed from queue");
+        }
     }
 
     void routeError(DelayedTask task, Exception ex) {
