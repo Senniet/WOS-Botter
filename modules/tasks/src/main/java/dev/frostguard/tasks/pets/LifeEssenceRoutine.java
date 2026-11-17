@@ -24,6 +24,7 @@ import dev.frostguard.engine.schedule.LaunchPoint;
 import dev.frostguard.engine.nav.SidebarDestination;
 import dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig;
 import dev.frostguard.tasks.diagnostics.TaskDiagnosticSnapshots;
+import dev.frostguard.tasks.diagnostics.TaskControlSignals;
 
 public class LifeEssenceRoutine extends DelayedTask {
 
@@ -112,13 +113,19 @@ public class LifeEssenceRoutine extends DelayedTask {
 				? configOffset
 				: DEFAULT_OFFSET_MINUTES;
 
-		this.buyWeeklyScroll = profile.getConfig(
+		this.buyWeeklyScroll = isWeeklyFreeScrollConfigured(profile.getConfig(
 				ConfigurationKeyEnum.LIFE_ESSENCE_BUY_WEEKLY_SCROLL_BOOL,
-				Boolean.class);
+				Boolean.class));
 
 		logDebug("Configuration loaded: offsetMinutes=" + offsetMinutes +
 				", buyWeeklyScroll=" + buyWeeklyScroll);
 	}
+
+    static boolean isWeeklyFreeScrollConfigured(Boolean enabled) {
+        // Older profiles can lack this optional setting. Defaulting to false
+        // prevents a null Boolean from crashing the main Life Essence task.
+        return Boolean.TRUE.equals(enabled);
+    }
 
 	private void loadFailureState() {
 		Integer failures = profile.getConfig(
@@ -190,6 +197,9 @@ public class LifeEssenceRoutine extends DelayedTask {
 			return LifeEssenceClaimPolicy.Observation.markers(
 					LifeEssenceSearchKind.COLOR.open(null).find(image));
 		} catch (Exception ex) {
+            // ADB disconnect, task preemption, stop and profile cooldown are
+            // scheduler signals, not an ordinary "no Life Essence" result.
+            TaskControlSignals.rethrowControlSignal(ex);
 			logWarning("Life Essence capture failed: " + ex.getClass().getSimpleName()
 					+ ": " + ex.getMessage());
 			return LifeEssenceClaimPolicy.Observation.failed();

@@ -21,6 +21,13 @@ class LifeEssenceScrollOutcomeTest {
     }
 
     @Test
+    void missingWeeklyScrollSettingNeverCrashesOrEnablesAnOptionalPurchase() {
+        assertFalse(LifeEssenceRoutine.isWeeklyFreeScrollConfigured(null));
+        assertFalse(LifeEssenceRoutine.isWeeklyFreeScrollConfigured(Boolean.FALSE));
+        assertTrue(LifeEssenceRoutine.isWeeklyFreeScrollConfigured(Boolean.TRUE));
+    }
+
+    @Test
     void storesTheNextMondayResetOnlyAsAConfirmedPurchaseTime() {
         ZonedDateTime tuesday = ZonedDateTime.of(2026, 9, 29, 15, 0, 0, 0, ZoneOffset.UTC);
 
