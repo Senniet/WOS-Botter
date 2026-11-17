@@ -78,7 +78,8 @@ public final class GameAnalyticsRoutine extends DelayedTask {
             }
             AllianceRankingCaptureResult result = capture.stopAndDecode();
             GameAnalyticsSnapshot snapshot = history.save(
-                    WorkspacePaths.current().root(), profile, EmulatorType.MUMU, collectionType, result);
+                    WorkspacePaths.current().root(), profile,
+                    analyticsBackend(emuManager.getSelectedEmulatorType()), collectionType, result);
             logInfo("Collected " + entryCount(result) + " "
                     + collectionType.name().toLowerCase() + " analytics entries");
             GameAnalyticsRunRegistry.publish(new GameAnalyticsRunRegistry.Event(
@@ -90,6 +91,12 @@ public final class GameAnalyticsRoutine extends DelayedTask {
                     + collectionType.name().toLowerCase() + " analytics: "
                     + exception.getMessage(), exception);
         }
+    }
+
+    static EmulatorType analyticsBackend(EmulatorType selected) {
+        // Store the actual producing emulator rather than attributing every
+        // Serve-EMU ranking capture to MuMu in the saved history.
+        return java.util.Objects.requireNonNull(selected, "emulator");
     }
 
     private void startCapture() {
