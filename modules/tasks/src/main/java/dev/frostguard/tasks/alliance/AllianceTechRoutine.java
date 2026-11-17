@@ -7,6 +7,7 @@ import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.api.domain.AreaData;
 import dev.frostguard.api.domain.ImageSearchResultData;
 import dev.frostguard.api.domain.PointData;
+import dev.frostguard.api.domain.RawImageData;
 import dev.frostguard.api.domain.OcrSettingsData;
 import dev.frostguard.engine.helper.NavigationHelper;
 import dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig;
@@ -30,9 +31,13 @@ private static final AreaData ALLIANCE_COINS_BUTTON_AREA_VALUE = new AreaData(
 			new PointData(580, 30),
 			new PointData(670, 50));
 
-private static final AreaData COIN_COUNT_OCR_AREA_VALUE = new AreaData(
-			new PointData(272, 257),
-			new PointData(443, 285));
+// Live Tech HUD: coin balance is at the upper right, not the old
+// central 2024 dialog position (272..443, 257..285).
+private static final AreaData COIN_COUNT_OCR_AREA_VALUE = AreaData.of(585,14,677,59);
+private static final AreaData FREE_ATTEMPTS_OCR_AREA = AreaData.of(389,929,655,986);
+private static final OcrSettingsData FREE_ATTEMPTS_SETTINGS = OcrSettingsData.configurator()
+        .textLayout(OcrSettingsData.TextLayout.SINGLE_LINE)
+        .allowedGlyphs("0123456789/").build();
 
 private static final PointData TREE_RESET_SWIPE_START_VALUE = new PointData(360, 600);
 
@@ -66,6 +71,8 @@ private int offsetMinutes;
 
 private boolean donationsSuccessful;
 
+private enum DonationStatus { CONFIRMED, NONE_AVAILABLE, UNVERIFIED }
+
 public AllianceTechRoutine(AccountDescriptor profile, TpDailyTaskEnum tpDailyTask) {
 		super(profile, tpDailyTask);
 	}
@@ -81,20 +88,33 @@ public AllianceTechRoutine(AccountDescriptor profile, TpDailyTaskEnum tpDailyTas
 			return;
 		}
 
+        boolean preempted = false;
         try {
             if (!locateDonationButton()) {
                 manageTaskFailure("Thumbs-up donation button not found");
                 return;
             }
 
-            performDonationsFlow();
-            donationsSuccessful = true;
+            DonationStatus outcome=performDonationsFlow();
+            if (outcome==DonationStatus.UNVERIFIED) {
+                markWorkIncomplete("Alliance Tech: free contribution not confirmed; no repeated blind taps");
+                logWarning("Alliance Tech free donation not confirmed; deferring without blind retries");
+                reschedule(LocalDateTime.now().plusMinutes(ERROR_RETRY_MINUTES_VALUE));
+                return;
+            }
+            donationsSuccessful=outcome==DonationStatus.CONFIRMED;
+            if (outcome==DonationStatus.NONE_AVAILABLE)
+                logInfo("Alliance Tech free contribution attempts exhausted; waiting for refill");
 
             inspectAndTriggerAllianceShop();
 
             queueNextRun();
+        } catch (dev.frostguard.engine.error.TaskPreemptedException
+                 | dev.frostguard.engine.error.StopExecutionException control) {
+            preempted = true;
+            throw control;
         } finally {
-            if (!Thread.currentThread().isInterrupted()) {
+            if (!preempted && !Thread.currentThread().isInterrupted()) {
                 returnToHomeAfterAllianceContributions();
             }
         }
@@ -106,61 +126,43 @@ public AllianceTechRoutine(AccountDescriptor profile, TpDailyTaskEnum tpDailyTas
 	}
 
 private void returnToHomeAfterAllianceContributions() {
-        // Current alliance donation UI is a "Long Live Our Alliance" pop-up
-        // with a close X in the top-right, not an Android Back page.
+        // No OCR of a title that has a proven 2026 visual template. The
+        // pop-up close X is (639,198); old blind Back and (270,50) were wrong.
         try {
-            OcrSettingsData titleOcr = OcrSettingsData.configurator()
-                    .textLayout(OcrSettingsData.TextLayout.SINGLE_LINE).build();
-            // Live 720x1280 emulator: modal title is at y=178..221,
-            // not in the underlying page header at y=20..105.
-            PointData topLeft = new PointData(175, 174);
-            PointData bottomRight = new PointData(555, 225);
-            String first = emuManager.readText(EMULATOR_NUMBER, topLeft, bottomRight, titleOcr, false);
-            sleepTask(160);
-            String second = emuManager.readText(EMULATOR_NUMBER, topLeft, bottomRight, titleOcr, false);
-            if (AllianceContributionExitPolicy.isVerifiedContributionTitle(first, second)) {
-                logInfo("Alliance donation pop-up title verified; closing it once");
-                // The modal close X is at (639, 198), not the page header.
-                tapInside(AreaData.of(626, 183, 653, 213));
-                sleepTask(550);
-                String after = emuManager.readText(EMULATOR_NUMBER, topLeft, bottomRight, titleOcr, false);
-                if (AllianceContributionExitPolicy.isVerifiedContributionTitle(after, after)) {
-                    markWorkIncomplete("Alliance Tech: contribution popup not dismissed");
-                    logWarning("Alliance contribution pop-up stayed open; no repeat or blind Back");
+            var first=emuManager.captureScreen(EMULATOR_NUMBER);
+            if (AllianceContributionFrame.popup(first)) {
+                logInfo("Verified Alliance contribution dialog; closing its header X once");
+                tapInside(AreaData.of(626,183,653,213));
+                sleepTask(350);
+                if (AllianceContributionFrame.popup(emuManager.captureScreen(EMULATOR_NUMBER))) {
+                    markWorkIncomplete("Alliance Tech: contribution dialog did not close");
+                    logWarning("Alliance contribution dialog remained after verified close");
                     return;
                 }
             }
-            // The last live run spent 40+ unrelated overlay checks while it
-            // was plainly on Alliance Tech, then Alliance, both with the
-            // same verified top-left back arrow. Return in at most 2 taps.
             var scoped=AlliancePageExit.returnHome(
                     ()->{checkPreemption();return emuManager.captureScreen(EMULATOR_NUMBER);},
                     point->{checkPreemption();tapNear(point);},
-                    ()->sleepTask(450));
-            if (scoped==AlliancePageExit.Result.HOME) {
-                logInfo("Alliance Tech -> Alliance -> verified City via scoped headers");
+                    ()->sleepTask(350));
+            if(scoped==AlliancePageExit.Result.HOME){
+                logInfo("Alliance Tech -> Alliance -> verified City via direct headers");
                 return;
             }
-            if (scoped==AlliancePageExit.Result.UNVERIFIED) {
-                markWorkIncomplete("Alliance Tech: known-page return to Home not verified");
-                logWarning("Alliance Tech known-page exit changed; no unrelated recovery taps");
+            if(scoped==AlliancePageExit.Result.UNVERIFIED){
+                markWorkIncomplete("Alliance Tech: direct return Home failed");
+                logWarning("Alliance Tech page changed during return; no blind Back");
                 return;
             }
-            navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME, this::checkPreemption);
-            logInfo("Alliance donation flow returned to verified Home via fallback");
-        } catch (dev.frostguard.engine.error.HomeNotFoundException missing) {
-            markWorkIncomplete("Alliance Tech: Home unverified after contributions");
-            logWarning("Alliance contributions finished; Home was not verified: " + missing.getMessage());
-        } catch (java.io.IOException | dev.frostguard.vision.ocr.OcrException failure) {
-            markWorkIncomplete("Alliance Tech: contribution popup OCR unknown; Home unverified");
-            logWarning("Alliance contribution screen OCR unavailable; refusing unknown close tap");
+            navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME,this::checkPreemption);
+        } catch(dev.frostguard.engine.error.HomeNotFoundException missing) {
+            markWorkIncomplete("Alliance Tech: City Home not verified");
+            logWarning("Alliance Tech return Home failed: "+missing.getMessage());
         }
     }
 
 private void inspectAndTriggerAllianceShop() {
-		boolean shopEnabled = profile.getConfig(
-				ConfigurationKeyEnum.ALLIANCE_SHOP_ENABLED_BOOL,
-				Boolean.class);
+        boolean shopEnabled = Boolean.TRUE.equals(profile.getConfig(
+                ConfigurationKeyEnum.ALLIANCE_SHOP_ENABLED_BOOL, Boolean.class));
 
 		if (!shopEnabled) {
 			logDebug(routineLogAllianceTechLine("Alliance Shop is disabled. Skipping shop check."));
@@ -185,7 +187,7 @@ private void inspectAndTriggerAllianceShop() {
 
 		logInfo(routineLogAllianceTechLine("Current alliance coins: " + currentCoins + ", Minimum required: " + minCoins));
 
-		if (currentCoins > minCoins) {
+        if (minCoins != null && currentCoins > minCoins) {
 			triggerAllianceShopRoutineFlow();
 		} else {
 			logInfo(routineLogAllianceTechLine("Insufficient coins to trigger Alliance Shop task"));
@@ -208,19 +210,81 @@ private String routineLogAllianceTechLine(String note) {
         return "AllianceTechRoutine | " + note;
     }
 
-private void performDonationsFlow() {
-		logInfo(routineLogAllianceTechLine("Performing " + DONATION_TAP_COUNT_VALUE + " donations to Alliance Tech"));
+private DonationStatus performDonationsFlow() {
+        if (emuManager.getSelectedEmulatorType()
+                != dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU) {
+            // Preserve the legacy non-Serve-EMU route until live visual
+            // evidence is available for those entirely different emulators.
+            tapInside(DONATION_BUTTON_AREA_VALUE.topLeft(),
+                    DONATION_BUTTON_AREA_VALUE.bottomRight(),DONATION_TAP_COUNT_VALUE,150);
+            return DonationStatus.CONFIRMED;
+        }
+        RawImageData current=emuManager.captureScreen(EMULATOR_NUMBER);
+        if (!AllianceContributionFrame.popup(current)){
+            logWarning("Alliance Tech resource donation dialog not verified");
+            return DonationStatus.UNVERIFIED;
+        }
+        int available=readFreeAttemptCount();
+        if(available<0){
+            logWarning("Cannot read Alliance free contribution attempts; no button tapped");
+            return DonationStatus.UNVERIFIED;
+        }
+        if(available==0)return DonationStatus.NONE_AVAILABLE;
+        int completed=0;
+        while(available>0 && completed<DONATION_TAP_COUNT_VALUE){
+            checkPreemption();
+            current=emuManager.captureScreen(EMULATOR_NUMBER);
+            var free=AllianceContributionFrame.freeResourceButton(current);
+            if(!free.isFound()){
+                logWarning("Alliance blue resource CTA disappeared; never tap orange 10-gem contribution");
+                return DonationStatus.UNVERIFIED;
+            }
+            // Exactly ONE resource donation at a time. Previous 25 taps at
+            // 150 ms were faster than the game could process and silently
+            // dropped actions while still reporting task success.
+            tapNear(free.getPoint());
+            int after=-1;
+            for(int observed=0;observed<4;observed++){
+                sleepTask(350);
+                after=readFreeAttemptCount();
+                if(after==available-1)break;
+            }
+            if(after!=available-1){
+                logWarning("Alliance donation unverified: attempts expected "
+                        +(available-1)+" but read "+after+"; no duplicate tap");
+                return DonationStatus.UNVERIFIED;
+            }
+            completed++;
+            available=after;
+            if(completed==1 || completed%5==0 || available==0)
+                logInfo("Alliance resource donations confirmed: "+completed
+                        +"; free attempts remaining "+available);
+        }
+        return completed>0 ? DonationStatus.CONFIRMED : DonationStatus.NONE_AVAILABLE;
+    }
 
-		tapInside(
-				DONATION_BUTTON_AREA_VALUE.topLeft(),
-				DONATION_BUTTON_AREA_VALUE.bottomRight(),
-				DONATION_TAP_COUNT_VALUE,
-				150
+    static int parseFreeAttemptCount(String raw){
+        if(raw==null)return -1;
+        var matcher=java.util.regex.Pattern.compile("(\\d{1,2})\\s*/\\s*25")
+                .matcher(raw.replace('O','0'));
+        if(!matcher.find())return -1;
+        int count=Integer.parseInt(matcher.group(1));
+        return count>=0 && count<=25 ? count : -1;
+    }
 
-		);
-
-		logInfo(routineLogAllianceTechLine("Donations completed finished cleanly"));
-	}
+    private int readFreeAttemptCount(){
+        try{
+            String raw=emuManager.readText(EMULATOR_NUMBER,
+                    FREE_ATTEMPTS_OCR_AREA.topLeft(),FREE_ATTEMPTS_OCR_AREA.bottomRight(),
+                    FREE_ATTEMPTS_SETTINGS,false);
+            return parseFreeAttemptCount(raw);
+        }catch(java.io.IOException | dev.frostguard.vision.ocr.OcrException failure){
+            if(Thread.currentThread().isInterrupted())
+                throw new java.util.concurrent.CancellationException("Alliance attempt OCR interrupted");
+            logDebug("Alliance free attempt OCR unavailable: "+failure.getClass().getSimpleName());
+            return -1;
+        }
+    }
 
 private boolean locateDonationButton() {
 		logDebug(routineLogAllianceTechLine("Scanning for thumbs-up donation button"));
@@ -318,11 +382,10 @@ private enum TechCategory {
 	}
 
 private void hydrateConfiguration() {
-		int rawOffset = profile.getConfig(
-				ConfigurationKeyEnum.ALLIANCE_TECH_OFFSET_INT,
-				Integer.class);
+        Integer rawOffset = profile.getConfig(
+                ConfigurationKeyEnum.ALLIANCE_TECH_OFFSET_INT, Integer.class);
 
-		if (rawOffset < MIN_OFFSET_MINUTES_FLOOR) {
+		if (rawOffset == null || rawOffset < MIN_OFFSET_MINUTES_FLOOR) {
 			logWarning(routineLogAllianceTechLine("Invalid offset configured: " + rawOffset +
 					" minutes. Must be at least " + MIN_OFFSET_MINUTES_FLOOR +
 					". Using default: " + DEFAULT_OFFSET_MINUTES_VALUE));
@@ -335,27 +398,19 @@ private void hydrateConfiguration() {
 	}
 
 private void reachCoinsDisplay() {
-		logDebug(routineLogAllianceTechLine("Closing donation popup"));
-		tapInside(
-				POPUP_CLOSE_AREA_VALUE.topLeft(),
-				POPUP_CLOSE_AREA_VALUE.bottomRight(),
-				3,
-
-				200
-
-		);
-
-		logDebug(routineLogAllianceTechLine("Entering alliance coins popup"));
-		tapInside(
-				ALLIANCE_COINS_BUTTON_AREA_VALUE.topLeft(),
-				ALLIANCE_COINS_BUTTON_AREA_VALUE.bottomRight(),
-				1,
-				1000
-
-		);
-	}
+        // The 2026 Tech page already shows alliance coins in the upper-right
+        // HUD. The old routine tapped the donation dialog at (270,50) three
+        // times, then clicked the plus/store area; both actions are obsolete
+        // and can open an unrelated purchase screen. Close only the known
+        // contribution modal and read the existing HUD, with zero store taps.
+        if(AllianceContributionFrame.popup(emuManager.captureScreen(EMULATOR_NUMBER))){
+            tapInside(AreaData.of(626,183,653,213));
+            sleepTask(300);
+        }
+    }
 
 private void manageTaskFailure(String reason) {
+        markWorkIncomplete("Alliance Tech: " + reason);
 		logWarning(routineLogAllianceTechLine("Routine pass did not complete: " + reason));
 
 		LocalDateTime retryTime = LocalDateTime.now().plusMinutes(ERROR_RETRY_MINUTES_VALUE);
