@@ -198,6 +198,14 @@ public class PetAllianceTreasuresRoutine extends DelayedTask {
     }
 
     private void claimTreasureIfAvailable() {
+        // The game keeps green individual Claim buttons visible even after
+        // Remaining claims today reaches zero. Never click them in that state.
+        String quota = readStringValue(new PointData(180, 265), new PointData(530, 335), null);
+        if (remainingClaimsExhausted(quota)) {
+            logInfo("Ally Treasure daily claim quota exhausted; skipping still-visible Claim rows");
+            rescheduleToGameReset("Ally Treasure remaining claims today 0");
+            return;
+        }
         ImageSearchResultData claimAll = detectClaimAll();
         if (claimAll.isFound()) {
             logInfo("Verified Ally Treasure Claim All label and green button; tapping once");
