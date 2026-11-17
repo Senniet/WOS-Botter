@@ -58,11 +58,14 @@ public class LifeEssenceCaringRoutine extends DelayedTask {
         // A fourth scan cannot add a daily reward and wastes navigation.
         for (int i = 0; i < 3; i++) {
 			// Check if daily attempts are available
-			if (!checkDailyAttemptsAvailable()) {
-				closeAllMenus();
-				reschedule(GameTimeUtils.dailyResetTime());
-				return;
-			}
+            if (!checkDailyAttemptsAvailable()) {
+                // A missing "available" marker is NOT evidence of exhaustion:
+                // the menu may be loading, displaced or misrecognized.
+                markWorkIncomplete("Life Essence Caring: attempt count not positively verified");
+                closeAllMenus();
+                reschedule(LocalDateTime.now().plusMinutes(retryOffsetMinutes));
+                return;
+            }
 
 			// Attempt to find and care for an island
 			if (findAndCareForIsland()) {
@@ -144,7 +147,7 @@ public class LifeEssenceCaringRoutine extends DelayedTask {
 			return true;
 		}
 
-		logInfo("No daily caring attempts remaining. Rescheduling for next game reset.");
+        logWarning("Daily caring available marker absent; remaining attempts unknown, retry later");
 		return false;
 	}
 
