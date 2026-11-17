@@ -176,13 +176,23 @@ public class PetAllianceTreasuresRoutine extends DelayedTask {
 
 		if (claimButton.isFound()) {
 			logInfo("Claim button found - claiming alliance treasure");
-			tapInside(claimButton.getPoint(), claimButton.getPoint());
-			sleepTask(500); // Wait for claim animation
-			rescheduleToGameReset("Alliance treasure claimed successfully");
-		} else {
-			logInfo("No claimable treasure found - already claimed today");
-			rescheduleToGameReset("Treasure already claimed");
-		}
+            tapInside(claimButton);
+            sleepTask(500);
+            // A dispatched click is not a successful claim. If the exact
+            // Claim button remains, retry later rather than hiding the miss
+            // until tomorrow's reset.
+            if (templateSearchHelper.locatePattern(
+                    TemplatesEnum.PETS_BEAST_ALLIANCE_CLAIM,
+                    SearchConfigConstants.DEFAULT_SINGLE).isFound()) {
+                markWorkIncomplete("Pet Alliance Treasure: Claim button remained after tap");
+                rescheduleForRetry();
+                return;
+            }
+            rescheduleToGameReset("Alliance treasure Claim disappeared after tap");
+        } else {
+            logInfo("No claimable alliance treasure visible; state may be exhausted or unavailable");
+            rescheduleToGameReset("No claimable treasure visible");
+        }
 	}
 
 	// ========================================================================
