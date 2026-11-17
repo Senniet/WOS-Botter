@@ -118,8 +118,13 @@ public class MysteryShopRoutine extends DelayedTask {
     }
 
     private void visitOpenShop(long deadline) {
-        boolean buyChest = enabled(ConfigurationKeyEnum.BOOL_MYSTERY_SHOP_250_HERO_WIDGET);
-        boolean buyShard = enabled(ConfigurationKeyEnum.BOOL_MYSTERY_SHOP_250_SHARD);
+        boolean buyChest = allowBadgePurchases(emuManager.getSelectedEmulatorType(),
+                enabled(ConfigurationKeyEnum.BOOL_MYSTERY_SHOP_250_HERO_WIDGET));
+        boolean buyShard = allowBadgePurchases(emuManager.getSelectedEmulatorType(),
+                enabled(ConfigurationKeyEnum.BOOL_MYSTERY_SHOP_250_SHARD));
+        if (!buyChest && !buyShard)
+            logInfo("Mystery Shop: free reward and free-refresh route only; "
+                    + "no badge purchases on Serve-EMU");
         phase = MysteryShopPhase.READING_BALANCE;
         Integer balance = readBadgeBalance();
         if (balance == null) {
@@ -516,6 +521,13 @@ public class MysteryShopRoutine extends DelayedTask {
         pressBack();
         sleepTask(BACK_GAP_MS);
         pressBack();
+    }
+
+    static boolean allowBadgePurchases(dev.frostguard.engine.emulator.EmulatorType emulator,
+                                       boolean configured) {
+        // Retained profile checkboxes must not cause unattended badge
+        // purchases on the Serve-EMU free-claims-only workflow.
+        return configured && emulator != dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU;
     }
 
     private boolean enabled(ConfigurationKeyEnum key) {
