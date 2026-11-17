@@ -225,16 +225,27 @@ public class LifeEssenceCaringRoutine extends DelayedTask {
 			if (caringButton.isFound()) {
 				logInfo("Caring button found. Performing caring action.");
 
-				// Click the caring button
-				tapInside(caringButton);
-				sleepTask(5000);
-
-				// Go back to our island view we're back on main map
-				tapNear(BACK_TO_MAP_BUTTON);
-				sleepTask(3000);
-
-				logInfo("Caring action completed successfully");
-				return true;
+                // Click once. A dispatched tap alone is not proof of caring.
+                tapInside(caringButton);
+                sleepTask(1000);
+                ImageSearchResultData stillAvailable = templateSearchHelper.locatePattern(
+                        TemplatesEnum.LIFE_ESSENCE_DAILY_CARING_BUTTON_CURRENT,
+                        SearchConfig.builder().build());
+                if (!stillAvailable.isFound()) {
+                    stillAvailable = templateSearchHelper.locatePattern(
+                            TemplatesEnum.LIFE_ESSENCE_DAILY_CARING_BUTTON,
+                            SearchConfig.builder().build());
+                }
+                if (stillAvailable.isFound()) {
+                    markWorkIncomplete("Life Essence Caring: Caring button remains after tap");
+                    logWarning("Caring button still visible; do not report success or tap again");
+                    tapNear(BACK_TO_MAP_BUTTON);
+                    return false;
+                }
+                tapNear(BACK_TO_MAP_BUTTON);
+                sleepTask(500);
+                logInfo("Life Essence Caring button cleared after tap");
+                return true;
 			}
 
 			// Not found yet - wait a bit longer for UI to load
