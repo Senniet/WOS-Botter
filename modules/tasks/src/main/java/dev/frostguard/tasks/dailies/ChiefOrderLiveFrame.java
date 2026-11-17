@@ -1,11 +1,14 @@
 package dev.frostguard.tasks.dailies;
 
 import dev.frostguard.api.domain.OcrSettingsData;
+import dev.frostguard.api.configs.TemplatesEnum;
 import dev.frostguard.api.domain.PointData;
 import dev.frostguard.api.domain.RawImageData;
 import dev.frostguard.tasks.diagnostics.TaskControlSignals;
 import dev.frostguard.vision.ocr.OcrEngine;
 import dev.frostguard.vision.ocr.OcrException;
+import dev.frostguard.vision.match.OpenCvPatternLocator;
+import java.time.Duration;
 import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -17,6 +20,10 @@ import java.util.regex.Pattern;
  */
 final class ChiefOrderLiveFrame {
     enum Action { FREE, COSTS_POINTS, UNVERIFIED }
+    enum ListState { ON_COOLDOWN, ACTIVE, AVAILABLE, UNKNOWN }
+
+    record ListInspection(ListState state, Duration remaining, String label,
+                          String status, String timer) {}
 
     record Inspection(Action action, long cost, String order, String button, String price) {}
 
@@ -26,6 +33,8 @@ final class ChiefOrderLiveFrame {
             .charWhitelist("0123456789,.")
             .textLayout(OcrSettingsData.TextLayout.SINGLE_LINE).build();
     private static final Pattern AMOUNT = Pattern.compile("\\d[\\d,.]*");
+    private static final Pattern COUNTDOWN = Pattern.compile(
+            "(\\d{1,2})\\s*[:.]\\s*(\\d{2})\\s*[:.]\\s*(\\d{2})");
 
     private ChiefOrderLiveFrame() {}
 
@@ -37,6 +46,58 @@ final class ChiefOrderLiveFrame {
     static boolean isOrderBook(RawImageData frame, String expectedOrder) {
         return valid(frame) && expectedOrder != null
                 && norm(read(frame, 200, 552, 540, 630, TEXT)).equals(norm(expectedOrder));
+    }
+
+    /** Read the banner on the named tile, not an arbitrary cooldown elsewhere in the list. */
+    static ListInspection inspectList(RawImageData frame, String expectedOrder) {
+        if (!isChiefOrderList(frame) || expectedOrder == null)
+            return new ListInspection(ListState.UNKNOWN, null, "", "", "");
+        // Positions observed on the real 720x1280 Chief Order board.
+        int left;
+        int titleTop;
+        int bannerTop;
+        if (norm(expectedOrder).equals("RUSH JOB")) {
+            left = 389; titleTop = 445; bannerTop = 302;
+        } else if (norm(expectedOrder).equals("URGENT MOBILIZATION")) {
+            left = 105; titleTop = 445; bannerTop = 302;
+        } else if (norm(expectedOrder).equals("PRODUCTIVITY DAY")) {
+            left = 105; titleTop = 1086; bannerTop = 948;
+        } else {
+            return new ListInspection(ListState.UNKNOWN, null, "", "", "");
+        }
+        int right = left + 225;
+        String label = read(frame, left, titleTop, right, titleTop + 52, TEXT);
+        String status = read(frame, left, bannerTop, right, bannerTop + 38, TEXT);
+        String timer = read(frame, left, bannerTop + 31, right, bannerTop + 70, TEXT);
+        return classifyList(label, status, timer, expectedOrder);
+    }
+
+    static ListInspection classifyList(String label, String status, String timer,
+                                        String expectedOrder) {
+        if (expectedOrder == null || !norm(expectedOrder).equals(norm(label)))
+            return new ListInspection(ListState.UNKNOWN, null, label, status, timer);
+        String visibleStatus = norm(status);
+        Duration remaining = countdown(timer);
+        if (visibleStatus.replace(" ", "").contains("ONCOOLDOWN"))
+            return new ListInspection(ListState.ON_COOLDOWN, remaining, label, status, timer);
+        if (visibleStatus.contains("ACTIVE") && !visibleStatus.contains("INACTIVE"))
+            return new ListInspection(ListState.ACTIVE, remaining, label, status, timer);
+        // OCR sees tiny scraps of the icon on an unwrapped, selectable tile.
+        // This is only a candidate: the actual icon template must still match
+        // before the routine is allowed to open its book.
+        if (visibleStatus.length() <= 3)
+            return new ListInspection(ListState.AVAILABLE, null, label, status, timer);
+        return new ListInspection(ListState.UNKNOWN, null, label, status, timer);
+    }
+
+    private static Duration countdown(String text) {
+        Matcher matcher = COUNTDOWN.matcher(text == null ? "" : text);
+        if (!matcher.find()) return null;
+        int hours = Integer.parseInt(matcher.group(1));
+        int minutes = Integer.parseInt(matcher.group(2));
+        int seconds = Integer.parseInt(matcher.group(3));
+        if (hours > 23 || minutes > 59 || seconds > 59) return null;
+        return Duration.ofSeconds(hours * 3600L + minutes * 60L + seconds);
     }
 
     static Inspection inspect(RawImageData frame, String expectedOrder) {
@@ -70,6 +131,12 @@ final class ChiefOrderLiveFrame {
         if (norm(priceText).equals("FREE"))
             return new Inspection(Action.FREE, 0, order, button, priceText);
         return new Inspection(Action.UNVERIFIED, -1, order, button, priceText);
+    }
+
+    static boolean isCityHome(RawImageData frame) {
+        return valid(frame) && OpenCvPatternLocator.locatePattern(frame,
+                TemplatesEnum.SERVE_EMU_CITY_ANCHOR.getTemplate(),
+                new PointData(590, 1145), new PointData(715, 1275), 90).isFound();
     }
 
     static boolean valid(RawImageData frame) {

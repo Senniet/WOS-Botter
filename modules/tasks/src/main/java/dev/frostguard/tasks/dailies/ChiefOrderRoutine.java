@@ -1,6 +1,7 @@
 package dev.frostguard.tasks.dailies;
 
 import java.time.LocalDateTime;
+import java.time.Duration;
 
 import dev.frostguard.api.configs.TemplatesEnum;
 import dev.frostguard.api.configs.TpDailyTaskEnum;
@@ -57,6 +58,9 @@ private static final int ERROR_RETRY_MINUTES_VALUE = 10;
 
 private final ChiefOrderType chiefOrderType;
 private boolean enactDeferred;
+private boolean returnedHomeDirectly;
+
+private enum OrderSelection { SELECTED, ALREADY_USED, UNKNOWN }
 
 public ChiefOrderRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask, ChiefOrderType chiefOrderType) {
 		super(profile, tpTask);
@@ -85,14 +89,17 @@ public ChiefOrderRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask, Chie
 
     private void executeChiefOrderWork() {
         enactDeferred = false;
+        returnedHomeDirectly = false;
         logInfo(routineLogChiefOrderLine("Starting " + chiefOrderType.getDescription()));
 
         if (!openUpChiefOrderMenu()) {
             manageTaskFailure("Chief Order menu not verified");
             return;
         }
-        if (!chooseOrderType()) {
-            manageTaskFailure("Chief Order preview unavailable or wrong order selected");
+        OrderSelection selection = chooseOrderType();
+        if (selection == OrderSelection.ALREADY_USED) return;
+        if (selection != OrderSelection.SELECTED) {
+            manageTaskFailure("Chief Order status or preview unavailable");
             return;
         }
         if (!enactOrderFlow()) {
@@ -100,7 +107,7 @@ public ChiefOrderRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask, Chie
             return;
         }
         // An Enact button disappearing is not proof of a reward/activation.
-        if (!dismissVerifiedChiefOrderReward()) {
+        if (!returnedHomeDirectly && !dismissVerifiedChiefOrderReward()) {
             manageTaskFailure("Rewards not verified or could not be dismissed");
             return;
         }
@@ -186,39 +193,55 @@ private void manageTaskFailure(String reason) {
 		logInfo(routineLogChiefOrderLine("Task rescheduled to retry in " + ERROR_RETRY_MINUTES_VALUE + " minutes"));
 	}
 
-private boolean chooseOrderType() {
-        if (emuManager.getSelectedEmulatorType() == EmulatorType.SERVE_EMU
-                && !ChiefOrderLiveFrame.isChiefOrderList(
-                        emuManager.captureScreen(EMULATOR_NUMBER))) {
-            logWarning(routineLogChiefOrderLine("Refusing order selection outside verified Chief Order list"));
-            return false;
+private OrderSelection chooseOrderType() {
+        if (emuManager.getSelectedEmulatorType() == EmulatorType.SERVE_EMU) {
+            var list = ChiefOrderLiveFrame.inspectList(
+                    emuManager.captureScreen(EMULATOR_NUMBER), chiefOrderType.getDescription());
+            if (list.state() == ChiefOrderLiveFrame.ListState.ON_COOLDOWN
+                    || list.state() == ChiefOrderLiveFrame.ListState.ACTIVE) {
+                // The status banner is positive evidence of an already-used order.
+                // OCR may corrupt the digits; never invent a precise expiry from them.
+                if (list.remaining() == null || list.remaining().isZero()) {
+                    logWarning(routineLogChiefOrderLine("Order " + list.state()
+                            + ", countdown unverified (OCR: " + list.timer()
+                            + "); using 30-minute recheck, not an exact expiry"));
+                }
+                LocalDateTime next = nextAvailableCheck(LocalDateTime.now(), list.remaining());
+                reschedule(next);
+                logInfo(routineLogChiefOrderLine(chiefOrderType.getDescription() + " already used ("
+                        + list.state() + ", remaining " + list.remaining()
+                        + "); no Enact or Claim tap; next check " + next));
+                return OrderSelection.ALREADY_USED;
+            }
+            if (list.state() != ChiefOrderLiveFrame.ListState.AVAILABLE) {
+                logWarning(routineLogChiefOrderLine("Cannot verify order list state: " + list));
+                return OrderSelection.UNKNOWN;
+            }
         }
 
-		logInfo(routineLogChiefOrderLine("Scanning for Chief Order type: " + chiefOrderType.getDescription()));
-
-		ImageSearchResultData orderButton = templateSearchHelper.locatePattern(
-				chiefOrderType.getTemplate(),
-				SearchConfigConstants.DEFAULT_SINGLE);
-
-		if (!orderButton.isFound()) {
-			logWarning(routineLogChiefOrderLine(chiefOrderType.getDescription() +
-					" button not detected or currently on cooldown"));
-			return false;
-		}
-
-		logInfo(routineLogChiefOrderLine(chiefOrderType.getDescription() + " button detected. Pressing to activate"));
+        ImageSearchResultData orderButton = templateSearchHelper.locatePattern(
+                chiefOrderType.getTemplate(), SearchConfigConstants.DEFAULT_SINGLE);
+        if (!orderButton.isFound()) {
+            logWarning(routineLogChiefOrderLine("Available order icon not positively matched"));
+            return OrderSelection.UNKNOWN;
+        }
         tapInside(orderButton);
         sleepTask(580);
         if (emuManager.getSelectedEmulatorType() == EmulatorType.SERVE_EMU
                 && !ChiefOrderLiveFrame.isOrderBook(
                         emuManager.captureScreen(EMULATOR_NUMBER),
                         chiefOrderType.getDescription())) {
-            logWarning(routineLogChiefOrderLine(
-                    "Wrong/unverified order book after selection; no Enact input"));
-            return false;
+            logWarning(routineLogChiefOrderLine("Wrong/unverified order book; no Enact input"));
+            return OrderSelection.UNKNOWN;
         }
-        return true;
-	}
+        return OrderSelection.SELECTED;
+    }
+
+    static LocalDateTime nextAvailableCheck(LocalDateTime now, Duration remaining) {
+        if (remaining == null || remaining.isZero() || remaining.isNegative())
+            return now.plusMinutes(30); // OCR failed: explicitly a fallback, not a validated timer.
+        return now.plus(remaining).plusMinutes(1);
+    }
 
 private boolean enactOrderFlow() {
         // Chief Order Enact is not a free button: the live Productivity Day
@@ -257,6 +280,17 @@ private boolean enactOrderFlow() {
 		logInfo(routineLogChiefOrderLine("Enact action verified; pressing once"));
 		tapInside(enactButton);
 		sleepTask(1300);
+        // A successful free Claim can return directly to the City/Furnace page
+        // without showing the generic Rewards overlay.
+        if (emuManager.getSelectedEmulatorType() == EmulatorType.SERVE_EMU
+                && ChiefOrderLiveFrame.isCityHome(emuManager.captureScreen(EMULATOR_NUMBER))) {
+            sleepTask(400);
+            if (ChiefOrderLiveFrame.isCityHome(emuManager.captureScreen(EMULATOR_NUMBER))) {
+                returnedHomeDirectly = true;
+                logInfo(routineLogChiefOrderLine("Free action returned directly to verified City Home"));
+                return true;
+            }
+        }
 		// Never repeat an uncertain purchase-like action. Require an independent
 		// visible transition before reporting success.
 		if (locateEnactAction().isFound()) {
