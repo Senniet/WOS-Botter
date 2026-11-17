@@ -1,6 +1,6 @@
 # SurvivalOps - ADB evidence and MSI source readiness
 
-Prepared on 17 November 2026 from source commit e5e25e6. No installer or update feed has been published.
+Prepared on 17 November 2026. A standalone Windows MSI test artifact has now been built from commit d3dbbe6. No stable release or signed update feed has been published.
 
 ## Verified build gates
 
@@ -51,15 +51,15 @@ Each row records a source implementation or tested change. A manually performed 
 
 ## Real MSI publication gates still open
 
-1. Windows MSI creation via WiX/jpackage has NOT been run here. This Ubuntu host cannot produce a verified Windows installer.
-2. Headless Linux desktop UI tests cannot start JavaFX: Unable to open DISPLAY. Desktop GUI behavior requires Windows or an X display.
+1. **Windows MSI test build PASSED:** the separate SurvivalOps Windows Installer workflow completed on commit d3dbbe6 (run [44133260346](https://github.com/Senniet/WOS-Botter/actions/runs/44133260346), artifact [14352515013](https://github.com/Senniet/WOS-Botter/actions/runs/44133260346/artifacts/14352515013)). It verified the Windows application image, its bundled Java runtime and watcher, created SurvivalOps-1.0.0.msi, and checked SHA-256 596dae8deaf1014282af3e740c453c8888b6c6a136ca97a835764b8f3ed3f283. GitHub retains this test artifact until 1 December 2026. This is NOT a Windows installation or upgrade acceptance test.
+2. Local headless Linux desktop UI tests cannot start JavaFX without an X display, but the Windows installer build completed its Java desktop-module tests. Real GUI interaction and an upgrade on an installed Windows client remain pending.
 3. The real Windows SurvivalOps client is postponed by the user: 0 full Windows production-bot end-to-end passes recorded in the tracker.
-4. The dedicated SurvivalOps signed updater manifest, MSI hash/size, upgrade smoke test and signing secret must be verified on Windows after packaging.
+4. The MSI hash was calculated during the Windows build. The dedicated SurvivalOps signed updater manifest, published update feed, installation and upgrade smoke tests remain pending and are NOT part of this PR installer artifact.
 5. No free-only exception: paid gems/Chief Order points/FC actions remain prohibited, and unavailable events or locked features are not falsely marked passed.
 
-## Build procedure when Windows stage is enabled
+## Stable release procedure after Windows client testing
 
-- Use GitHub Actions workflow .github/workflows/survivalops-release.yml with reviewed branch/tag only after Windows checks pass.
+- The test MSI is already available from the linked Actions run. Do not confuse it with the signed stable updater channel. Use GitHub Actions workflow .github/workflows/survivalops-release.yml with reviewed branch/tag only after Windows client and update checks pass.
 - Validate app image includes SurvivalOps.exe, SurvivalOpsWatcher.exe and Java runtime before creating the installer.
 - Verify installer version, SHA-256 and file size against the project-signed stable update manifest, and test actual MSI update on Windows.
 - Do not publish a stable channel from this source candidate before those Windows gates are complete.
