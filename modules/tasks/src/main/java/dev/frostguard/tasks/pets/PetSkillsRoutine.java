@@ -5,6 +5,7 @@ import java.awt.image.BufferedImage;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.regex.Pattern;
 
@@ -15,12 +16,16 @@ import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.api.domain.AreaData;
 import dev.frostguard.api.domain.ImageSearchResultData;
 import dev.frostguard.api.domain.PointData;
-import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.api.domain.OcrSettingsData;
+import dev.frostguard.api.domain.RawImageData;
 import dev.frostguard.engine.nav.CommonOCRSettings;
 import dev.frostguard.engine.nav.SearchConfigConstants;
 import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.schedule.LaunchPoint;
+import dev.frostguard.engine.error.HomeNotFoundException;
+import dev.frostguard.engine.emulator.EmulatorType;
+import dev.frostguard.tasks.diagnostics.TaskControlSignals;
+import dev.frostguard.vision.convert.ImageConverter;
 import dev.frostguard.engine.service.StaminaService;
 import dev.frostguard.vision.color.PixelStats;
 import dev.frostguard.vision.convert.GameTimeUtils;
@@ -248,9 +253,122 @@ public class PetSkillsRoutine extends DelayedTask {
             return;
         }
 
-        processAllSkills(enabledSkills);
+        // The current Serve-EMU Pet Skill page orders tiles by owned beasts.
+        // Do not reuse the old fixed tile-to-skill mapping on that layout.
+        RawImageData current = emuManager.captureScreen(EMULATOR_NUMBER);
+        if (isCurrentServeEmuMenu(current)) {
+            processCurrentPetSkillMenu(enabledSkills, current);
+        } else {
+            processAllSkills(enabledSkills);
+        }
         closePetsMenu();
         finalizeRescheduling();
+    }
+
+    private boolean isCurrentServeEmuMenu(RawImageData frame) {
+        return emuManager.getSelectedEmulatorType() == EmulatorType.SERVE_EMU
+                && PetSkillsCurrentScreen.isCurrentMenu(frame);
+    }
+
+    /**
+     * 2026 live Serve-EMU layout: a given slot can be Builder's Aide,
+     * Arctic Embrace, etc. The position is NOT the identity.
+     * Only an OCR-verified selected title AND verified free Use footer can
+     * authorize an activation, and the post-tap footer must become Cooldown.
+     */
+    private void processCurrentPetSkillMenu(List<PetSkill> enabled, RawImageData first) {
+        BufferedImage tiles = ImageConverter.toBufferedImage(first);
+        EnumSet<PetSkill> observed = EnumSet.noneOf(PetSkill.class);
+        for (PointData center : PetSkillsCurrentScreen.visibleTileCenters()) {
+            checkPreemption();
+            var tileArea = AreaData.of(center.getX()-55,center.getY()-64,
+                    center.getX()+55,center.getY()+64);
+            if (!hasDistinctiveSkillTilePixels(tiles,tileArea)) continue;
+            tapInside(center,center,1,0);
+            sleepTask(230);
+            RawImageData selected = emuManager.captureScreen(EMULATOR_NUMBER);
+            if (!isCurrentServeEmuMenu(selected)) {
+                markWorkIncomplete("Pet Skills: left the verified Pet Skill page unexpectedly");
+                updateEarliestCooldown(LocalDateTime.now().plusMinutes(FALLBACK_RESCHEDULE_MINUTES));
+                return;
+            }
+
+            PetSkillsCurrentScreen.Skill currentSkill=PetSkillsCurrentScreen.selectedSkill(selected);
+            PetSkill configured = switch(currentSkill) {
+                case STAMINA -> PetSkill.STAMINA;
+                case GATHERING -> PetSkill.GATHERING;
+                case FOOD -> PetSkill.FOOD;
+                case TREASURE -> PetSkill.TREASURE;
+                default -> null;
+            };
+            if (configured==null || !enabled.contains(configured)) {
+                logDebug("Skipping current pet tile: " + currentSkill + " (not an enabled supported skill)");
+                continue;
+            }
+            observed.add(configured);
+            var state = PetSkillsCurrentScreen.selectedState(selected);
+            switch (state) {
+                case LOCKED -> {
+                    logInfo(configured+" is locked in the current Pet Skill page; no Use tap");
+                    updateEarliestCooldown(GameTimeUtils.dailyResetTime());
+                }
+                case COOLDOWN -> {
+                    Duration cooldown=PetSkillsCurrentScreen.remainingCooldown(selected);
+                    if (cooldown != null && !cooldown.isNegative() && !cooldown.isZero()) {
+                        updateEarliestCooldown(LocalDateTime.now().plus(cooldown));
+                    } else {
+                        updateEarliestCooldown(LocalDateTime.now().plusMinutes(FALLBACK_RESCHEDULE_MINUTES));
+                        markWorkIncomplete("Pet Skills: "+configured+" cooldown timer not readable");
+                    }
+                }
+                case READY -> activateVerifiedCurrentSkill(configured);
+                case UNKNOWN -> {
+                    markWorkIncomplete("Pet Skills: "+configured+" status not visually confirmed");
+                    updateEarliestCooldown(LocalDateTime.now().plusMinutes(FALLBACK_RESCHEDULE_MINUTES));
+                }
+            }
+        }
+        for (PetSkill wanted : enabled) {
+            if (!observed.contains(wanted)) {
+                // An unavailable / not-yet-learned pet skill is NOT an excuse
+                // to click another tile, or to report a use as successful.
+                logInfo(wanted + " is not in the current learned pet skill tiles; skip safely");
+            }
+        }
+        if (earliestCooldown == null)
+            updateEarliestCooldown(GameTimeUtils.dailyResetTime());
+    }
+
+    private void activateVerifiedCurrentSkill(PetSkill skill) {
+        if (skill==PetSkill.GATHERING) {
+            // Gathering requires a separate positively verified march; it is
+            // not safe to trigger the skill without a confirmed deploy plan.
+            markWorkIncomplete("Pet gathering skill is ready but march is not yet safely verified");
+            updateEarliestCooldown(LocalDateTime.now().plusMinutes(FALLBACK_RESCHEDULE_MINUTES));
+            return;
+        }
+        // The actual 2026 free Use button is x206..514, y1047..1135.
+        // One tap only, no previous blind triple tap.
+        tapInside(new PointData(255,1064),new PointData(467,1124));
+        sleepTask(540);
+        var after = emuManager.captureScreen(EMULATOR_NUMBER);
+        boolean confirmed = PetSkillsCurrentScreen.isCurrentMenu(after)
+                && PetSkillsCurrentScreen.selectedSkill(after).name().equals(skill.name())
+                && PetSkillsCurrentScreen.selectedState(after)==PetSkillsCurrentScreen.State.COOLDOWN;
+        if (!confirmed) {
+            markWorkIncomplete("Pet Skills: "+skill+" free Use was not confirmed by cooldown");
+            updateEarliestCooldown(LocalDateTime.now().plusMinutes(FALLBACK_RESCHEDULE_MINUTES));
+            return;
+        }
+        logInfo(skill+" free Pet Skill activated once and cooldown verified");
+        if (skill==PetSkill.STAMINA) {
+            // Arctic Embrace's displayed skill text specifies 35 Chief Stamina.
+            StaminaService.getServices().addExternalStamina(profile.getId(),STAMINA_BASE_VALUE);
+        }
+        Duration cooldown=PetSkillsCurrentScreen.remainingCooldown(after);
+        updateEarliestCooldown(cooldown!=null && !cooldown.isZero()
+                ? LocalDateTime.now().plus(cooldown)
+                : GameTimeUtils.dailyResetTime());
     }
 
     /**
@@ -267,8 +385,9 @@ public class PetSkillsRoutine extends DelayedTask {
      * Reschedules the task to retry in a few minutes.
      */
     private void handleMenuOpenFailure() {
-        logWarning("Pets feature is unavailable on the confirmed Home screen. Retrying after game reset.");
-        reschedule(GameTimeUtils.dailyResetTime());
+        markWorkIncomplete("Pet Skills: Pets menu not verified on Home");
+        logWarning("Pets feature not confirmed on Home, bounded retry instead of skipping until daily reset");
+        reschedule(LocalDateTime.now().plusMinutes(FALLBACK_RESCHEDULE_MINUTES));
     }
 
     /**
@@ -313,21 +432,28 @@ public class PetSkillsRoutine extends DelayedTask {
                 SearchConfigConstants.DEFAULT_SINGLE);
 
         if (!petsButton.isFound()) {
-            navigationAttempts++;
-
-            if (navigationAttempts >= 3) { // Max navigation attempts
-                logError("Could not find Pets menu after 3 attempts.");
+            // The current 720x1280 Home screen has a Pet Skills paw on the
+            // right. A single fallback click is allowed only on verified Home
+            // and only if the actual Pet Skill title is confirmed afterward.
+            if (emuManager.getSelectedEmulatorType() != EmulatorType.SERVE_EMU)
+                return false;
+            RawImageData homeFrame=emuManager.captureScreen(EMULATOR_NUMBER);
+            if (homeFrame==null || !homeFrame.isValid()
+                    || homeFrame.getWidth()!=720 || homeFrame.getHeight()!=1280) {
+                logWarning("Cannot use current Pets fallback: viewport not verified 720x1280");
                 return false;
             }
-
-            logWarning("Pets button not found (attempt " + navigationAttempts + "/3).");
+            tapInside(new PointData(634,832),new PointData(691,897));
+        } else {
+            tapInside(petsButton);
+        }
+        sleepTask(440);
+        if (emuManager.getSelectedEmulatorType() == EmulatorType.SERVE_EMU
+                && !PetSkillsCurrentScreen.isCurrentMenu(
+                        emuManager.captureScreen(EMULATOR_NUMBER))) {
+            logWarning("Pet button clicked but current Pet Skill screen was not confirmed");
             return false;
         }
-
-        logInfo("Pets button found. Opening menu.");
-        tapInside(petsButton);
-        sleepTask(1000); // Wait for Pets menu to load
-
         return true;
     }
 
@@ -434,6 +560,7 @@ public class PetSkillsRoutine extends DelayedTask {
             recordGatheringDeployment();
             logInfo("Gathering bonus march deployed. Waiting for the Active state to clear.");
         } else {
+            markWorkIncomplete("Pet Skills: gathering bonus march not verified: " + result.logValue);
             logWarning("Gathering bonus march not deployed: " + result.logValue + ". Retrying while the skill is Active.");
         }
         scheduleGatheringActiveRecheck();
@@ -489,8 +616,10 @@ public class PetSkillsRoutine extends DelayedTask {
                     emuManager.captureScreen(EMULATOR_NUMBER));
             return hasDistinctiveSkillTilePixels(image, skill.area);
         } catch (Exception ex) {
-            logWarning("Could not verify " + skill.name() + " skill tile. Continuing conservatively.");
-            return true;
+            TaskControlSignals.rethrowControlSignal(ex);
+            markWorkIncomplete("Pet Skills: cannot verify "+skill+" tile after screen capture");
+            logWarning("Could not verify " + skill.name() + " skill tile; NOT tapping unknown space");
+            return false;
         }
     }
 
@@ -576,18 +705,14 @@ public class PetSkillsRoutine extends DelayedTask {
         }
 
         logDebug("Use button found. Using skill.");
-        tapInside(
-                useButton.getPoint(),
-                useButton.getPoint(),
-                3, // Number of taps
-                100); // Delay between taps in ms
-
-        sleepTask(1500); // Wait for skill use animation
-
-        if (skill == PetSkill.STAMINA) {
-            addStaminaBySkillLevel();
+        tapInside(useButton); // exactly one free Use, never three blind taps
+        sleepTask(380);
+        if (templateSearchHelper.locatePattern(TemplatesEnum.PETS_SKILL_USE,
+                SearchConfigConstants.QUICK_SEARCH).isFound()) {
+            markWorkIncomplete("Pet Skills: "+skill+" Use remained visible after one tap");
+            return false;
         }
-
+        if (skill == PetSkill.STAMINA) addStaminaBySkillLevel();
         return true;
     }
 
@@ -768,9 +893,21 @@ public class PetSkillsRoutine extends DelayedTask {
      * Closes the Pets menu by tapping the back button.
      */
     private void closePetsMenu() {
-        logDebug("Closing Pets menu");
-        pressBack();
-        sleepTask(500); // Wait for menu to close
+        logDebug("Closing Pets menu and verifying Home");
+        if (emuManager.getSelectedEmulatorType() == EmulatorType.SERVE_EMU
+                && PetSkillsCurrentScreen.isCurrentMenu(
+                        emuManager.captureScreen(EMULATOR_NUMBER))) {
+            tapInside(new PointData(640,134),new PointData(686,171)); // actual top-right X
+        } else {
+            pressBack();
+        }
+        sleepTask(280);
+        try {
+            navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME,this::checkPreemption);
+        } catch (HomeNotFoundException missing) {
+            markWorkIncomplete("Pet Skills: Home not verified after closing menu");
+            logWarning("Pet Skills could not return Home: " + missing.getMessage());
+        }
     }
 
     /**
@@ -843,6 +980,7 @@ public class PetSkillsRoutine extends DelayedTask {
             }
             return result;
         } catch (Exception e) {
+            TaskControlSignals.rethrowControlSignal(e);
             logWarning("Error deploying gathering skill march: " + e.getMessage());
             return GatheringDeployResult.BLOCKED;
         } finally {
@@ -858,6 +996,7 @@ public class PetSkillsRoutine extends DelayedTask {
                 logWarning("Could not reopen Pets menu after gathering deployment attempt.");
             }
         } catch (RuntimeException ex) {
+            TaskControlSignals.rethrowControlSignal(ex);
             logWarning("Could not restore Pets menu after gathering deployment attempt: " + ex.getMessage());
         }
     }
@@ -988,12 +1127,9 @@ public class PetSkillsRoutine extends DelayedTask {
                 return GatheringDeployResult.SAME_TARGET;
             }
 
-            ImageSearchResultData deployStillVisible = templateSearchHelper.locatePattern(
-                    TemplatesEnum.GATHER_DEPLOY_BUTTON,
-                    SearchConfigConstants.QUICK_SEARCH);
-            if (deployStillVisible.isFound()) {
-                logWarning("Gather deploy button remained visible after pressing it.");
-                pressBack();
+            if (deploymentHelper.verifyLaunchTransition(TemplatesEnum.GATHER_DEPLOY_BUTTON)
+                    != dev.frostguard.engine.helper.DeploymentHelper.LaunchCheck.WORLD_VERIFIED) {
+                logWarning("Gathering Deploy outcome unknown: a vanished button alone is not a march");
                 return GatheringDeployResult.BLOCKED;
             }
 
@@ -1002,6 +1138,7 @@ public class PetSkillsRoutine extends DelayedTask {
             return GatheringDeployResult.DEPLOYED;
 
         } catch (Exception e) {
+            TaskControlSignals.rethrowControlSignal(e);
             logWarning("Error deploying gathering march: " + e.getMessage());
             return GatheringDeployResult.BLOCKED;
         }
