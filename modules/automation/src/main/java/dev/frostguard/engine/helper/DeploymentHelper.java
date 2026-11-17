@@ -205,8 +205,7 @@ public class DeploymentHelper {
     /** Check the specific routine's Deploy button and both verified world
      * anchor variants. A disappearing button alone is NOT success. */
     public LaunchCheck verifyLaunchTransition(TemplatesEnum deploymentButton) {
-        var deployArea = deploymentButton == TemplatesEnum.GATHER_DEPLOY_BUTTON
-                ? AreaData.of(75, 950, 720, 1279) : CommonGameAreas.RALLY_BOTTOM_BUTTON_BAR;
+        var deployArea = launchButtonArea(deploymentButton);
         ImageSearchResultData deploy = templates.locatePattern(deploymentButton,
                 search(deployArea, 2, 85));
         AreaData anchor = AreaData.of(590, 1145, 715, 1275);
@@ -222,6 +221,17 @@ public class DeploymentHelper {
                             .build()).isFound();
         }
         return classifyLaunchCheck(deploy.isFound(), atWorld);
+    }
+
+    static AreaData launchButtonArea(TemplatesEnum deploymentButton) {
+        // Gather formation uses a right-hand blue Deploy footer. The rally
+        // bottom bar ends at x=460, so using it for SERVE_EMU_GATHER_DEPLOY
+        // missed the button entirely on the observed 720x1280 screen.
+        if (deploymentButton == TemplatesEnum.SERVE_EMU_GATHER_DEPLOY)
+            return AreaData.of(400, 1140, 705, 1279);
+        if (deploymentButton == TemplatesEnum.GATHER_DEPLOY_BUTTON)
+            return AreaData.of(75, 950, 720, 1279);
+        return CommonGameAreas.RALLY_BOTTOM_BUTTON_BAR;
     }
 
     static LaunchCheck classifyLaunchCheck(boolean deployStillVisible, boolean worldAnchorVisible) {
