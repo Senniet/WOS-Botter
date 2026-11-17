@@ -17,6 +17,11 @@ final class SurvivorAdmissionCompletionPolicy {
     private SurvivorAdmissionCompletionPolicy() {
     }
 
+    static Decision allocationOnly(Assignment assignment, boolean homeVerified) {
+        if (assignment == null || !homeVerified) return Decision.RETRY;
+        return assignment == Assignment.UNCONFIRMED ? Decision.RETRY : Decision.COMPLETE;
+    }
+
     static Decision decide(boolean welcomeDismissed, Assignment assignment, boolean homeVerified) {
         if (!welcomeDismissed || assignment == null || !homeVerified) {
             return Decision.RETRY;

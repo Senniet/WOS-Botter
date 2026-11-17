@@ -38,7 +38,28 @@ public class NewSurvivorsRoutine extends DelayedTask {
         ImageSearchResultData notification = templateSearchHelper.locatePattern(
                 TemplatesEnum.GAME_HOME_NEW_SURVIVORS, SearchConfigConstants.DEFAULT_SINGLE);
         if (!notification.isFound()) {
-            logInfo(routineLogNewSurvivorsLine("No New Survivors notification; planning next run."));
+            // No new arrivals does not mean the city's existing survivors are
+            // fully assigned. Live 5554 showed 25 working / 7 resting with an
+            // enabled Allocate All but no Welcome In notification. Three
+            // workers were assigned when that button was pressed.
+            logInfo(routineLogNewSurvivorsLine(
+                    "No Welcome In notification; checking existing survivors for free work slots."));
+            if (!openVerifiedSurvivorStatus()) {
+                scheduleUnknownRetry("Existing survivor allocation panel could not be verified",
+                        "existing-status-not-opened");
+                return;
+            }
+            SurvivorAdmissionCompletionPolicy.Assignment allocation = allocateAvailableSurvivors();
+            boolean returnedHome = returnToVerifiedHome();
+            if (SurvivorAdmissionCompletionPolicy.allocationOnly(allocation, returnedHome)
+                    != SurvivorAdmissionCompletionPolicy.Decision.COMPLETE) {
+                scheduleUnknownRetry("Existing survivor assignment or return Home was unconfirmed"
+                        + " (assignment=" + allocation + ", home=" + returnedHome + ")",
+                        "existing-allocation-or-home-unconfirmed");
+                return;
+            }
+            logInfo(routineLogNewSurvivorsLine(
+                    "No new arrivals; existing survivor allocation resolved and Home verified."));
             scheduleNormalInterval();
             return;
         }
