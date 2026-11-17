@@ -177,7 +177,14 @@ private void redeemDailyChestRewards() {
             }
             tapInside(freeClaim);
             sleepTask(350);
-            logInfo(routineLogVipLine("Verified VIP free Claim pressed once"));
+            // A green Claim detected before the tap does not prove the
+            // reward was received. Confirm it is no longer actionable.
+            if (verifiedFreeVipClaim(new GreenLabelActionDetector.Region(505, 755, 688, 882)).isFound()) {
+                markWorkIncomplete("VIP Daily Bundle: free Claim still visible after tap");
+                logWarning(routineLogVipLine("Daily Bundle Claim did not clear; no repeated tap"));
+            } else {
+                logInfo(routineLogVipLine("VIP Daily Bundle Claim cleared after tap"));
+            }
             return;
         }
         // Retain the old supported UI only if its exact VIP screen is visible.
