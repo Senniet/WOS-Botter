@@ -11,6 +11,8 @@ import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.schedule.LaunchPoint;
 import dev.frostguard.engine.helper.TemplateSearchHelper;
+import dev.frostguard.engine.error.HomeNotFoundException;
+import dev.frostguard.tasks.diagnostics.TaskDiagnosticSnapshots;
 
 import java.time.LocalDateTime;
 
@@ -203,13 +205,7 @@ public class ExpertsRomulusTroopsRoutine extends DelayedTask {
         clearNavigationOverlay();
 
         boolean claimed = attemptToClaimRomulusTroops(troopType);
-
-        if (!claimed) {
-            logInfo("Romulus claim button not found after " + MAX_CLAIM_BUTTON_ATTEMPTS +
-                    " attempts. Assuming already claimed today");
-        }
-
-        rescheduleToGameReset();
+        finishOnlyAfterConfirmedClaimAndHome(claimed);
     }
 
     // ========================================================================
@@ -377,9 +373,43 @@ public class ExpertsRomulusTroopsRoutine extends DelayedTask {
 
         logInfo("Romulus claim button found - claiming " + troopType + " troops");
         tapInside(claimButton);
-        sleepTask(1000); // Wait for claim animation to complete
+        sleepTask(750);
+        // The same icon can animate. Only two independent missing captures
+        // after the tap establish that the free reward was consumed.
+        var afterConfig = TemplateSearchHelper.SearchConfig.builder()
+                .withMaxAttempts(1).withThreshold(CLAIM_BUTTON_THRESHOLD)
+                .withArea(CLAIM_BUTTON_SEARCH_AREA).build();
+        boolean visibleAfterOne = templateSearchHelper.locatePattern(
+                TemplatesEnum.ROMULUS_CLAIM_TROOPS_BUTTON, afterConfig).isFound();
+        sleepTask(180);
+        boolean visibleAfterTwo = templateSearchHelper.locatePattern(
+                TemplatesEnum.ROMULUS_CLAIM_TROOPS_BUTTON, afterConfig).isFound();
+        boolean confirmed = ExpertDailyClaimPolicy.disappearedOnTwoFrames(
+                true, visibleAfterOne, visibleAfterTwo);
+        if (!confirmed)
+            logWarning("Romulus claim unchanged or unstable after tap; not marking success");
+        return confirmed;
+    }
 
-        return true;
+    private void finishOnlyAfterConfirmedClaimAndHome(boolean claimed) {
+        boolean homeVerified = false;
+        try {
+            navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME, this::checkPreemption);
+            homeVerified = true;
+        } catch (HomeNotFoundException missing) {
+            logWarning("Romulus: Home could not be verified after claim: " + missing.getMessage());
+        }
+        if (!ExpertDailyClaimPolicy.readyForDailyReset(claimed, homeVerified)) {
+            markWorkIncomplete("Romulus: free claim or return Home not verified");
+            String evidence = TaskDiagnosticSnapshots.capture(
+                    emuManager, EMULATOR_NUMBER, "romulus", "claim-or-home-unknown");
+            LocalDateTime retryAt = LocalDateTime.now().plusHours(1);
+            reschedule(retryAt);
+            logWarning("Romulus free reward unverified; retry at "
+                    + retryAt.format(DATETIME_FORMATTER) + "; " + evidence);
+            return;
+        }
+        rescheduleToGameReset();
     }
 
     // ========================================================================
