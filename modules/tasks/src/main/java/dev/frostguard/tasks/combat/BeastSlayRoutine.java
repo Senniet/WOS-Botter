@@ -50,7 +50,16 @@ public class BeastSlayRoutine extends DelayedTask {
 		Integer configMarches = profile.getConfig(ConfigurationKeyEnum.BEAST_HUNTING_MARCHES_INT, Integer.class);
 		this.maxQueues = (configMarches != null) ? configMarches : 3;
 		Integer configLevel = profile.getConfig(ConfigurationKeyEnum.BEAST_HUNTING_LEVEL_INT, Integer.class);
-		this.beastLevel = (configLevel != null) ? configLevel : 30;
+        this.beastLevel = (configLevel != null) ? configLevel : 30;
+        // The level selector advances once per tap from level 1. An invalid
+        // profile value must not generate dozens of blind clicks or select
+        // an unintended beast level.
+        if (!validBeastLevel(this.beastLevel)) {
+            markWorkIncomplete("Beast Hunting: configured beast level outside supported 1..30 range");
+            logWarning("Invalid Beast Hunting level " + this.beastLevel + "; no search or attack dispatched");
+            reschedule(LocalDateTime.now().plusMinutes(5));
+            return;
+        }
 		Integer configReserve = profile.getConfig(ConfigurationKeyEnum.STAMINA_RESERVE_INT, Integer.class);
 		this.staminaReserve = (configReserve != null) ? configReserve : DEFAULT_STAMINA_RESERVE;
 
@@ -198,6 +207,10 @@ public class BeastSlayRoutine extends DelayedTask {
 		// Finalize: reschedule to earliest beast return time (freeing the thread for other tasks)
 		finalizeReschedule();
 	}
+
+    static boolean validBeastLevel(int level) {
+        return level >= 1 && level <= 30;
+    }
 
 	@Override
 	protected LaunchPoint getRequiredStartLocation() {
