@@ -60,8 +60,11 @@ public VipRoutine(AccountDescriptor profile, TpDailyTaskEnum tpDailyTask) {
 		hydrateConfiguration();
 
 		if (!openUpVipMenu()) {
-			logWarning(routineLogVipLine("Could not open VIP menu."));
-			queueNextExecution();
+            markWorkIncomplete("VIP: menu not verified; no free reward state checked");
+            LocalDateTime retry = nextUnverifiedVisit(LocalDateTime.now());
+            logWarning(routineLogVipLine("Could not open VIP menu; retrying at "
+                    + retry.format(DATETIME_FORMATTER)));
+            reschedule(retry);
 			return;
 		}
 
@@ -290,8 +293,20 @@ private void hydrateConfiguration() {
 						: "not set")));
 	}
 
+    static LocalDateTime nextUnverifiedVisit(LocalDateTime now) {
+        return now.plusMinutes(10);
+    }
+
 private void queueNextExecution() {
 		LocalDateTime nextGameReset = GameTimeUtils.dailyResetTime();
+        // This production Serve-EMU routine never buys monthly VIP. A stale
+        // profile purchase timestamp is not a reason to run before reset.
+        if (emuManager.getSelectedEmulatorType()
+                == dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU) {
+            reschedule(nextGameReset);
+            logInfo(routineLogVipLine("Next free VIP check at game reset; paid VIP ignored"));
+            return;
+        }
 		LocalDateTime nextExecutionTime = nextGameReset;
 
 		if (buyMonthlyVip && nextMonthlyVipBuyTime != null) {
