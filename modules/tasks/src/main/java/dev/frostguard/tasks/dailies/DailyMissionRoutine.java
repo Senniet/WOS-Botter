@@ -211,9 +211,8 @@ private boolean redeemRewardsIndividually() {
 			if (!claimResult.isFound()) {
                 logInfo(routineLogDailyMissionLine("Individual collecting complete. Claimed " + claimedCount + " rewards"));
                 claimActionObserved = claimedCount > 0;
-                // A daily chest can be ready even when ordinary Claim All
-                // is absent. Check it only after finishing the normal list.
-                return claimOptional160Milestone();
+                // Milestone boxes open automatically once enough points are earned.
+                return settleAutomaticMilestoneRewards();
 			}
 
 			claimedCount++;
@@ -293,39 +292,20 @@ private boolean redeemAllRewardsAtOnce(ImageSearchResultData claimAllResult) {
             return false;
         }
         logInfo(routineLogDailyMissionLine("Claim All no longer visible after tap."));
-        // The 160-point chest is NOT always available. It is distinct from
-        // the ordinary mission Claim All, and may open a second Rewards sheet.
-        return claimOptional160Milestone();
+        // Point milestone boxes open automatically; never tap the box.
+        return settleAutomaticMilestoneRewards();
 	}
 
-private boolean claimOptional160Milestone() {
-        var first=emuManager.captureScreen(EMULATOR_NUMBER);
-        if (!DailyMissionsCurrentFrame.title(first))return false;
-        var chest=DailyMilestone160Frame.ready(first);
-        if (!chest.isFound()) {
-            logInfo(routineLogDailyMissionLine("160-point chest not available or already claimed; skipping"));
-            return true;
-        }
-        sleepTask(180);
-        var second=DailyMilestone160Frame.ready(emuManager.captureScreen(EMULATOR_NUMBER));
-        if (!RecognitionConsensus.agrees(chest,second,12)) {
-            logWarning(routineLogDailyMissionLine("160-point chest not stable; no click"));
-            return false;
-        }
-        PointData target=second.getPoint();
-        logInfo(routineLogDailyMissionLine("Verified optional 160-point chest at "+target));
-        tapInside(new PointData(target.getX()-10,target.getY()-10),
-                new PointData(target.getX()+10,target.getY()+10));
-        sleepTask(540);
-        if (!dismissRewardPopupsFlow())return false;
-        var after=emuManager.captureScreen(EMULATOR_NUMBER);
-        if (DailyMilestone160Frame.ready(after).isFound()) {
-            logWarning(routineLogDailyMissionLine("160-point chest remained closed after tap"));
-            return false;
-        }
-        boolean returnedDaily=DailyMissionsCurrentFrame.title(after);
-        if(returnedDaily)claimActionObserved=true;
-        return returnedDaily;
+private boolean settleAutomaticMilestoneRewards() {
+        // The 160-point milestone (and other point milestones) opens itself
+        // only when enough points have been collected. No chest interaction.
+        // Give the game a moment to show any automatically triggered Rewards
+        // overlay, then dismiss only visually verified overlays.
+        sleepTask(700);
+        if (!dismissRewardPopupsFlow()) return false;
+        logInfo(routineLogDailyMissionLine(
+                "Automatic point milestone rewards settled; no chest tap necessary"));
+        return currentDailyTitle().isFound();
     }
 
 private ImageSearchResultData seekForClaimAllButton() {
@@ -436,18 +416,24 @@ private boolean dismissInterface() {
         tapInside(new PointData(p.getX()-7,p.getY()-7),
                 new PointData(p.getX()+7,p.getY()+7));
         sleepTask(420);
-        var after=emuManager.captureScreen(EMULATOR_NUMBER);
-        if (DailyMissionsCurrentFrame.title(after)) {
-            logWarning(routineLogDailyMissionLine("Daily Missions remained visible after verified X"));
-            return false;
+        // Closing Daily can animate over several frames. Never treat a
+        // transient absent City anchor as a permanent failure or tap blindly.
+        for (int attempt = 0; attempt < 3; attempt++) {
+            var after=emuManager.captureScreen(EMULATOR_NUMBER);
+            if (!DailyMissionsCurrentFrame.title(after)) {
+                boolean city=emuManager.locatePattern(EMULATOR_NUMBER,after,
+                        TemplatesEnum.SERVE_EMU_CITY_ANCHOR,
+                        new PointData(590,1145),new PointData(715,1275),90).isFound();
+                if (city) {
+                    logInfo(routineLogDailyMissionLine("Daily Missions closed, City HUD confirmed"));
+                    return true;
+                }
+            }
+            if (attempt < 2) sleepTask(450);
         }
-        // Do not mark successful if a new, unknown overlay replaces Daily.
-        boolean city=emuManager.locatePattern(EMULATOR_NUMBER,after,
-                TemplatesEnum.SERVE_EMU_CITY_ANCHOR,
-                new PointData(590,1145),new PointData(715,1275),90).isFound();
-        if (city) logInfo(routineLogDailyMissionLine("Daily Missions closed, City HUD confirmed"));
-        else logWarning(routineLogDailyMissionLine("Daily closed but City HUD not verified"));
-        return city;
+        logWarning(routineLogDailyMissionLine("Daily closed but City HUD not verified; "
+                + captureDailyDiagnostic("daily-home-unverified")));
+        return false;
     }
 
 private void queueManualMode() {
