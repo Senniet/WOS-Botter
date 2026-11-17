@@ -244,8 +244,11 @@ public class PetAllianceTreasuresRoutine extends DelayedTask {
             }
             rescheduleToGameReset("Alliance treasure Claim disappeared after tap");
         } else {
-            logInfo("No claimable alliance treasure visible; state may be exhausted or unavailable");
-            rescheduleToGameReset("No claimable treasure visible");
+            // A missing Claim template is not evidence of exhausted daily
+            // quota. Only an OCR-confirmed zero may defer until reset.
+            markWorkIncomplete("Ally Treasure: no claim control and daily quota not confirmed exhausted");
+            logWarning("No claim control visible and quota is not confirmed zero; retrying safely");
+            rescheduleForRetry();
         }
 	}
 
