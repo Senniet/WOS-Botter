@@ -12,6 +12,8 @@ import dev.frostguard.api.domain.AreaData;
 import dev.frostguard.api.domain.OcrSettingsData;
 import java.util.Locale;
 import dev.frostguard.api.domain.SizeData;
+import dev.frostguard.api.domain.RawImageData;
+import dev.frostguard.vision.match.OpenCvPatternLocator;
 import dev.frostguard.engine.nav.SearchConfigConstants;
 import dev.frostguard.engine.error.TaskOutcomeUnknownException;
 import dev.frostguard.engine.helper.GreenLabelActionDetector;
@@ -55,12 +57,28 @@ public class ExplorationRoutine extends DelayedTask {
 
 	@Override
 	protected void execute() {
-        if (!isExplorationScreenVisible() && !isExplorationMainScreenVisible()) {
-            navigationHelper.ensureCorrectScreenLocation(LaunchPoint.WORLD);
+        // City and World expose the same Exploration shortcut. Classify one
+        // current screenshot instead of probing absent Claim/disabled buttons
+        // on the City HUD and unnecessarily navigating City -> World.
+        RawImageData startingFrame=emuManager.captureScreen(EMULATOR_NUMBER);
+        boolean onExploration=ExplorationPageFrame.title(startingFrame);
+        boolean onRoot=!onExploration &&
+                ExplorationRootFrame.root(startingFrame)!=ExplorationRootFrame.Root.UNKNOWN;
+        boolean onIdleIncome=!onExploration && !onRoot && idleIncomeTitleOnFrame(startingFrame);
+        if (!onExploration && !onRoot && !onIdleIncome) {
+            // Recover a previously-opened Idle Income window whose title
+            // artwork may have changed, but only once on an UNKNOWN screen.
+            // Normal Exploration never runs this expensive OCR fallback.
+            onIdleIncome=idleIncomeVisible();
         }
-		logInfo(routineLogExplorationLine("Opening or resuming Exploration rewards."));
-		boolean opened = openExplorationScreen();
-		boolean claimedAnyReward = opened && claimAvailableRewards();
+        if (!onExploration && !onRoot && !onIdleIncome) {
+            navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME,this::checkPreemption);
+            onRoot=ExplorationRootFrame.root(emuManager.captureScreen(EMULATOR_NUMBER))
+                    !=ExplorationRootFrame.Root.UNKNOWN;
+        }
+        logInfo(routineLogExplorationLine("Opening or resuming Exploration rewards."));
+        boolean opened=openExplorationScreen(onExploration,onIdleIncome,onRoot);
+		boolean claimedAnyReward = opened && claimAvailableRewards(onIdleIncome);
 		if (claimedAnyReward) {
 			logInfo(routineLogExplorationLine("Exploration rewards claimed."));
 		} else if (!opened) {
@@ -123,54 +141,46 @@ public class ExplorationRoutine extends DelayedTask {
         }
     }
 
-    private boolean openExplorationScreen() {
-        // A previously opened Exploration/Idle Income page is already the
-        // destination. Re-tapping the bottom-left HUD position on that page
-        // can hit another action and corrupt the pending claim.
-        if (isExplorationMainScreenVisible() || idleIncomeVisible()) return true;
-        for (int attempt = 1; attempt <= MAX_OPEN_ATTEMPTS; attempt++) {
-			tapInside(EXPLORATION_ENTRY_TOP_LEFT, EXPLORATION_ENTRY_BOTTOM_RIGHT);
-			sleepTask(1000);
-
-			if (isExplorationScreenVisible()) {
-				logDebug(routineLogExplorationLine("Exploration screen confirmed on attempt " + attempt + "."));
-				return true;
-			}
-
-			logDebug(routineLogExplorationLine("Exploration screen not confirmed on attempt " + attempt + "."));
-		}
-		return false;
-	}
-
-	private boolean isExplorationScreenVisible() {
-        if (idleIncomeVisible()) return true;
-		if (locateEnabledClaimButton().isFound()) {
-			return true;
-		}
-
-		if (locateDisabledClaimButton().isFound()
-				&& !locateEnabledClaimButton().isFound()) {
-			return true;
-		}
-
-		ImageSearchResultData explorationButton = templateSearchHelper.locatePattern(
-				TemplatesEnum.EXPLORATION_BUTTON, SearchConfigConstants.SINGLE_WITH_2_RETRIES);
-		return explorationButton.isFound();
-	}
-
-    private boolean isExplorationMainScreenVisible() {
-        // One verified 2026 page heading instead of two known non-matching
-        // older title templates (confirmed by 20 Task Coach sessions).
-        return templateSearchHelper.locatePattern(
-                TemplatesEnum.SERVE_EMU_EXPLORATION_TITLE_NOV_2026,
-                dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig.builder()
-                        .withMaxAttempts(1).withThreshold(92)
-                        .withArea(AreaData.of(65, 0, 335, 115)).build()).isFound();
+    private boolean openExplorationScreen(boolean onExploration, boolean onIdleIncome,
+                                          boolean rootVerified) {
+        if(onExploration || onIdleIncome)return true;
+        if(!rootVerified){
+            logWarning(routineLogExplorationLine("No verified City/World shortcut; refusing blind entry tap"));
+            return false;
+        }
+        for(int attempt=0;attempt<MAX_OPEN_ATTEMPTS;attempt++){
+            checkPreemption();
+            tapInside(EXPLORATION_ENTRY_TOP_LEFT,EXPLORATION_ENTRY_BOTTOM_RIGHT);
+            // Observe the actual screen transition instead of a mandatory
+            // 1-second sleep followed by multiple global template searches.
+            // A single title template on each new screenshot is sufficient
+            // to establish the destination before looking for Claim.
+            for(int frame=0;frame<8;frame++){
+                sleepTask(160);
+                if(ExplorationPageFrame.title(emuManager.captureScreen(EMULATOR_NUMBER))) {
+                    logDebug(routineLogExplorationLine("Exploration page ready after entry "+(attempt+1)));
+                    return true;
+                }
+            }
+            // Never tap the shortcut again on an unrelated game screen.
+            if(ExplorationRootFrame.root(emuManager.captureScreen(EMULATOR_NUMBER))
+                    ==ExplorationRootFrame.Root.UNKNOWN)break;
+        }
+        return false;
     }
 
-    private boolean claimAvailableRewards() {
-        // A previously-open Idle Income panel can survive a failed run.
-        if (idleIncomeVisible()) return claimIdleIncome();
+    private boolean idleIncomeTitleOnFrame(RawImageData frame) {
+        if(frame==null || !frame.isValid() || frame.getWidth()!=720 || frame.getHeight()!=1280)
+            return false;
+        return OpenCvPatternLocator.locatePattern(frame,
+                TemplatesEnum.SERVE_EMU_IDLE_INCOME_TITLE_NOV_2026.getTemplate(),
+                new PointData(210,233),new PointData(520,330),90).isFound();
+    }
+
+    private boolean claimAvailableRewards(boolean alreadyOnIdleIncome) {
+        // We just confirmed either the Exploration page or Idle Income.
+        // Do not OCR the absent Idle Income title on every valid Explore page.
+        if (alreadyOnIdleIncome) return claimIdleIncome();
 
         ImageSearchResultData outer = locateEnabledClaimButton();
         if (!outer.isFound()) {
@@ -293,29 +303,48 @@ public class ExplorationRoutine extends DelayedTask {
             new GreenLabelActionDetector.Region(535, 830, 701, 909);
 
 	private ImageSearchResultData locateEnabledClaimButton() {
-        // The saved 2026-11-11 frame scored 94.1%, just shy of the old 95%.
-        // Restrict the modest threshold adjustment to the observed location.
-		ImageSearchResultData matched = templateSearchHelper.locatePattern(
-				TemplatesEnum.EXPLORATION_CLAIM,
+        if (emuManager.getSelectedEmulatorType()
+                == dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU) {
+            // The old EXPLORATION_CLAIM crop includes "Claim" and can
+            // still match the inactive grey button. Confirm *green fill* on
+            // a verified page instead; absent buttons cost just one ADB frame.
+            var first=ExplorationChestActionFrame.enabled(
+                    emuManager.captureScreen(EMULATOR_NUMBER));
+            if (!first.isFound())return ImageSearchResultData.miss();
+            sleepTask(120);
+            var second=ExplorationChestActionFrame.enabled(
+                    emuManager.captureScreen(EMULATOR_NUMBER));
+            return RecognitionConsensus.agrees(first,second,8)
+                    ? second : ImageSearchResultData.miss();
+        }
+        ImageSearchResultData matched = templateSearchHelper.locatePattern(
+                TemplatesEnum.EXPLORATION_CLAIM,
                 dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig.builder()
                     .withMaxAttempts(2).withDelay(250).withThreshold(92)
-                    .withArea(AreaData.of(525, 804, 710, 926)).build());
-        if (matched.isFound()) return matched;
-        // No blind coordinate taps: require green body and white label on two
-        // independently captured frames of the verified Exploration screen.
-        ImageSearchResultData first = GreenLabelActionDetector.detect(
-                ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER)), EXPLORATION_CLAIM_REGION);
-        if (!first.isFound()) return ImageSearchResultData.miss();
+                    .withArea(AreaData.of(525,804,710,926)).build());
+        if (matched.isFound())return matched;
+        var first=GreenLabelActionDetector.detect(
+                ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER)),
+                EXPLORATION_CLAIM_REGION);
+        if (!first.isFound())return ImageSearchResultData.miss();
         sleepTask(250);
-        ImageSearchResultData second = GreenLabelActionDetector.detect(
-                ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER)), EXPLORATION_CLAIM_REGION);
-        return RecognitionConsensus.agrees(first, second, 8) ? second : ImageSearchResultData.miss();
-	}
+        var second=GreenLabelActionDetector.detect(
+                ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER)),
+                EXPLORATION_CLAIM_REGION);
+        return RecognitionConsensus.agrees(first,second,8) ? second : ImageSearchResultData.miss();
+    }
 
-	private ImageSearchResultData locateDisabledClaimButton() {
-		return templateSearchHelper.locatePattern(
-				TemplatesEnum.EXPLORATION_CLAIM_DISABLED, SearchConfigConstants.SINGLE_WITH_2_RETRIES);
-	}
+    private ImageSearchResultData locateDisabledClaimButton() {
+        if (emuManager.getSelectedEmulatorType()
+                == dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU)
+            return ExplorationChestActionFrame.disabled(
+                    emuManager.captureScreen(EMULATOR_NUMBER))
+                    ? ImageSearchResultData.hit(622,865,90)
+                    : ImageSearchResultData.miss();
+        return templateSearchHelper.locatePattern(
+                TemplatesEnum.EXPLORATION_CLAIM_DISABLED,
+                SearchConfigConstants.SINGLE_WITH_2_RETRIES);
+    }
 
 	private void tapClaimButton(ImageSearchResultData claimResult) {
 		SizeData templateSize = claimResult.getTemplateSize();
