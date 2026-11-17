@@ -5,7 +5,6 @@ import dev.frostguard.engine.schedule.LaunchPoint;
 
 import dev.frostguard.engine.config.PriorityConfigResolver;
 import dev.frostguard.vision.convert.GameTimeUtils;
-import dev.frostguard.vision.convert.GameTimeUtils;
 import dev.frostguard.api.configs.ConfigurationKeyEnum;
 import dev.frostguard.api.configs.TemplatesEnum;
 import dev.frostguard.api.configs.ExpertSkillItemEnum;
@@ -82,6 +81,7 @@ public class ExpertSkillTrainingRoutine extends DelayedTask {
                     GameTimeUtils::isAcceptedFormat,
                     GameTimeUtils::parseDuration);
             if (trainingTime == null) {
+                retryUnverifiedSkillTraining("Active skill timer unreadable after opening Speed Up");
                 return;
             }
             logInfo("A skill is currently being trained. Rescheduling task to run after training completes in "
@@ -198,6 +198,10 @@ public class ExpertSkillTrainingRoutine extends DelayedTask {
                 // Calculate how many taps are needed using the dynamically detected order
                 int tapsNeeded = calculateTapsToReach(currentExpert, expert, expertsOrderList);
 
+                if (tapsNeeded < 0) {
+                    logWarning("Expert carousel order is uncertain; skipping " + expert);
+                    continue;
+                }
                 if (tapsNeeded > 0) {
                     logInfo("Moving from " + currentExpert + " to " + expert + " - tapping " + tapsNeeded + " time(s)");
 
@@ -293,14 +297,31 @@ public class ExpertSkillTrainingRoutine extends DelayedTask {
                 } else {
                     tapInside(new PointData(284, 329), new PointData(452, 359), 1, 300);
                     if (learningTime.equals(LearningTime.TIME_00_10_00)) {
-                        logInfo("All time options failed, but skill training did not start. Forcing 10 minutes option as last resort.");
-                        tapInside(timeCheckboxArea.topLeft(), timeCheckboxArea.bottomRight(), 1, 400);
-                        tapInside(new PointData(454, 777), new PointData(573, 800), 1, 400);
+                        // The former fallback tapped an unverified lower
+                        // button twice, then returned without rescheduling.
+                        // Do not send another resource-spending action when
+                        // every duration failed the actual screen check.
+                        retryUnverifiedSkillTraining("All expert skill durations rejected or unconfirmed");
                         return;
                     }
                 }
             }
         }
+        // No available unlocked skill in this pass is not a successful
+        // training start. Keep this optional routine eligible for later
+        // rechecks rather than returning with an unchanged due time.
+        retryUnverifiedSkillTraining("No priority expert skill was confirmed trainable");
+    }
+
+    static LocalDateTime unknownTrainingRetryAt(LocalDateTime now) {
+        return now.plusMinutes(30);
+    }
+
+    private void retryUnverifiedSkillTraining(String reason) {
+        markWorkIncomplete("Expert Skill Training: " + reason);
+        LocalDateTime retry = unknownTrainingRetryAt(LocalDateTime.now());
+        reschedule(retry);
+        logWarning(reason + "; next safe check at " + retry.format(DATETIME_FORMATTER));
     }
 
     private EXPERTS getExpertFromEnum(ExpertSkillItemEnum expertSkillItem) {
