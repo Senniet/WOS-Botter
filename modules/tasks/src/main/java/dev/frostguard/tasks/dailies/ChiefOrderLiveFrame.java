@@ -18,14 +18,14 @@ import java.util.regex.Pattern;
  * No paid Enact is allowed without explicit authorization.
  * Unknown OCR, wrong order or a generic blue button never means FREE.
  */
-final class ChiefOrderLiveFrame {
-    enum Action { FREE, COSTS_POINTS, UNVERIFIED }
-    enum ListState { ON_COOLDOWN, ACTIVE, AVAILABLE, UNKNOWN }
+public final class ChiefOrderLiveFrame {
+    public enum Action { FREE, COSTS_POINTS, UNVERIFIED }
+    public enum ListState { ON_COOLDOWN, ACTIVE, AVAILABLE, UNKNOWN }
 
-    record ListInspection(ListState state, Duration remaining, String label,
+    public record ListInspection(ListState state, Duration remaining, String label,
                           String status, String timer) {}
 
-    record Inspection(Action action, long cost, String order, String button, String price) {}
+    public record Inspection(Action action, long cost, String order, String button, String price) {}
 
     private static final OcrSettingsData TEXT = OcrSettingsData.assembler()
             .textLayout(OcrSettingsData.TextLayout.SINGLE_LINE).build();
@@ -38,18 +38,18 @@ final class ChiefOrderLiveFrame {
 
     private ChiefOrderLiveFrame() {}
 
-    static boolean isChiefOrderList(RawImageData frame) {
+    public static boolean isChiefOrderList(RawImageData frame) {
         return valid(frame) && norm(read(frame, 252, 97, 490, 164, TEXT))
                 .equals("CHIEF ORDER");
     }
 
-    static boolean isOrderBook(RawImageData frame, String expectedOrder) {
+    public static boolean isOrderBook(RawImageData frame, String expectedOrder) {
         return valid(frame) && expectedOrder != null
                 && norm(read(frame, 200, 552, 540, 630, TEXT)).equals(norm(expectedOrder));
     }
 
     /** Read the banner on the named tile, not an arbitrary cooldown elsewhere in the list. */
-    static ListInspection inspectList(RawImageData frame, String expectedOrder) {
+    public static ListInspection inspectList(RawImageData frame, String expectedOrder) {
         if (!isChiefOrderList(frame) || expectedOrder == null)
             return new ListInspection(ListState.UNKNOWN, null, "", "", "");
         // Positions observed on the real 720x1280 Chief Order board.
@@ -60,6 +60,8 @@ final class ChiefOrderLiveFrame {
             left = 389; titleTop = 445; bannerTop = 302;
         } else if (norm(expectedOrder).equals("URGENT MOBILIZATION")) {
             left = 105; titleTop = 445; bannerTop = 302;
+        } else if (norm(expectedOrder).equals("DOUBLE TIME")) {
+            left = 389; titleTop = 764; bannerTop = 623;
         } else if (norm(expectedOrder).equals("PRODUCTIVITY DAY")) {
             left = 105; titleTop = 1086; bannerTop = 948;
         } else {
@@ -70,6 +72,37 @@ final class ChiefOrderLiveFrame {
         String status = read(frame, left, bannerTop, right, bannerTop + 38, TEXT);
         String timer = read(frame, left, bannerTop + 31, right, bannerTop + 70, TEXT);
         return classifyList(label, status, timer, expectedOrder);
+    }
+
+    public static Long availableOrderPoints(RawImageData frame) {
+        if (!isChiefOrderList(frame)) return null;
+        return parseOrderPoints(read(frame, 584, 15, 675, 67, TEXT));
+    }
+
+    /** Compact displayed Chief Order points, e.g. 4.2M. Unclear OCR never authorizes spending. */
+    public static Long parseOrderPoints(String value) {
+        if (value == null) return null;
+        String clean=value.trim().toUpperCase(Locale.ROOT).replace(" ", "");
+        Matcher matcher=Pattern.compile("^([0-9]+(?:[.,][0-9]+)?)([KMB]?)$").matcher(clean);
+        if (!matcher.matches()) return null;
+        try {
+            String raw=matcher.group(1);
+            String suffix=matcher.group(2);
+            // Without a compact K/M/B suffix, a 3-digit group after a
+            // thousands separator is NOT a decimal fraction: 800,000.
+            String digits=suffix.isEmpty() && raw.matches("[0-9]{1,3}[,.][0-9]{3}")
+                    ? raw.replaceAll("[,.]","") : raw.replace(',', '.');
+            long multiplier=switch(suffix) {
+                case "K" -> 1_000L;
+                case "M" -> 1_000_000L;
+                case "B" -> 1_000_000_000L;
+                default -> 1L;
+            };
+            return java.math.BigDecimal.valueOf(multiplier)
+                    .multiply(new java.math.BigDecimal(digits)).longValueExact();
+        } catch (ArithmeticException | NumberFormatException error) {
+            return null;
+        }
     }
 
     static ListInspection classifyList(String label, String status, String timer,
@@ -100,7 +133,7 @@ final class ChiefOrderLiveFrame {
         return Duration.ofSeconds(hours * 3600L + minutes * 60L + seconds);
     }
 
-    static Inspection inspect(RawImageData frame, String expectedOrder) {
+    public static Inspection inspect(RawImageData frame, String expectedOrder) {
         if (!valid(frame)) return unknown();
         String order = read(frame, 200, 552, 540, 630, TEXT);
         String button = read(frame, 296, 886, 432, 926, TEXT);
@@ -133,7 +166,7 @@ final class ChiefOrderLiveFrame {
         return new Inspection(Action.UNVERIFIED, -1, order, button, priceText);
     }
 
-    static boolean isCityHome(RawImageData frame) {
+    public static boolean isCityHome(RawImageData frame) {
         return valid(frame) && OpenCvPatternLocator.locatePattern(frame,
                 TemplatesEnum.SERVE_EMU_CITY_ANCHOR.getTemplate(),
                 new PointData(590, 1145), new PointData(715, 1275), 90).isFound();
