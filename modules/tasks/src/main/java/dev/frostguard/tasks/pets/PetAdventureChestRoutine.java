@@ -153,14 +153,8 @@ public class PetAdventureChestRoutine extends DelayedTask {
 
 		confirmedDailyMissionProgress = false;
 
-		// Validate stamina before proceeding
-		if (!staminaHelper.checkStaminaOrReschedule(
-				MIN_STAMINA_REQUIRED,
-				TARGET_STAMINA_FOR_REFRESH,
-				this)) {
-			return; // Task will be rescheduled by helper
-		}
-
+		// Collecting finished adventures is free. Never skip available
+        // claims just because stamina is too low to START a new adventure.
 		if (!navigateToPetAdventures()) {
 			rescheduleForNavigationRetry();
 			return;
@@ -173,6 +167,12 @@ public class PetAdventureChestRoutine extends DelayedTask {
 			rescheduleForChestCompletion();
 			return;
 		}
+        // Only new adventures consume stamina; check after free claims and
+        // the observe-only guard, avoiding a redundant initial check.
+        if (!staminaHelper.checkStaminaOrReschedule(
+                MIN_STAMINA_REQUIRED, TARGET_STAMINA_FOR_REFRESH, this)) {
+            return;
+        }
 		startAvailableChests();
 	}
 
