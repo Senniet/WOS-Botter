@@ -70,8 +70,10 @@ private static final int MAX_RESOURCE_REPLENISHMENTS = 4;
 private static final PointData REPLENISH_CONFIRM_POINT = new PointData(511, 1056);
 
 private static final SearchConfig REPLENISH_BUTTON_RECHECK = SearchConfig.builder()
-        .withMaxAttempts(2)
-        .withDelay(300)
+        // Every step obtains a fresh observation; repeated misses consumed
+        // unnecessary time on the live 22:30 Furnace resource cycle.
+        .withMaxAttempts(1)
+        .withDelay(0)
         .withThreshold(90)
         .withCoordinates(new PointData(180, 1070), new PointData(535, 1195))
         .build();
@@ -259,7 +261,7 @@ private boolean refillResourcesIfNeededFlow() {
                     @Override
                     public void openObtain(PointData point) {
                         tapNear(point);
-                        sleepTask(500);
+                        sleepTask(300);
                     }
 
                     @Override
@@ -268,7 +270,7 @@ private boolean refillResourcesIfNeededFlow() {
                         tapNear(point);
                         sleepTask(300);
                         tapNear(REPLENISH_CONFIRM_POINT);
-                        sleepTask(1000);
+                        sleepTask(550);
                     }
                 },
                 MAX_RESOURCE_REPLENISHMENTS);
