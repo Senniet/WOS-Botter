@@ -38,7 +38,11 @@ public abstract class EmulatorInstance {
     private final ConcurrentHashMap<String, Boolean>      runCache  = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Long>         runExpiry = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, RawImageData> lastFrame = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, String> lastReportedGeometry = new ConcurrentHashMap<>();
     private final ReentrantLock bridgeMtx = new ReentrantLock();
+    // Both the GlobalMonitor ticker and task queue capture the same emulator.
+    // Serialize shell screencap by serial to avoid overlapping multi-MB ADB reads.
+    private static final ConcurrentHashMap<String, ReentrantLock> captureLocks = new ConcurrentHashMap<>();
 
     protected abstract String  getDeviceSerial(String idx);
     public    abstract void    launchEmulator(String idx);
@@ -74,12 +78,16 @@ public abstract class EmulatorInstance {
     }
 
     private String adbPath() {
-        String wd = System.getProperty("user.dir");
-        for (String sub : new String[]{"tools", "packaging/desktop/target/input/lib"}) {
-            File f = new File(wd, sub + File.separator + "adb" + File.separator + "adb.exe");
-            if (f.exists()) return f.getAbsolutePath();
-        }
-        return consolePath + File.separator + "adb.exe";
+        // BlueStacks includes its own ADB client; keep using that for BlueStacks.
+        File blueStacksAdb = new File(consolePath, "HD-Adb.exe");
+        if (blueStacksAdb.isFile()) return blueStacksAdb.getAbsolutePath();
+
+        // jpackage ships the bundled Android platform tools inside app/lib/adb,
+        // irrespective of the Windows working directory. Locate them relative
+        // to the launcher/runtime, not by relying only on user.dir.
+        return BundledAdbLocator.find(System.getProperty("user.dir"),
+                System.getProperty("java.home"),
+                System.getProperty("jpackage.app-path"), consolePath);
     }
 
     private void killAdb() {
@@ -120,14 +128,36 @@ public abstract class EmulatorInstance {
     }
 
     private IDevice scan(String serial) {
-        for (IDevice d : bridge.getDevices()) if (serial.equals(d.getSerialNumber())) return d;
+        if (bridge == null) return null;
+        for (IDevice d : bridge.getDevices()) {
+            if (serial.equals(d.getSerialNumber()) && d.isOnline()) return d;
+        }
+        // The same local Android emulator can appear as emulator-5554 or
+        // 127.0.0.1:5555, depending on how the ADB server discovered it.
+        if (serial.startsWith("emulator-")) {
+            try {
+                int consolePort = Integer.parseInt(serial.substring("emulator-".length()));
+                String tcpSerial = "127.0.0.1:" + (consolePort + 1);
+                for (IDevice d : bridge.getDevices()) {
+                    if (tcpSerial.equals(d.getSerialNumber()) && d.isOnline()) return d;
+                }
+            } catch (NumberFormatException ignored) {
+                // Other serial formats must retain exact-match discovery.
+            }
+        }
         return null;
     }
 
     private boolean adbConnect(String serial) {
         if (Thread.currentThread().isInterrupted()) return false;
         try {
-            String ep = serial.startsWith("emulator-") ? "127.0.0.1:" + serial.substring(9) : serial;
+            // emulator-5554 is an ADB serial, not a TCP endpoint.
+            // The corresponding local ADB port is the console port + 1.
+            String ep = serial;
+            if (serial.startsWith("emulator-")) {
+                int consolePort = Integer.parseInt(serial.substring("emulator-".length()));
+                ep = "127.0.0.1:" + (consolePort + 1);
+            }
             BoundedProcessRunner.ProcessResult result = BoundedProcessRunner.run(
                     new ProcessBuilder(adbPath(), "connect", ep)
                             .directory(new File(adbPath()).getParentFile()),
@@ -168,7 +198,16 @@ public abstract class EmulatorInstance {
     }
 
     protected void invalidateRunningStatusCache(String idx) { runCache.remove(idx); runExpiry.remove(idx); }
-    public void invalidateAllCaches(String idx) { invalidateDeviceCache(idx); invalidateRunningStatusCache(idx); }
+    public void invalidateAllCaches(String idx) {
+        invalidateDeviceCache(idx);
+        invalidateRunningStatusCache(idx);
+        invalidateCapturedFrame(lastFrame, idx);
+        lastReportedGeometry.remove(idx);
+    }
+
+    static void invalidateCapturedFrame(Map<String, RawImageData> frames, String idx) {
+        frames.remove(idx);
+    }
 
     // --- 3-phase retry ---
 
@@ -243,9 +282,58 @@ public abstract class EmulatorInstance {
 
     // --- screen capture ---
 
+    private static final int SCREENSHOT_COMMAND_TIMEOUT_MS = 5_000;
+
+    static ReentrantLock captureLockForSerial(String serial) {
+        return captureLocks.computeIfAbsent(serial, unused -> new ReentrantLock(true));
+    }
+
     public RawImageData captureScreenshot(String idx) {
         String serial = getDeviceSerial(idx);
         if (serial == null) throw new ADBConnectionException("No serial for dev " + idx);
+        ReentrantLock captureLock = captureLockForSerial(serial);
+        captureLock.lock();
+        try {
+            return captureScreenshotLocked(idx, serial);
+        } finally {
+            captureLock.unlock();
+        }
+    }
+
+    private RawImageData captureScreenshotLocked(String idx, String serial) {
+        // A one-shot fresh capture may recover ddmlib shell stalls without
+        // restarting the remote serve-emu or repeating any gameplay actions.
+        return retryTransientCapture(() -> captureScreenshotAttempt(idx, serial), () -> {
+            LOG.warn("Transient ADB screencap failure for device {}; retrying one fresh frame", idx);
+            invalidateDeviceCache(idx);
+            sleep(350);
+        });
+    }
+
+    static <T> T retryTransientCapture(Supplier<T> capture, Runnable prepareRetry) {
+        try {
+            return capture.get();
+        } catch (RuntimeException failure) {
+            if (Thread.currentThread().isInterrupted() || !isTransientCaptureFailure(failure)) {
+                throw failure;
+            }
+            prepareRetry.run();
+            if (Thread.currentThread().isInterrupted()) throw failure;
+            return capture.get();
+        }
+    }
+
+    static boolean isTransientCaptureFailure(Throwable failure) {
+        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+            if (cause instanceof com.android.ddmlib.ShellCommandUnresponsiveException
+                    || cause instanceof com.android.ddmlib.TimeoutException
+                    || cause instanceof java.io.IOException
+                    || cause instanceof ADBConnectionException) return true;
+        }
+        return false;
+    }
+
+    private RawImageData captureScreenshotAttempt(String idx, String serial) {
         ByteArrayOutputStream buf = new ByteArrayOutputStream(720 * 1280 * 4 + 64);
         try {
             IDevice d = getCachedDevice(idx);
@@ -254,19 +342,16 @@ public abstract class EmulatorInstance {
             }
             d.executeShellCommand("screencap", new CollectingOutputReceiver() {
                 @Override public void addOutput(byte[] data, int off, int len) { buf.write(data, off, len); }
-            }, 2000, TimeUnit.MILLISECONDS);
-            byte[] raw = buf.toByteArray();
-            if (raw.length < 12) throw new RuntimeException("screencap too small");
-            int w = le32(raw, 0), h = le32(raw, 4), fmt = le32(raw, 8);
-            int bitsPerPixel = (fmt == 1) ? 32 : 16;
-            int bytesPerPixel = bitsPerPixel / 8;
-            int headerLength = raw.length - (w * h * bytesPerPixel);
-            if (headerLength < 12 || headerLength > 64) {
-                headerLength = 12;
+            }, SCREENSHOT_COMMAND_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            RawImageData raw = decodeScreenshotPayload(buf.toByteArray());
+            RawImageData frame = prepareCapturedFrame(idx, raw);
+            String signature = raw.getWidth() + "x" + raw.getHeight() + " -> "
+                    + frame.getWidth() + "x" + frame.getHeight();
+            String previous = lastReportedGeometry.put(idx, signature);
+            if (!signature.equals(previous)) {
+                LOG.info("Emulator {} ADB screenshot geometry {} (physical -> recognition); "
+                        + "tap mapping follows the active screenshot", idx, signature);
             }
-            byte[] px = new byte[raw.length - headerLength];
-            System.arraycopy(raw, headerLength, px, 0, px.length);
-            RawImageData frame = RawImageData.capture(px, w, h, bitsPerPixel);
             lastFrame.put(idx, frame);
             return frame;
         } catch (Exception e) {
@@ -279,8 +364,8 @@ public abstract class EmulatorInstance {
 
     static String captureFailureMessage(String idx, String serial, int receivedBytes, Exception failure) {
         String timeout = failure instanceof com.android.ddmlib.TimeoutException
-                ? "commandTimeoutMs=2000"
-                : "commandTimeoutMs=2000 (not reached or not identified as timeout)";
+                ? "commandTimeoutMs=" + SCREENSHOT_COMMAND_TIMEOUT_MS
+                : "commandTimeoutMs=" + SCREENSHOT_COMMAND_TIMEOUT_MS + " (not reached or not identified as timeout)";
         return "ADB screencap failed; emulator=" + idx
                 + "; serial=" + serial
                 + "; command=screencap"
@@ -290,6 +375,41 @@ public abstract class EmulatorInstance {
                 + "; cause=" + failure.getClass().getSimpleName() + ": "
                 + Objects.requireNonNullElse(failure.getMessage(), "no message");
     }
+
+    static RawImageData decodeScreenshotPayload(byte[] raw) {
+        if (raw == null || raw.length < 12) {
+            throw new IllegalArgumentException("screencap header is missing or truncated");
+        }
+        int width = le32(raw, 0), height = le32(raw, 4), format = le32(raw, 8);
+        if (width <= 0 || height <= 0 || width > 16_384 || height > 16_384) {
+            throw new IllegalArgumentException("invalid screencap dimensions: " + width + "x" + height);
+        }
+        // Android PIXEL_FORMAT_RGBA_8888 / RGBX_8888 and RGB_565.
+        // Reject unknown formats instead of silently interpreting them as RGB_565.
+        int bitsPerPixel = switch (format) {
+            case 1, 2 -> 32;
+            case 4 -> 16;
+            default -> throw new IllegalArgumentException("unsupported screencap pixel format: " + format);
+        };
+        long expectedPixelBytes = (long) width * height * (bitsPerPixel / 8);
+        long headerLength = raw.length - expectedPixelBytes;
+        if (headerLength < 12 || headerLength > 64 || expectedPixelBytes > Integer.MAX_VALUE
+                || headerLength + expectedPixelBytes != raw.length) {
+            throw new IllegalArgumentException("incomplete or malformed screencap payload: dimensions="
+                    + width + "x" + height + ", format=" + format + ", bytes=" + raw.length);
+        }
+        int offset = (int) headerLength;
+        byte[] pixels = Arrays.copyOfRange(raw, offset, raw.length);
+        RawImageData frame = RawImageData.capture(pixels, width, height, bitsPerPixel);
+        if (!frame.isValid()) throw new IllegalArgumentException("decoded screencap frame is invalid");
+        return frame;
+    }
+
+    /** Per-emulator capture preparation; all existing backends remain unchanged. */
+    protected RawImageData prepareCapturedFrame(String idx, RawImageData raw) { return raw; }
+
+    /** Translate reference-space coordinates only for backends that normalize screenshots. */
+    protected PointData mapScreenPoint(String idx, PointData point) { return point; }
 
     private static int le32(byte[] b, int o) {
         return (b[o]&0xFF) | ((b[o+1]&0xFF)<<8) | ((b[o+2]&0xFF)<<16) | ((b[o+3]&0xFF)<<24);
@@ -304,18 +424,17 @@ public abstract class EmulatorInstance {
     boolean touchArea(String idx, PointData a, PointData b, int n, int delMs) { return tap(idx, a, b, n, delMs); }
 
     private boolean tap(String idx, PointData c1, PointData c2, int reps, int delMs) {
-        return withRetries(idx, dev -> {
-            Random rng = new Random();
-            int x0 = Math.min(c1.getX(), c2.getX()), x1 = Math.max(c1.getX(), c2.getX());
-            int y0 = Math.min(c1.getY(), c2.getY()), y1 = Math.max(c1.getY(), c2.getY());
-            for (int t = 0; t < reps; t++) {
-                int tx = x0 + rng.nextInt(Math.max(1, x1 - x0 + 1));
-                int ty = y0 + rng.nextInt(Math.max(1, y1 - y0 + 1));
-                try { dev.executeShellCommand("input tap " + tx + " " + ty, new NullOutputReceiver()); Thread.sleep(delMs); }
-                catch (Exception e) { throw new RuntimeException(e); }
-            }
-            return Boolean.TRUE;
-        }, "tap");
+        Random rng = new Random();
+        int x0 = Math.min(c1.getX(), c2.getX()), x1 = Math.max(c1.getX(), c2.getX());
+        int y0 = Math.min(c1.getY(), c2.getY()), y1 = Math.max(c1.getY(), c2.getY());
+        for (int t = 0; t < reps; t++) {
+            int tx = x0 + rng.nextInt(Math.max(1, x1 - x0 + 1));
+            int ty = y0 + rng.nextInt(Math.max(1, y1 - y0 + 1));
+            PointData target = mapScreenPoint(idx, new PointData(tx, ty));
+            dispatchInputCommand(idx, "input tap " + target.getX() + " " + target.getY(), "tap");
+            sleep(delMs);
+        }
+        return true;
     }
 
     public void swipe(String idx, PointData from, PointData to) {
@@ -330,11 +449,7 @@ public abstract class EmulatorInstance {
     }
 
     private void swipe(String idx, PointData from, PointData to, Integer durationMs) {
-        withRetries(idx, dev -> {
-            try { dev.executeShellCommand(swipeCommand(from, to, durationMs), new NullOutputReceiver()); }
-            catch (Exception e) { throw new RuntimeException(e); }
-            return Boolean.TRUE;
-        }, "swipe");
+        dispatchInputCommand(idx, swipeCommand(mapScreenPoint(idx, from), mapScreenPoint(idx, to), durationMs), "swipe");
     }
 
     static String swipeCommand(PointData from, PointData to, Integer durationMs) {
@@ -344,27 +459,61 @@ public abstract class EmulatorInstance {
     }
 
     public void pressBackButton(String idx) {
-        withRetries(idx, dev -> {
-            try { dev.executeShellCommand("input keyevent KEYCODE_BACK", new NullOutputReceiver()); }
-            catch (Exception e) { throw new RuntimeException(e); }
-            return Boolean.TRUE;
-        }, "back");
+        dispatchInputCommand(idx, "input keyevent KEYCODE_BACK", "back");
     }
 
     public void writeText(String idx, String text) {
-        withRetries(idx, dev -> {
-            try { dev.executeShellCommand("input text \"" + esc(text) + "\"", new NullOutputReceiver()); }
-            catch (Exception e) { throw new RuntimeException(e); }
-            return Boolean.TRUE;
-        }, "text");
+        dispatchInputCommand(idx, "input text \"" + esc(text) + "\"", "text");
     }
 
     public void clearText(String idx, int n) {
-        withRetries(idx, dev -> {
-            try { for (int c = 0; c < n; c++) { dev.executeShellCommand("input keyevent KEYCODE_DEL", new NullOutputReceiver()); Thread.sleep(50); } }
-            catch (Exception e) { throw new RuntimeException(e); }
-            return Boolean.TRUE;
-        }, "clear");
+        for (int c = 0; c < n; c++) {
+            dispatchInputCommand(idx, "input keyevent KEYCODE_DEL", "clear-text");
+            sleep(50);
+        }
+    }
+
+    /**
+     * Dispatches a non-idempotent UI input exactly once. A transport error after
+     * sending the command leaves its outcome unknown, so automatic retry/reboot
+     * recovery is deliberately forbidden here; the caller must inspect the UI.
+     */
+    private void dispatchInputCommand(String idx, String command, String tag) {
+        if (Thread.currentThread().isInterrupted()) {
+            throw new ADBConnectionException("Interrupted before input dispatch: " + tag);
+        }
+        final IDevice device;
+        try {
+            device = getCachedDevice(idx);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            invalidateAllCaches(idx);
+            throw new ADBConnectionException("ADB lookup interrupted before input dispatch for "
+                    + tag + " on " + idx + "; command was not sent", interrupted);
+        } catch (Exception failure) {
+            invalidateAllCaches(idx);
+            throw new ADBConnectionException("ADB unavailable before input dispatch for "
+                    + tag + " on " + idx + "; command was not sent", failure);
+        }
+        if (device == null || !device.isOnline()) {
+            invalidateAllCaches(idx);
+            throw new ADBConnectionException("Device unavailable before input dispatch for "
+                    + tag + " on " + idx + "; command was not sent");
+        }
+        try {
+            // Under heavy emulator load the Android input service may take longer
+            // than three seconds to acknowledge a dispatched tap. Keep a
+            // bounded timeout but never resend a possibly executed action.
+            device.executeShellCommand(command, new NullOutputReceiver(), 8, TimeUnit.SECONDS);
+        } catch (Exception failure) {
+            invalidateAllCaches(idx);
+            throw new ADBConnectionException("Input dispatch outcome unknown for " + tag
+                    + " on " + idx + "; command was not retried", failure);
+        } finally {
+            // A previous frame must never be reused for OCR after any input:
+            // even an unacknowledged tap may already have changed the UI.
+            invalidateCapturedFrame(lastFrame, idx);
+        }
     }
 
     private String esc(String s) {

@@ -1,6 +1,8 @@
 package dev.frostguard.tasks.city;
 
 import dev.frostguard.api.configs.TpDailyTaskEnum;
+import dev.frostguard.api.configs.ConfigurationKeyEnum;
+import dev.frostguard.tasks.dailies.ChiefOrderLiveFrame;
 import dev.frostguard.api.configs.TemplatesEnum;
 import dev.frostguard.api.domain.*;
 import dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig;
@@ -62,6 +64,7 @@ private static final int BUILDING_CONTROL_POLL_MS = 300;
 private static final int UPGRADE_CONFIRMATION_THRESHOLD = 90;
 
 private final CityUpgradeDiagnostics diagnostics = new CityUpgradeDiagnostics();
+private boolean doubleTimeAttempted;
 
 private static final int TEMPLATE_TAP_RADIUS = 8;
 
@@ -70,8 +73,10 @@ private static final int MAX_RESOURCE_REPLENISHMENTS = 4;
 private static final PointData REPLENISH_CONFIRM_POINT = new PointData(511, 1056);
 
 private static final SearchConfig REPLENISH_BUTTON_RECHECK = SearchConfig.builder()
-        .withMaxAttempts(2)
-        .withDelay(300)
+        // Every step obtains a fresh observation; repeated misses consumed
+        // unnecessary time on the live 22:30 Furnace resource cycle.
+        .withMaxAttempts(1)
+        .withDelay(0)
         .withThreshold(90)
         .withCoordinates(new PointData(180, 1070), new PointData(535, 1195))
         .build();
@@ -107,6 +112,7 @@ public UpgradeBuildingsRoutine(AccountDescriptor profile, TpDailyTaskEnum tpDail
 
 private void executeQueues() {
         diagnostics.begin(0, 0);
+        doubleTimeAttempted = false;
         reachCityView();
 
 
@@ -259,7 +265,7 @@ private boolean refillResourcesIfNeededFlow() {
                     @Override
                     public void openObtain(PointData point) {
                         tapNear(point);
-                        sleepTask(500);
+                        sleepTask(300);
                     }
 
                     @Override
@@ -268,7 +274,7 @@ private boolean refillResourcesIfNeededFlow() {
                         tapNear(point);
                         sleepTask(300);
                         tapNear(REPLENISH_CONFIRM_POINT);
-                        sleepTask(1000);
+                        sleepTask(550);
                     }
                 },
                 MAX_RESOURCE_REPLENISHMENTS);
@@ -1027,6 +1033,17 @@ private Attempt<QueueHandlingResult> handleQueueAttempt(QueueReadout queueResult
             diagnostics.decision(frame, furnace.toString());
             if (furnace.actionable()) {
                 logInfo(routineLogUpgradeBuildingsLine("Furnace entry recognized; " + furnace));
+                if (shouldPrepareDoubleTime(true)) {
+                    doubleTimeAttempted = true;
+                    // This exact Furnace Upgrade control was verified, and an
+                    // idle construction queue exists. Prepare the five-minute
+                    // buff only now, never on a busy/unrecognized building.
+                    prepareDoubleTimeBeforeFurnaceUpgrade();
+                    // Chief Order navigation changes the selected building;
+                    // return to the same queue and revalidate the upgrade
+                    // action. The boolean guard prevents a second enact.
+                    return handleQueueAttempt(queueResult);
+                }
                 return buildingAttempt(startBuildingAction("upgrade", furnace.upgrade()));
             }
 
@@ -1043,7 +1060,34 @@ private Attempt<QueueHandlingResult> handleQueueAttempt(QueueReadout queueResult
                 return buildingAttempt(handleSurvivorBuilding());
             }
             if (upgrade != null && upgrade.isFound()) {
+                // New Furnace artwork sometimes matches its title but not
+                // the Furnace-specific orange button. A separately verified
+                // generic Upgrade button on the same Furnace frame is safe.
+                if (shouldPrepareDoubleTime(furnace.panelVisible())) {
+                    doubleTimeAttempted=true;
+                    prepareDoubleTimeBeforeFurnaceUpgrade();
+                    return handleQueueAttempt(queueResult);
+                }
                 return buildingAttempt(startBuildingAction("upgrade", upgrade));
+            }
+            // In current 720x1280 game artwork the guidance hand covers the
+            // white Upgrade arrow, reducing template score below recognition.
+            // Require both a precisely located Details control and the hand
+            // pointing at its adjacent Upgrade before attempting this tap.
+            if (!info.isFound()) {
+                CityUpgradeGuidanceDetector.Evidence guided = CityUpgradeGuidanceDetector.inspect(
+                        (template, area, threshold) -> locateOnFrame(frame, template, area, threshold));
+                diagnostics.decision(frame, "tutorial-hand upgrade=" + guided);
+                if (guided.actionable()) {
+                    logInfo(routineLogUpgradeBuildingsLine(
+                            "Selected building Upgrade guided by confirmed hand+Details; " + guided));
+                    if (shouldPrepareDoubleTime(furnace.panelVisible())) {
+                        doubleTimeAttempted=true;
+                        prepareDoubleTimeBeforeFurnaceUpgrade();
+                        return handleQueueAttempt(queueResult);
+                    }
+                    return buildingAttempt(startBuildingAction("upgrade", guided.upgrade()));
+                }
             }
             if (poll < BUILDING_CONTROL_CHECKS - 1) sleepTask(BUILDING_CONTROL_POLL_MS);
         }
@@ -1062,6 +1106,100 @@ private Attempt<QueueHandlingResult> handleQueueAttempt(QueueReadout queueResult
                 ? Attempt.unresolved(FailureReason.CONTROL_NOT_RECOGNIZED)
                 : Attempt.completed(new QueueHandlingResult(false, blocker));
     }
+
+private boolean shouldPrepareDoubleTime(boolean furnaceConfirmed) {
+    return furnaceConfirmed && !doubleTimeAttempted
+            && Boolean.TRUE.equals(profile.getConfig(
+                    ConfigurationKeyEnum.CITY_UPGRADE_DOUBLE_TIME_BOOL,Boolean.class));
+}
+
+/**
+ * One bounded Chief Order attempt, immediately before a confirmed Furnace
+ * upgrade. Insufficient points, cooldown or unreadable UI are normal skips;
+ * construction continues, never uses gems and never retries Enact blindly.
+ */
+private void prepareDoubleTimeBeforeFurnaceUpgrade() {
+    diagnostics.stage("double-time-preparation");
+    checkPreemption();
+    try {
+        recoverLocation(LaunchPoint.HOME);
+        ImageSearchResultData menu=templateSearchHelper.locatePattern(
+                TemplatesEnum.CHIEF_ORDER_MENU_BUTTON,
+                SearchConfig.builder().withMaxAttempts(1).withThreshold(90).build());
+        if (menu == null || !menu.isFound()) {
+            logInfo(routineLogUpgradeBuildingsLine("Double Time skipped: Chief Order menu not present"));
+            return;
+        }
+        tapInside(menu);
+        sleepTask(350);
+        RawImageData board=emuManager.captureScreen(EMULATOR_NUMBER);
+        if (!ChiefOrderLiveFrame.isChiefOrderList(board)) {
+            logWarning(routineLogUpgradeBuildingsLine("Double Time skipped: order board unverified"));
+            return;
+        }
+        var tile=ChiefOrderLiveFrame.inspectList(board,"Double Time");
+        if (tile.state()==ChiefOrderLiveFrame.ListState.ACTIVE) {
+            logInfo(routineLogUpgradeBuildingsLine("Double Time already active; proceeding to build"));
+            return;
+        }
+        if (tile.state()!=ChiefOrderLiveFrame.ListState.AVAILABLE) {
+            logInfo(routineLogUpgradeBuildingsLine("Double Time unavailable: "+tile.state()));
+            return;
+        }
+        Long balance=ChiefOrderLiveFrame.availableOrderPoints(board);
+        if(balance==null || balance<DoubleTimePolicy.REQUIRED_POINTS) {
+            logInfo(routineLogUpgradeBuildingsLine(
+                    "Double Time skipped: available Chief Order points insufficient/unreadable: "+balance));
+            return;
+        }
+
+        // Middle-right Double Time tile, confirmed by its own title and
+        // cooldown OCR above. Do not select another Chief Order.
+        tapNear(new PointData(490,640),8);
+        sleepTask(380);
+        RawImageData book=emuManager.captureScreen(EMULATOR_NUMBER);
+        var offer=ChiefOrderLiveFrame.inspect(book,"Double Time");
+        if (offer.action()!=ChiefOrderLiveFrame.Action.COSTS_POINTS) {
+            logWarning(routineLogUpgradeBuildingsLine(
+                    "Double Time cost or identity not verified; no points spent: "+offer.action()));
+            return;
+        }
+        ImageSearchResultData enact=templateSearchHelper.locatePattern(
+                TemplatesEnum.CHIEF_ORDER_ENACT_BUTTON,
+                SearchConfig.builder().withMaxAttempts(1).withThreshold(90)
+                    .withArea(AreaData.of(205,860,525,975)).build());
+        boolean allowed=DoubleTimePolicy.mayEnact(balance,offer.cost(),
+                ChiefOrderLiveFrame.isOrderBook(book,"Double Time"),
+                enact!=null && enact.isFound());
+        if (!allowed) {
+            logInfo(routineLogUpgradeBuildingsLine(
+                    "Double Time skipped: price/balance/Enact safety check failed"));
+            return;
+        }
+        logInfo(routineLogUpgradeBuildingsLine(
+                "Double Time: one verified 800000-point Enact tap before Furnace upgrade"));
+        tapInside(enact);
+        sleepTask(600);
+        // Never repeat a potentially successful point-spending tap. The
+        // next action is to return Home and start the build promptly.
+        RawImageData result=emuManager.captureScreen(EMULATOR_NUMBER);
+        ImageSearchResultData reward=emuManager.locatePattern(EMULATOR_NUMBER,
+                result,TemplatesEnum.SHARED_REWARDS_BANNER,
+                new PointData(30,245),new PointData(690,400),90);
+        if(reward!=null && reward.isFound()) {
+            tapNear(new PointData(360,1190),8);
+            sleepTask(280);
+        }
+    } catch (RuntimeException failure) {
+        CityUpgradeFlow.rethrowControlSignal(failure);
+        logWarning(routineLogUpgradeBuildingsLine(
+                "Double Time attempt unavailable: "+failure.getClass().getSimpleName()));
+    } finally {
+        // Never return into an old Furnace dialog after Chief Order. Re-open
+        // the building from a verified City root to prevent wrong clicks.
+        recoverLocation(LaunchPoint.HOME);
+    }
+}
 
 private Attempt<QueueHandlingResult> buildingAttempt(FailureReason failure) {
         return failure == null ? Attempt.completed(new QueueHandlingResult(true, null))

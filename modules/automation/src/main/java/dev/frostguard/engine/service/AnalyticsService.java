@@ -124,7 +124,7 @@ public class AnalyticsService {
 		track("app_launched", props);
 
 		// Start heartbeat to calculate active users
-		if (heartbeatExecutor == null || heartbeatExecutor.isShutdown()) {
+		if (isEnabled() && (heartbeatExecutor == null || heartbeatExecutor.isShutdown())) {
 			heartbeatExecutor = Executors.newSingleThreadScheduledExecutor();
 			heartbeatExecutor.scheduleAtFixedRate(() -> {
 				JSONObject hbProps = new JSONObject();
@@ -326,18 +326,8 @@ public class AnalyticsService {
 	 * @return true if analytics is enabled
 	 */
 	public boolean isEnabled() {
-		try {
-			HashMap<String, String> globalConfig = ConfigService.obtain().loadGlobalSettings();
-			if (globalConfig == null) {
-				return true; // Default to enabled
-			}
-			String value = globalConfig.getOrDefault(
-					ConfigurationKeyEnum.ANALYTICS_ENABLED_BOOL.name(),
-					ConfigurationKeyEnum.ANALYTICS_ENABLED_BOOL.getDefaultValue());
-			return Boolean.parseBoolean(value);
-		} catch (Exception e) {
-			return true; // Default to enabled if config read fails
-		}
+		// Legacy external Mixpanel pipeline is retired; no transmission.
+		return false;
 	}
 
 	/**

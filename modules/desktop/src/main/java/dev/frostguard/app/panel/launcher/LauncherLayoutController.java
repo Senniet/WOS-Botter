@@ -7,6 +7,7 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -145,11 +146,12 @@ public class LauncherLayoutController implements IProfileLoadListener, StaminaCh
     @FXML
     private TextField navSearchField;
     @FXML
-    private Label logoWhiteout;
-    @FXML
-    private Label logoSurvival;
-    @FXML
     private VBox sidebarHeader;
+    @FXML private VBox sidebarStatusBox;
+    @FXML private Label sidebarStatusTitle;
+    @FXML private Label sidebarStatusDetail;
+    @FXML private Label sidebarStatusSubDetail;
+    @FXML private Label footerBotStatus;
 
     // Custom Title Bar FXML
     @FXML private javafx.scene.layout.StackPane titleBar;
@@ -220,6 +222,7 @@ public class LauncherLayoutController implements IProfileLoadListener, StaminaCh
     private int autoStartSecondsRemaining;
     private boolean isStartup = true;
     private NotificationCenterController notificationCenterController;
+    private DashboardLayoutController dashboardController;
     private final Consumer<List<ActionRequiredIncidentData>> notificationListener =
             this::onNotificationSnapshot;
 
@@ -271,9 +274,51 @@ public class LauncherLayoutController implements IProfileLoadListener, StaminaCh
         uptimeTimeline.play();
     }
 
+    private void refreshDashboard() { /* internal */
+        if (dashboardController == null) return;
+        List<ProfileAux> profiles = profileComboBox == null
+                ? List.of() : new ArrayList<>(profileComboBox.getItems());
+        Map<Long, String> currentTasks = new HashMap<>();
+        Map<Long, String> nextTasks = new HashMap<>();
+        activeQueueStates.keySet().forEach(profileId -> {
+            var queue = ScheduleService.obtain().getCoordinator().getQueue(profileId);
+            if (queue != null) {
+                for (var taskType : dev.frostguard.api.configs.TpDailyTaskEnum.values()) {
+                    if (queue.isExecutingTask(taskType)) {
+                        currentTasks.put(profileId, taskType.getLabel());
+                        break;
+                    }
+                }
+                if (!currentTasks.containsKey(profileId)) {
+                    var next = queue.getNextQueuedTaskTypes(1);
+                    if (!next.isEmpty()) nextTasks.put(profileId, next.get(0).getLabel());
+                }
+            }
+        });
+        dashboardController.updateSnapshot(profiles, new HashMap<>(activeQueueStates), currentTasks, nextTasks,
+                consoleLogLayoutController.getRecentActivity(5), estado, allQueuesPaused,
+                formatUptime((System.nanoTime() - uptimeStartedAtNanos) / 1_000_000_000L));
+    }
+
     private void updateUptimeLabel() { /* internal */
         long elapsedSeconds = (System.nanoTime() - uptimeStartedAtNanos) / 1_000_000_000L;
         labelRunTime.setText("Uptime: " + formatUptime(elapsedSeconds));
+        refreshShellStatus();
+        refreshDashboard();
+    }
+
+    private void refreshShellStatus() {
+        String state = !estado ? "Gereed" : allQueuesPaused ? "Gepauzeerd" : "Actief";
+        String detail = !estado ? "Automatisering gestopt"
+                : allQueuesPaused ? "Wachtrijen gepauzeerd" : "Automatisering draait";
+        sidebarStatusTitle.setText(state);
+        sidebarStatusDetail.setText(detail);
+        sidebarStatusSubDetail.setText(activeQueueStates.size()
+                + (activeQueueStates.size() == 1 ? " wachtrij beschikbaar" : " wachtrijen beschikbaar"));
+        sidebarStatusBox.getStyleClass().removeAll("state-active", "state-paused", "state-idle");
+        sidebarStatusBox.getStyleClass().add(!estado ? "state-idle"
+                : allQueuesPaused ? "state-paused" : "state-active");
+        footerBotStatus.setText(detail);
     }
 
     static String formatUptime(long elapsedSeconds) {
@@ -387,7 +432,7 @@ public class LauncherLayoutController implements IProfileLoadListener, StaminaCh
     }
 
     private void showVersion() { /* internal */
-        labelVersion.setText("Version: " + BuildMetadata.current().version());
+        labelVersion.setText("SurvivalOps " + BuildMetadata.current().version());
     }
 
     private void initializeEmulatorController() { /* internal */
@@ -410,7 +455,8 @@ public class LauncherLayoutController implements IProfileLoadListener, StaminaCh
 
         if (null != activeEmulator) {
             String activePath = globalConfig.get(activeEmulator.getConfigKey());
-            if (activePath != null && new File(activePath).exists()) {
+            if (activePath != null && (activeEmulator == EmulatorType.SERVE_EMU
+                    ? !activePath.isBlank() : new File(activePath).exists())) {
                 activeEmulatorValid = true;
             } else {
                 ScheduleService.obtain().persistEmulatorPath(activeEmulator.getConfigKey(), null);
@@ -423,9 +469,11 @@ public class LauncherLayoutController implements IProfileLoadListener, StaminaCh
                 continue;
 
             String emulatorPath = globalConfig.get(emulator.getConfigKey());
-            if (emulatorPath != null && new File(emulatorPath).exists()) {
+            if (emulatorPath != null && (emulator == EmulatorType.SERVE_EMU
+                    ? !emulatorPath.isBlank() : new File(emulatorPath).exists())) {
                 foundEmulators.add(emulator);
             } else {
+                if (emulator == EmulatorType.SERVE_EMU) continue;
                 File emulatorFile = new File(emulator.getDefaultPath());
                 if (emulatorFile.exists()) {
                     ScheduleService.obtain().persistEmulatorPath(emulator.getConfigKey(), emulatorFile.getParent());
@@ -510,6 +558,23 @@ public class LauncherLayoutController implements IProfileLoadListener, StaminaCh
     }
 
     private void selectEmulatorManually(EmulatorType selectedEmulator) { /* internal */
+        if (selectedEmulator == EmulatorType.SERVE_EMU) {
+            javafx.scene.control.TextInputDialog dialog = new javafx.scene.control.TextInputDialog();
+            dialog.setTitle("Connect serve-emu on TrueNAS");
+            dialog.setHeaderText("Enter remote ADB host:port; comma-separated for multiple devices");
+            dialog.setContentText("ADB endpoint(s):");
+            var result = dialog.showAndWait();
+            if (result.isPresent()) {
+                try {
+                    dev.frostguard.engine.emulator.instance.ServeEmuEmulatorInstance.validateEndpoints(result.get());
+                    ScheduleService.obtain().persistEmulatorPath(selectedEmulator.getConfigKey(), result.get());
+                    ScheduleService.obtain().persistEmulatorPath(ConfigurationKeyEnum.CURRENT_EMULATOR_STRING.name(), selectedEmulator.name());
+                    return;
+                } catch (IllegalArgumentException ex) { showErrorAndExit(ex.getMessage()); return; }
+            }
+            showErrorAndExit("No serve-emu ADB endpoint supplied");
+            return;
+        }
         FileChooser fileChooser = new FileChooser();
         fileChooser.setTitle("Select Emulator Executable for " + selectedEmulator.getDisplayName());
 
@@ -569,21 +634,25 @@ public class LauncherLayoutController implements IProfileLoadListener, StaminaCh
         Parent taskPane = loadNode("TaskManagerLayout", taskCtrl);
         Parent customTasksPane = loadNode("CustomTasksLayout", customTasksCtrl);
 
-        // Show Logs by default on startup
-        setMainContent(logsPane);
+        // Dashboard is the default landing page; operational screens remain available in navigation.
+        dashboardController = new DashboardLayoutController();
+        Parent dashboardPane = loadNode("DashboardLayout", dashboardController);
+        Button dashboardButton = addButton("DashboardLayout", "Dashboard", MaterialDesignH.HOME, dashboardController);
+        dashboardButton.getStyleClass().add("active");
+        setMainContent(dashboardPane);
 
         TabPane controlTabs = new TabPane();
         controlTabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
         controlTabs.getTabs().addAll(
-                makeTab("Logs", logsPane),
-                makeTab("Profiles", profilesPane),
-                makeTab("Tasks", taskPane),
-                makeTab("Custom Tasks", customTasksPane)
+                makeTab("Logboeken", logsPane),
+                makeTab("Profielen", profilesPane),
+                makeTab("Taken", taskPane),
+                makeTab("Eigen taken", customTasksPane)
         );
         controlTabs.setMaxWidth(Double.MAX_VALUE);
         controlTabs.setMaxHeight(Double.MAX_VALUE);
 
-        addPinnedButton("Control", MaterialDesignC.CONTROLLER_CLASSIC, controlTabs);
+        Button controlButton = addPinnedButton("Bediening", MaterialDesignC.CONTROLLER_CLASSIC, controlTabs);
 
         // Config pinned button with application-wide settings tabs.
         EmuConfigLayoutController configCtrl = new EmuConfigLayoutController();
@@ -605,7 +674,12 @@ public class LauncherLayoutController implements IProfileLoadListener, StaminaCh
         configTabs.setMaxWidth(Double.MAX_VALUE);
         configTabs.setMaxHeight(Double.MAX_VALUE);
 
-        addPinnedButton("Config", MaterialDesignC.COG_OUTLINE, configTabs);
+        Button settingsButton = addPinnedButton("Instellingen", MaterialDesignC.COG_OUTLINE, configTabs);
+        dashboardController.setNavigationActions(
+                () -> { controlButton.fire(); controlTabs.getSelectionModel().select(1); },
+                () -> { settingsButton.fire(); configTabs.getSelectionModel().select(0); },
+                () -> { controlButton.fire(); controlTabs.getSelectionModel().select(2); },
+                () -> { controlButton.fire(); controlTabs.getSelectionModel().select(0); });
     }
 
     private Tab makeTab(String title, Parent content) { /* internal */
@@ -656,6 +730,7 @@ public class LauncherLayoutController implements IProfileLoadListener, StaminaCh
         profileComboBox.getItems().addAll(profiles);
         configureComboCells();
         updatingComboBox = false;
+        refreshDashboard();
     }
 
     private void configureComboCells() { /* internal */
@@ -741,18 +816,31 @@ public class LauncherLayoutController implements IProfileLoadListener, StaminaCh
         );
         //@formatter:on
 
+        Map<String, List<ModuleDefinition>> sections = new LinkedHashMap<>();
+        sections.put("STAD & ACCOUNTS", new ArrayList<>());
+        sections.put("TAKEN & ROUTINES", new ArrayList<>());
+        sections.put("ECONOMIE & ALLIANTIE", new ArrayList<>());
+        sections.put("TOOLS & INZICHTEN", new ArrayList<>());
         for (ModuleDefinition module : modules) {
-            consoleLogLayoutController.appendMessage(
-                    new LogMessageData(TpMessageSeverityEnum.INFO, "Loading module: " + module.buttonTitle(), "-", "-"));
-
-            Object controller = module.createController(profileManagerLayoutController);
-            moduleControllers.put(module.buttonTitle(), controller);
-            addButton(module.fxmlName(), module.buttonTitle(), module.icon(), controller);
-
-            if (controller instanceof IProfileLoadListener) {
-                profileManagerLayoutController.addProfileLoadListener((IProfileLoadListener) controller);
-            }
+            sections.get(navigationSectionFor(module.buttonTitle())).add(module);
         }
+        sections.forEach((heading, entries) -> {
+            if (entries.isEmpty()) return;
+            Label sectionLabel = new Label(heading);
+            sectionLabel.getStyleClass().add("nav-section-label");
+            buttonsContainer.getChildren().add(sectionLabel);
+            for (ModuleDefinition module : entries) {
+                consoleLogLayoutController.appendMessage(
+                        new LogMessageData(TpMessageSeverityEnum.INFO,
+                                "Loading module: " + module.buttonTitle(), "-", "-"));
+                Object controller = module.createController(profileManagerLayoutController);
+                moduleControllers.put(module.buttonTitle(), controller);
+                addButton(module.fxmlName(), navigationTitleFor(module.buttonTitle()), module.icon(), controller);
+                if (controller instanceof IProfileLoadListener listener) {
+                    profileManagerLayoutController.addProfileLoadListener(listener);
+                }
+            }
+        });
         profileManagerLayoutController.addProfileLoadListener(this);
     }
 
@@ -762,6 +850,7 @@ public class LauncherLayoutController implements IProfileLoadListener, StaminaCh
         updateWindowTitle();
         selectProfileInComboBox(profile);
         refreshPauseMenuItems();
+        refreshDashboard();
     }
 
     @Override
@@ -796,7 +885,7 @@ public class LauncherLayoutController implements IProfileLoadListener, StaminaCh
             if (botState.getRunning()) {
                 cancelAutoStart();
                 if (botState.getPaused() != null && botState.getPaused()) {
-                    buttonStartStop.setText("Stop");
+                    buttonStartStop.setText("Stoppen");
                     buttonStartStop.setDisable(false);
                     allQueuesPaused = true;
                     buttonPauseResume.setDisable(false);
@@ -804,7 +893,7 @@ public class LauncherLayoutController implements IProfileLoadListener, StaminaCh
                     updatePauseButtonState();
                     refreshPauseMenuItems();
                 } else {
-                    buttonStartStop.setText("Stop");
+                    buttonStartStop.setText("Stoppen");
                     buttonStartStop.setDisable(false);
                     allQueuesPaused = false;
                     buttonPauseResume.setDisable(false);
@@ -813,7 +902,7 @@ public class LauncherLayoutController implements IProfileLoadListener, StaminaCh
                     refreshPauseMenuItems();
                 }
             } else {
-                buttonStartStop.setText("Start Bot");
+                buttonStartStop.setText("Start");
                 buttonStartStop.setDisable(false);
                 buttonPauseResume.setDisable(true);
                 resetPauseStates();
@@ -821,6 +910,8 @@ public class LauncherLayoutController implements IProfileLoadListener, StaminaCh
                 isStartup = false;
                 scheduleAutoStart();
             }
+            refreshShellStatus();
+            refreshDashboard();
         }
     }
 
@@ -863,6 +954,7 @@ public class LauncherLayoutController implements IProfileLoadListener, StaminaCh
 
         refreshPauseMenuItems();
         updatePauseButtonState();
+        refreshDashboard();
     }
 
     // Changed by pernerch | Date: 2026-07-02 | Why: keep UI profile identity and title in sync
@@ -1184,13 +1276,13 @@ public class LauncherLayoutController implements IProfileLoadListener, StaminaCh
         Thread startStopThread = Thread.ofVirtual().unstarted(() -> {
             if (!estado) {
                 Platform.runLater(() -> {
-                    buttonStartStop.setText("Starting...");
+                    buttonStartStop.setText("Starten...");
                     buttonStartStop.setDisable(true);
                 });
                 actionController.startBot();
             } else {
                 Platform.runLater(() -> {
-                    buttonStartStop.setText("Stopping...");
+                    buttonStartStop.setText("Stoppen...");
                     buttonStartStop.setDisable(true);
                     buttonPauseResume.setDisable(true);
                 });
@@ -1210,7 +1302,7 @@ public class LauncherLayoutController implements IProfileLoadListener, StaminaCh
         Alert alert = new Alert(Alert.AlertType.ERROR);
         alert.setTitle("Bot stop incomplete");
         alert.setHeaderText("One or more tasks are still stopping");
-        alert.setContentText(detail + "\n\nThe queues remain tracked and Frostguard will not start replacements. "
+        alert.setContentText(detail + "\n\nDe wachtrijen blijven bewaard en SurvivalOps start geen vervangende taken. "
                 + "Try Stop again after the blocking operation returns.");
         alert.showAndWait();
     }
@@ -1220,7 +1312,7 @@ public class LauncherLayoutController implements IProfileLoadListener, StaminaCh
             cancelAutoStart();
             Thread startStopThread = Thread.ofVirtual().unstarted(() -> {
                 Platform.runLater(() -> {
-                    buttonStartStop.setText("Starting...");
+                    buttonStartStop.setText("Starten...");
                     buttonStartStop.setDisable(true);
                 });
                 actionController.startBot();
@@ -1321,7 +1413,7 @@ public class LauncherLayoutController implements IProfileLoadListener, StaminaCh
         if (null == buttonPauseResume) return;
         List<MenuItem> items = new ArrayList<>();
         if (null != menuToggleAllQueues) {
-            menuToggleAllQueues.setText(allQueuesPaused ? "Resume" : "Pause");
+            menuToggleAllQueues.setText(allQueuesPaused ? "Hervat alle wachtrijen" : "Pauzeer alle wachtrijen");
             menuToggleAllQueues.setDisable(!estado);
             items.add(menuToggleAllQueues);
         }
@@ -1344,14 +1436,14 @@ public class LauncherLayoutController implements IProfileLoadListener, StaminaCh
     }
 
     private String formatQueueMenuItemLabel(QueueProfileStateData state) { /* internal */
-        if (null == state) return "Toggle queue";
+        if (null == state) return "Wachtrij wisselen";
         String profileName = state.getProfileName() != null ? state.getProfileName() : String.valueOf(state.getProfileId());
-        return (state.isPaused() ? "Resume " : "Pause ") + profileName;
+        return (state.isPaused() ? "Hervat " : "Pauzeer ") + profileName;
     }
 
     private void updatePauseButtonState() { /* internal */
         if (null == buttonPauseResume) return;
-        buttonPauseResume.setText(allQueuesPaused ? "Resume All Queues" : "Pause All Queues");
+        buttonPauseResume.setText(allQueuesPaused ? "Hervatten" : "Pauzeren");
     }
 
     private void resetPauseStates() { /* internal */
@@ -1391,7 +1483,7 @@ public class LauncherLayoutController implements IProfileLoadListener, StaminaCh
                 cancelAutoStart();
                 Thread autoStartThread = Thread.ofVirtual().unstarted(() -> {
                     Platform.runLater(() -> {
-                        buttonStartStop.setText("Starting...");
+                        buttonStartStop.setText("Starten...");
                         buttonStartStop.setDisable(true);
                     });
                     actionController.startBot();
@@ -1408,7 +1500,7 @@ public class LauncherLayoutController implements IProfileLoadListener, StaminaCh
         if (null != autoStartTimeline) {
             autoStartTimeline.stop();
             autoStartTimeline = null;
-            buttonStartStop.setText("Start Bot");
+            buttonStartStop.setText("Start");
         }
     }
 
@@ -1453,6 +1545,49 @@ public class LauncherLayoutController implements IProfileLoadListener, StaminaCh
     }
 
     // ==================== BUTTON FACTORY ====================
+
+    private String navigationSectionFor(String title) { /* internal */
+        return switch (title) {
+            case "City Upgrades", "City Events", "Extra City Events", "Skip Tutorial", "Character" -> "STAD & ACCOUNTS";
+            case "Rally", "Bear Trap", "Beast Hunting", "Fishing Tournament", "Training", "Research", "Pets", "Events", "Experts", "Chief Order", "Intel" -> "TAKEN & ROUTINES";
+            case "Shop", "Gather", "Alliance", "Alliance Championship", "Alliance Shop", "Alliance Mobilization" -> "ECONOMIE & ALLIANTIE";
+            default -> "TOOLS & INZICHTEN";
+        };
+    }
+
+    private String navigationTitleFor(String title) {
+        return switch (title) {
+            case "Dummy Task" -> "Testtaak";
+            case "City Upgrades" -> "Stad verbeteren";
+            case "City Events" -> "Stadsevenementen";
+            case "Extra City Events" -> "Extra evenementen";
+            case "Rally" -> "Rally's";
+            case "Shop" -> "Winkel";
+            case "Gather" -> "Grondstoffen";
+            case "Intel" -> "Verkenning";
+            case "Alliance" -> "Alliantie";
+            case "Alliance Championship" -> "Alliantiekampioenschap";
+            case "Alliance Shop" -> "Alliantiewinkel";
+            case "Alliance Mobilization" -> "Alliantiegemobilisatie";
+            case "Bear Trap" -> "Berenval";
+            case "Beast Hunting" -> "Beestenjacht";
+            case "Fishing Tournament" -> "Vistoernooi";
+            case "Training" -> "Training";
+            case "Research" -> "Onderzoek";
+            case "Pets" -> "Huisdieren";
+            case "Events" -> "Evenementen";
+            case "Experts" -> "Experts";
+            case "Chief Order" -> "Leidersbevel";
+            case "Get Giftcodes" -> "Cadeaucodes";
+            case "Debugging" -> "Diagnostiek";
+            case "Task Builder" -> "Takenbouwer";
+            case "Skip Tutorial" -> "Tutorial overslaan";
+            case "Character" -> "Personage";
+            case "Game Data" -> "Spelgegevens";
+            case "Statistics" -> "Statistieken";
+            default -> title;
+        };
+    }
 
     private Button createAndConfigureButton(String title, Ikon icon, Parent root) { /* internal */
         FontIcon btnIcon = new FontIcon(icon);

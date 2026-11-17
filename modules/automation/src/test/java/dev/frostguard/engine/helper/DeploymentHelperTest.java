@@ -9,6 +9,8 @@ import java.time.Duration;
 import org.junit.jupiter.api.Test;
 
 import dev.frostguard.api.domain.AccountDescriptor;
+import dev.frostguard.api.configs.TemplatesEnum;
+import dev.frostguard.engine.nav.CommonGameAreas;
 import dev.frostguard.api.domain.OcrSettingsData.TextLayout;
 import dev.frostguard.engine.nav.CommonOCRSettings;
 import dev.frostguard.vision.ocr.ResilientOcrExecutor;
@@ -46,6 +48,17 @@ class DeploymentHelperTest {
                 DeploymentHelper.classifyLaunchCheck(true, true));
         assertEquals(DeploymentHelper.LaunchCheck.UNKNOWN,
                 DeploymentHelper.classifyLaunchCheck(false, false));
+    }
+
+    @Test
+    void gatherLaunchVerificationSearchesTheActualRightHandDeployFooter() {
+        var gather = DeploymentHelper.launchButtonArea(TemplatesEnum.SERVE_EMU_GATHER_DEPLOY);
+        assertEquals(400, gather.topLeft().getX());
+        assertEquals(1140, gather.topLeft().getY());
+        assertEquals(705, gather.bottomRight().getX());
+        assertEquals(1279, gather.bottomRight().getY());
+        assertEquals(CommonGameAreas.RALLY_BOTTOM_BUTTON_BAR,
+                DeploymentHelper.launchButtonArea(TemplatesEnum.DEPLOY_BUTTON));
     }
 
     private DeploymentHelper helperReturning(String travelText, String costText) {

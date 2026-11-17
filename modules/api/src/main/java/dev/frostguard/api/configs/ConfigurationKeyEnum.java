@@ -26,7 +26,10 @@ public enum ConfigurationKeyEnum {
 
     /* ─────────── analytics ─────────── */
 
-    ANALYTICS_ENABLED_BOOL              ("true",             Boolean.class,       ConfigCategory.ANALYTICS),
+    ANALYTICS_ENABLED_BOOL              ("false",             Boolean.class,       ConfigCategory.ANALYTICS),
+    LAN_DIAGNOSTICS_ENABLED_BOOL         ("false", Boolean.class, ConfigCategory.ANALYTICS),
+    LAN_DIAGNOSTICS_SCREENSHOTS_BOOL     ("false", Boolean.class, ConfigCategory.ANALYTICS),
+    LAN_DIAGNOSTICS_TOKEN_STRING         ("", String.class, ConfigCategory.ANALYTICS),
     ANALYTICS_ID_STRING                 ("",                 String.class,        ConfigCategory.ANALYTICS),
     HIDE_ANALYTICS_LOGS_BOOL            ("true",             Boolean.class,       ConfigCategory.ANALYTICS),
     STATISTICS_JSON_STRING              ("{}",               String.class,        ConfigCategory.ANALYTICS),
@@ -86,6 +89,7 @@ public enum ConfigurationKeyEnum {
     CITY_ACCEPT_NEW_SURVIVORS_BOOL              ("false",   Boolean.class,  ConfigCategory.CITY),
     CITY_ACCEPT_NEW_SURVIVORS_OFFSET_INT        ("360",     Integer.class,  ConfigCategory.CITY),
     CITY_UPGRADE_FURNACE_BOOL                   ("false",   Boolean.class,  ConfigCategory.CITY),
+    CITY_UPGRADE_DOUBLE_TIME_BOOL               ("true",    Boolean.class,  ConfigCategory.CITY),
     CITY_UPGRADE_RESERVE_PRODUCTION_BOOL        ("true",    Boolean.class,  ConfigCategory.CITY),
     CITY_UPGRADE_CONSTRUCTION_LOCK_STRING       ("",        String.class,   ConfigCategory.CITY),
     CITY_UPGRADE_PRIORITISE_FURNACE_BOOL        ("false",   Boolean.class,  ConfigCategory.CITY),
@@ -264,6 +268,11 @@ public enum ConfigurationKeyEnum {
     DO_EXPLORATION_QUICK_DEPLOY_BOOL        ("true",    Boolean.class,  ConfigCategory.SHOPS),
     BOOL_EXPLORATION_CHEST                  ("false",   Boolean.class,  ConfigCategory.SHOPS),
     BOOL_HERO_RECRUITMENT                   ("false",   Boolean.class,  ConfigCategory.SHOPS),
+    HERO_RECRUIT_ADVANCED_FREE_BOOL        ("true",    Boolean.class,  ConfigCategory.SHOPS),
+    HERO_RECRUIT_EPIC_FREE_BOOL            ("true",    Boolean.class,  ConfigCategory.SHOPS),
+    HERO_RECRUIT_ADVANCED_KEYS_BOOL        ("false",   Boolean.class,  ConfigCategory.SHOPS),
+    HERO_RECRUIT_EPIC_KEYS_BOOL            ("false",   Boolean.class,  ConfigCategory.SHOPS),
+    HERO_RECRUIT_POINTS_CHEST_BOOL         ("true",    Boolean.class,  ConfigCategory.SHOPS),
     BOOL_MYSTERY_SHOP                       ("false",   Boolean.class,  ConfigCategory.SHOPS),
     BOOL_MYSTERY_SHOP_250_HERO_WIDGET       ("false",   Boolean.class,  ConfigCategory.SHOPS),
     BOOL_MYSTERY_SHOP_250_SHARD             ("false",   Boolean.class,  ConfigCategory.SHOPS),
@@ -294,6 +303,8 @@ public enum ConfigurationKeyEnum {
     STOP_BEHAVIOR_STRING                ("DO_NOTHING",  String.class,   ConfigCategory.SYSTEM),
     // Changed by pernerch | Date: 2026-07-04 | Why: separate Telegram stop behavior from local GUI stop behavior.
     STOP_BEHAVIOR_TELEGRAM_STRING       ("DO_NOTHING",  String.class,   ConfigCategory.SYSTEM),
+    SERVE_EMU_ADB_ENDPOINTS_STRING       ("", String.class, ConfigCategory.SYSTEM),
+    BLUESTACKS_PATH_STRING              ("C:\\Program Files\\BlueStacks_nxt", String.class, ConfigCategory.SYSTEM),
     LDPLAYER_PATH_STRING                ("",            String.class,   ConfigCategory.SYSTEM),
     MAX_IDLE_TIME_INT                   ("15",          Integer.class,  ConfigCategory.SYSTEM),
     MAX_RUNNING_EMULATORS_INT           ("1",           Integer.class,  ConfigCategory.SYSTEM),
@@ -335,6 +346,9 @@ public enum ConfigurationKeyEnum {
 
     /* ─────────── training ─────────── */
 
+    HEAL_TROOPS_BOOL                    ("false",   Boolean.class,  ConfigCategory.TRAINING),
+    HEAL_BATCH_MODE_STRING              ("Full - Quick Select", String.class, ConfigCategory.TRAINING),
+    HEAL_REQUEST_ALLIANCE_HELP_BOOL     ("true",    Boolean.class,  ConfigCategory.TRAINING),
     TRAIN_BOOL                          ("false",   Boolean.class,  ConfigCategory.TRAINING),
     TRAIN_INFANTRY_BOOL                 ("false",   Boolean.class,  ConfigCategory.TRAINING),
     TRAIN_LANCER_BOOL                   ("false",   Boolean.class,  ConfigCategory.TRAINING),

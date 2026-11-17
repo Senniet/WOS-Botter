@@ -2,9 +2,12 @@ package dev.frostguard.tasks.alliance;
 
 import dev.frostguard.api.configs.ConfigurationKeyEnum;
 import dev.frostguard.api.configs.TpDailyTaskEnum;
+import dev.frostguard.api.configs.TemplatesEnum;
 import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.api.domain.AreaData;
 import dev.frostguard.api.domain.PointData;
+import dev.frostguard.api.domain.RawImageData;
+import dev.frostguard.vision.match.OpenCvPatternLocator;
 import dev.frostguard.engine.helper.NavigationHelper;
 import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.schedule.LaunchPoint;
@@ -60,30 +63,97 @@ public AllianceAutojoinRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask
 	}
 
 @Override
-	protected void execute() {
+    protected void execute() {
+        hydrateConfiguration();
+        if (deferForUpcomingAutoJoinReset()) return;
+        if (!openUpAllianceWarMenu()) {
+            manageTaskFailure("Alliance War unavailable");
+            return;
+        }
+        if (!openUpAutoJoinSettings()) {
+            manageTaskFailure("Auto-Join dialog title not verified");
+            return;
+        }
+        // A preexisting active timer is a success. Do not stop/restart it.
+        if (autoJoinActive()) {
+            logInfo(routineLogAllianceAutojoinLine(
+                    "Auto-Join already active; keeping current timer and settings"));
+            if (closeAutoJoinAndReturnHome()) queueNextRun();
+            else manageTaskFailure("Auto-Join active, City return unconfirmed");
+            return;
+        }
+        configureTroopSelectionFlow();
+        setAutoJoinQueuesFlow(queueCount);
+        enableAutoJoinFlow();
+        if (!autoJoinActive()) {
+            markWorkIncomplete("Auto-Join activation not verified");
+            closeAutoJoinAndReturnHome();
+            manageTaskFailure("Start did not show active Restart state");
+            return;
+        }
+        if (closeAutoJoinAndReturnHome()) {
+            logInfo(routineLogAllianceAutojoinLine("Auto-Join enabled, returned to City"));
+            queueNextRun();
+        } else manageTaskFailure("Auto-Join enabled, City return unconfirmed");
+    }
 
-		hydrateConfiguration();
+    private boolean detect(RawImageData frame, TemplatesEnum icon,
+            PointData tl, PointData br, double threshold) {
+        return frame!=null && frame.isValid() && frame.getWidth()==720
+                && frame.getHeight()==1280 && OpenCvPatternLocator.locatePattern(
+                        frame,icon.getTemplate(),tl,br,threshold).isFound();
+    }
 
-		if (deferForUpcomingAutoJoinReset()) {
-			return;
-		}
+    private boolean autoJoinDialog(RawImageData frame) {
+        return detect(frame,TemplatesEnum.AUTOJOIN_DIALOG_TITLE_2026,
+                new PointData(260,110),new PointData(488,185),90);
+    }
 
-		if (!openUpAllianceWarMenu()) {
-			manageTaskFailure("Failed to open Alliance War menu");
-			return;
-		}
+    private boolean autoJoinActive() {
+        RawImageData frame=emuManager.captureScreen(EMULATOR_NUMBER);
+        return autoJoinDialog(frame)
+                && detect(frame,TemplatesEnum.AUTOJOIN_RESTART_2026,
+                        new PointData(325,1035),new PointData(686,1155),90);
+    }
 
-		if (!openUpAutoJoinSettings()) {
-			manageTaskFailure("Failed to open auto-join ocrPreset");
-			return;
-		}
+    private boolean warPage(RawImageData frame) {
+        return detect(frame,TemplatesEnum.AUTOJOIN_WAR_TITLE_2026,
+                new PointData(80,5),new PointData(260,80),90);
+    }
 
-		configureTroopSelectionFlow();
-		setAutoJoinQueuesFlow(queueCount);
-		enableAutoJoinFlow();
+    private boolean alliancePage(RawImageData frame) {
+        return detect(frame,TemplatesEnum.AUTOJOIN_ALLIANCE_TITLE_2026,
+                new PointData(80,5),new PointData(260,80),90);
+    }
 
-		queueNextRun();
-	}
+    private boolean cityPage(RawImageData frame) {
+        return detect(frame,TemplatesEnum.SERVE_EMU_CITY_ANCHOR,
+                new PointData(590,1145),new PointData(715,1275),90);
+    }
+
+    private boolean closeAutoJoinAndReturnHome() {
+        // Real verified exit: Auto-Join modal X -> War header Back ->
+        // Alliance header Back -> City HUD; no generic overlay sweep.
+        for (int step=0;step<4;step++) {
+            checkPreemption();
+            RawImageData frame=emuManager.captureScreen(EMULATOR_NUMBER);
+            if(cityPage(frame)) return true;
+            if(autoJoinDialog(frame)) {
+                if(!detect(frame,TemplatesEnum.AUTOJOIN_DIALOG_CLOSE_2026,
+                        new PointData(620,115),new PointData(710,190),88))
+                    return false;
+                tapNear(new PointData(666,148),4);
+            } else if (warPage(frame) || alliancePage(frame)) {
+                tapNear(new PointData(43,35),5);
+            } else {
+                logWarning(routineLogAllianceAutojoinLine(
+                        "Unknown page during exit; no blind Back"));
+                return false;
+            }
+            sleepTask(350);
+        }
+        return cityPage(emuManager.captureScreen(EMULATOR_NUMBER));
+    }
 
 private boolean deferForUpcomingAutoJoinReset() {
 		TaskQueue queue = scheduleService.getCoordinator().getQueue(profile.getId());
@@ -128,19 +198,22 @@ private void configureTroopSelectionFlow() {
 	}
 
 private boolean openUpAutoJoinSettings() {
-		logDebug(routineLogAllianceAutojoinLine("Entering rally section"));
-		tapInside(RALLY_SECTION_TAB_VALUE.topLeft(), RALLY_SECTION_TAB_VALUE.bottomRight());
-		sleepTask(500);
-
-
-		logDebug(routineLogAllianceAutojoinLine("Entering auto-join ocrPreset popup"));
-		tapInside(AUTOJOIN_SETTINGS_BUTTON_VALUE.topLeft(), AUTOJOIN_SETTINGS_BUTTON_VALUE.bottomRight());
-		sleepTask(1500);
-
-
-		logDebug(routineLogAllianceAutojoinLine("Auto-join ocrPreset popup should be open"));
-		return true;
-	}
+        RawImageData frame=emuManager.captureScreen(EMULATOR_NUMBER);
+        if (autoJoinDialog(frame)) return true;
+        if (!warPage(frame)) {
+            logWarning(routineLogAllianceAutojoinLine(
+                    "War page title not confirmed; refusing Auto-Join shortcut"));
+            return false;
+        }
+        // Rally is already the default War tab in the 2026 client.
+        tapInside(AUTOJOIN_SETTINGS_BUTTON_VALUE.topLeft(),
+                AUTOJOIN_SETTINGS_BUTTON_VALUE.bottomRight());
+        sleepTask(430);
+        boolean visible=autoJoinDialog(emuManager.captureScreen(EMULATOR_NUMBER));
+        if (!visible) logWarning(routineLogAllianceAutojoinLine(
+                "Auto-Join dialog title not confirmed after shortcut"));
+        return visible;
+    }
 
 private void setAutoJoinQueuesFlow(int count) {
 		logInfo(routineLogAllianceAutojoinLine("Applying auto-join queue count to " + count));
@@ -184,26 +257,27 @@ private boolean openUpAllianceWarMenu() {
 	}
 
 private void hydrateConfiguration() {
-		useAllTroops = profile.getConfig(
-				ConfigurationKeyEnum.ALLIANCE_AUTOJOIN_USE_ALL_TROOPS_BOOL,
-				Boolean.class);
+        Boolean allTroopsSetting = profile.getConfig(
+                ConfigurationKeyEnum.ALLIANCE_AUTOJOIN_USE_ALL_TROOPS_BOOL, Boolean.class);
+        useAllTroops = Boolean.TRUE.equals(allTroopsSetting);
 
-		int rawQueueCount = profile.getConfig(
-				ConfigurationKeyEnum.ALLIANCE_AUTOJOIN_QUEUES_INT,
-				Integer.class);
-
-
-		if (rawQueueCount < MIN_QUEUE_COUNT_FLOOR || rawQueueCount > MAX_QUEUE_COUNT_LIMIT) {
-			logWarning(routineLogAllianceAutojoinLine("Invalid queue count configured: " + rawQueueCount +
-					". Using default: " + DEFAULT_QUEUE_COUNT_VALUE));
-			queueCount = DEFAULT_QUEUE_COUNT_VALUE;
-		} else {
-			queueCount = rawQueueCount;
-		}
+        Integer rawQueueCount = profile.getConfig(
+                ConfigurationKeyEnum.ALLIANCE_AUTOJOIN_QUEUES_INT, Integer.class);
+        queueCount = validQueueCount(rawQueueCount);
+        if (rawQueueCount == null || queueCount != rawQueueCount) {
+            logWarning(routineLogAllianceAutojoinLine("Missing/invalid queue count: " + rawQueueCount
+                    + ". Using safe default: " + queueCount));
+        }
 
 		logInfo(routineLogAllianceAutojoinLine("Configuration loaded - Use all troops: " + useAllTroops +
 				", Queue count: " + queueCount));
 	}
+
+    static int validQueueCount(Integer configured) {
+        return configured != null && configured >= MIN_QUEUE_COUNT_FLOOR
+                && configured <= MAX_QUEUE_COUNT_LIMIT
+                ? configured : DEFAULT_QUEUE_COUNT_VALUE;
+    }
 
 private void enableAutoJoinFlow() {
 		logInfo(routineLogAllianceAutojoinLine("Enabling auto-join"));

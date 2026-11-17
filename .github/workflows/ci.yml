@@ -30,6 +30,37 @@ jobs:
           # Binaries are ordinary blobs; do not fetch Git LFS.
           lfs: false
 
+      # The dashboard imports the read-only QA matcher and its NumPy
+      # dependency. Use the same supported Python runtime across CI jobs.
+      - name: Set up Python for offline QA tests
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install offline QA test dependency
+        run: python3 -m pip install --disable-pip-version-check "numpy>=2.0,<3"
+
+      - name: Audit all recognition template resources
+        run: python3 tools/audit-template-assets.py --baseline tools/template-missing-baseline.json
+
+      - name: Test complete template inventory and evidence parser
+        run: python3 -m unittest discover -s tools/template-system-audit -p 'test_*.py' -v
+
+      - name: Test shared QA dashboard and two-party acceptance protocol
+        env:
+          SURVIVALOPS_REPO: ${{ github.workspace }}
+          SURVIVALOPS_TEMPLATE_AUDIT_REPORT: ${{ runner.temp }}/survivalops-template-audit/report.json
+        run: |
+          # Generate the same bounded, read-only catalog that the dashboard
+          # uses in production. No private evidence or emulator is required.
+          python3 tools/template-system-audit/audit.py --output "$RUNNER_TEMP/survivalops-template-audit" > /dev/null
+          python3 -m unittest discover -s tools/task-dashboard -p 'test_*.py' -v
+
+      - name: Test QA browser draft preservation and syntax
+        run: |
+          node --check tools/task-dashboard/static/app.js
+          node tools/task-dashboard/test_ui_drafts.cjs
+
       - name: Verify shipped binaries are real files
         run: build-support/verification/check_lfs_assets.sh
 

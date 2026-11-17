@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+config.json
+runs.sqlite3*
+evidence/

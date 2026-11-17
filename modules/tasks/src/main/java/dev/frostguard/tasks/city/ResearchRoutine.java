@@ -7,6 +7,7 @@ import dev.frostguard.api.configs.TpDailyTaskEnum;
 import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.api.domain.ImageSearchResultData;
 import dev.frostguard.api.domain.PointData;
+import dev.frostguard.api.domain.AreaData;
 import dev.frostguard.api.domain.PriorityItemData;
 import dev.frostguard.api.domain.RawImageData;
 import dev.frostguard.api.domain.ResearchBadgeData;
@@ -14,7 +15,9 @@ import dev.frostguard.api.domain.OcrSettingsData;
 import dev.frostguard.engine.config.PriorityConfigResolver;
 import dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig;
 import dev.frostguard.engine.nav.SidebarDestination;
+import dev.frostguard.engine.nav.SidebarFrameClassifier;
 import dev.frostguard.engine.nav.SearchConfigConstants;
+import dev.frostguard.engine.emulator.EmulatorType;
 import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.schedule.LaunchPoint;
 import dev.frostguard.tasks.diagnostics.TaskDiagnosticSnapshots;
@@ -22,6 +25,7 @@ import dev.frostguard.tasks.city.ResearchDialogClassifier.ResearchDialogState;
 import dev.frostguard.tasks.city.ResearchNodeSelectionPolicy.ResearchNode;
 import dev.frostguard.tasks.city.ResearchNodeSelectionPolicy.ResearchRow;
 import dev.frostguard.vision.convert.GameTimeUtils;
+import dev.frostguard.vision.convert.ImageConverter;
 import dev.frostguard.vision.ocr.ResearchBadgeReader;
 import dev.frostguard.vision.ocr.OcrEngine;
 import java.io.IOException;
@@ -37,13 +41,13 @@ private static final int HAND_CLICK_OFFSET_X_VALUE = -73;
 
 private static final int HAND_CLICK_OFFSET_Y_VALUE = 88;
 
-private static final int RESEARCH_SCROLL_SETTLE_MILLIS = 2000;
+private static final int RESEARCH_SCROLL_SETTLE_MILLIS = 450;
 
 private static final int RESEARCH_DRAG_DURATION_MILLIS = 750;
 
 private static final int RESEARCH_TOP_RESET_SWIPE_COUNT = 4;
 
-private static final int RESEARCH_TOP_RESET_GAP_MILLIS = 2000;
+private static final int RESEARCH_TOP_RESET_GAP_MILLIS = 450;
 
 private static final PointData RESEARCH_TOP_RESET_FROM = new PointData(489, 300);
 
@@ -132,6 +136,24 @@ public ResearchRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
 
     @Override
     protected void execute() {
+        boolean preempted=false;
+        try {
+            executeResearchWork();
+        } catch (dev.frostguard.engine.error.TaskPreemptedException
+                 | java.util.concurrent.CancellationException stop) {
+            preempted=true;
+            throw stop;
+        } finally {
+            // Never consume a higher-priority task's time while it is
+            // preempting us. Otherwise end the research UI transaction with
+            // a page-specific, verified Back rather than broad screen scans.
+            if (!preempted && !Thread.currentThread().isInterrupted()) {
+                returnHomeAfterResearchIfVisible();
+            }
+        }
+    }
+
+    private void executeResearchWork() {
 
         var constructionReservation = ConstructionBlockerRegistry.reservationFor(
                 profile, ConstructionBlockerRegistry.Consumer.RESEARCH);
@@ -153,31 +175,34 @@ public ResearchRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
 
 
         marchHelper.openLeftMenuCitySection(true);
+        AreaData queueArea = researchQueueStatusArea(
+                SidebarFrameClassifier.isCurrentLayout(
+                        ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER))));
 
-
-        logDebug(routineLogResearchLine("Inspecting research queue status via OCR..."));
+        logDebug(routineLogResearchLine("Inspecting research queue status via OCR in " + queueArea + "..."));
         try {
             String queueStatus = emuManager.readText(
                     EMULATOR_NUMBER,
-                    new PointData(164, 811),
-                    new PointData(303, 841)).trim();
+                    queueArea.topLeft(),
+                    queueArea.bottomRight()).trim();
 
             logInfo(routineLogResearchLine("Research queue OCR status: '" + queueStatus + "'"));
 
-            if (!queueStatus.toLowerCase().contains("idle")) {
+            if (!ResearchQueueStatusPolicy.isExplicitlyIdle(queueStatus)) {
 
 
                 logInfo(routineLogResearchLine("Research queue is busy. Attempting to read remaining time..."));
-                Duration busyTime = durationHelper.attemptRecognition(
-                        new PointData(164, 811),
-                        new PointData(303, 841),
+                var busyTimeRead = durationHelper.attemptRecognitionDetailed(
+                        queueArea.topLeft(),
+                        queueArea.bottomRight(),
                         5,
                         300,
                         null,
                         GameTimeUtils::isAcceptedFormat,
                         GameTimeUtils::parseDuration);
+                Duration busyTime = busyTimeRead.value();
 
-                if (busyTime != null) {
+                if (busyTimeRead.accepted() && busyTime != null) {
                     Duration recheckDelay = ResearchTimerPolicy.recheckDelay(busyTime);
                     LocalDateTime rescheduleTime = LocalDateTime.now().plus(recheckDelay);
                     logInfo(routineLogResearchLine("Research busy for "
@@ -186,7 +211,9 @@ public ResearchRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
                             + formatDuration(recheckDelay) + "."));
                     this.reschedule(rescheduleTime);
                 } else {
-                    scheduleUnknownQueueRetry("remaining time OCR returned no valid duration");
+                    scheduleUnknownQueueRetry("remaining time OCR status=" + busyTimeRead.status()
+                            + " attempts=" + busyTimeRead.attempts()
+                            + (busyTimeRead.failure() == null ? "" : " failure=" + busyTimeRead.failure()));
                 }
                 return;
             }
@@ -203,6 +230,7 @@ public ResearchRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
             logWarning(routineLogResearchLine("Research tree did not open after "
                     + RESEARCH_ENTRY_ATTEMPTS + " attempts. Planning next run in "
                     + RESEARCH_ENTRY_RETRY_MINUTES + " minutes."));
+            markWorkIncomplete("Research: tree did not open after verified navigation attempts");
             this.reschedule(LocalDateTime.now().plusMinutes(RESEARCH_ENTRY_RETRY_MINUTES));
             return;
         }
@@ -212,6 +240,11 @@ public ResearchRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
         if (researchTextResult == null) {
             logWarning(routineLogResearchLine("No enabled category had an available research. Planning next run in 1 hour."));
             this.reschedule(LocalDateTime.now().plusHours(1));
+            // A maxed/locked research tree must not strand the next task on
+            // Tech Research. Only the central verified-arrow navigation may
+            // leave it; never use a blind Android Back or tap a locked item.
+            // The finally block performs a single verified exit/return Home.
+            // Do not repeat a full navigation scan here as well.
             return;
         }
 
@@ -233,7 +266,7 @@ public ResearchRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
 
 
                 logInfo(routineLogResearchLine("Reading research time via OCR..."));
-                Duration researchTime = durationHelper.attemptRecognition(
+                var researchTimeRead = durationHelper.attemptRecognitionDetailed(
                         new PointData(226, 1194),
                         new PointData(422, 1234),
                         5,
@@ -241,9 +274,9 @@ public ResearchRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
                         null,
                         GameTimeUtils::isAcceptedFormat,
                         GameTimeUtils::parseDuration);
+                Duration researchTime = researchTimeRead.value();
 
-
-                if (researchTime != null) {
+                if (researchTimeRead.accepted() && researchTime != null) {
                     Duration recheckDelay = ResearchTimerPolicy.recheckDelay(researchTime);
                     LocalDateTime rescheduleTime = LocalDateTime.now().plus(recheckDelay);
 
@@ -255,8 +288,10 @@ public ResearchRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
                     this.reschedule(rescheduleTime);
                     return;
                 } else {
-                    logWarning(routineLogResearchLine("Could not OCR running research time. Retrying in "
-                            + RESEARCH_TIMER_RETRY_MINUTES + " minute."));
+                    logWarning(routineLogResearchLine("Could not OCR running research time: status="
+                            + researchTimeRead.status() + " attempts=" + researchTimeRead.attempts()
+                            + (researchTimeRead.failure() == null ? "" : " failure=" + researchTimeRead.failure())
+                            + ". Retrying in " + RESEARCH_TIMER_RETRY_MINUTES + " minute."));
                 }
 
         this.reschedule(LocalDateTime.now().plusMinutes(RESEARCH_TIMER_RETRY_MINUTES));
@@ -265,9 +300,17 @@ public ResearchRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
     private void scheduleUnknownQueueRetry(String reason) {
         LocalDateTime retryAt = LocalDateTime.now().plusMinutes(5);
         String snapshot = TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER, "research", "queue-ocr");
+        markWorkIncomplete("Research queue unknown: " + reason);
         logWarning(routineLogResearchLine("Research queue state is unknown; " + reason
                 + ". Retrying at " + retryAt.format(DATETIME_FORMATTER) + "; " + snapshot + "."));
         reschedule(retryAt);
+    }
+
+static boolean mayUseResourceReplenishment(EmulatorType backend) {
+        // The unattended Serve-EMU task is authorized for ordinary free
+        // research only. Replenish All can consume resource items or send the
+        // player to premium offers, so never operate it on this backend.
+        return backend != EmulatorType.SERVE_EMU;
     }
 
 private boolean replenishResourcesAndRetryStart(PointData researchButton) {
@@ -275,6 +318,16 @@ private boolean replenishResourcesAndRetryStart(PointData researchButton) {
                 TemplatesEnum.REPLENISH_ALL_BUTTON, REPLENISH_BUTTON_RECHECK);
         if (!isFound(replenishAllButton)) {
             return true;
+        }
+
+        if (!mayUseResourceReplenishment(emuManager.getSelectedEmulatorType())) {
+            markWorkIncomplete("Research needs resources; automatic replenishment is disabled");
+            String evidence = TaskDiagnosticSnapshots.capture(
+                    emuManager, EMULATOR_NUMBER, "research", "resources-required");
+            logWarning(routineLogResearchLine(
+                    "Research blocked by resources; no item use or purchase. " + evidence));
+            this.reschedule(LocalDateTime.now().plusMinutes(INSUFFICIENT_RESOURCES_RETRY_MINUTES));
+            return false;
         }
 
         // An unaffordable research opens the shared "Obtain more" screen instead
@@ -366,13 +419,23 @@ private boolean isFound(ImageSearchResultData result) {
 
 private void rescheduleShortResearchRetry() {
         LocalDateTime retryAt = LocalDateTime.now().plusSeconds(COMPLETED_RESEARCH_RETRY_SECONDS);
-        logInfo(routineLogResearchLine("Planning next research check for: " + retryAt));
+        markWorkIncomplete("Research launch unconfirmed after Help/Speedup checks");
+        logWarning(routineLogResearchLine("Research start outcome unknown. Check again at " + retryAt));
         this.reschedule(retryAt);
     }
 
 private static String formatDuration(Duration duration) {
         return String.format("%02d:%02d:%02d",
                 duration.toHours(), duration.toMinutesPart(), duration.toSecondsPart());
+    }
+
+static AreaData researchQueueStatusArea(boolean currentLayout) {
+        // Two City sidebar layouts have different queue rows. On the classic
+        // layout observed live Nov 17, the older (164,811)..(303,841) OCR
+        // dropped the first colon in 01:09:02. A slightly wider/taller crop
+        // reads the full countdown. The shifted layout stays unchanged.
+        return currentLayout ? AreaData.of(165, 842, 305, 892)
+                : AreaData.of(165, 818, 326, 853);
     }
 
 private boolean openResearchTree() {
@@ -421,6 +484,10 @@ private boolean openResearchTree() {
     }
 
 private boolean isResearchTreeVisible() {
+        if (templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_RESEARCH_TITLE,
+                SearchConfig.builder().withMaxAttempts(1)
+                        .withThreshold(90).withArea(AreaData.of(75, 0, 380, 100)).build()).isFound())
+            return true;
         for (int attempt = 1; attempt <= 3; attempt++) {
             try {
                 String title = emuManager.readText(
@@ -441,6 +508,48 @@ private boolean isResearchTreeVisible() {
             }
         }
         return false;
+    }
+
+private void returnHomeAfterResearchIfVisible() {
+        var frame=emuManager.captureScreen(EMULATOR_NUMBER);
+        if (!ResearchPageFrame.titleVisible(frame)) {
+            // The tree may have closed after an instant completion or error.
+            // Do not silently leave the task on some other page.
+            try {
+                navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME,this::checkPreemption);
+            } catch (dev.frostguard.engine.error.HomeNotFoundException missing) {
+                markWorkIncomplete("Research: Home not verified after leaving Research page");
+                logWarning(routineLogResearchLine("Research exit not verified: " + missing.getMessage()));
+            }
+            return;
+        }
+        var first=ResearchPageFrame.safeBack(frame);
+        if (!first.isFound()) {
+            markWorkIncomplete("Research completed but header Back not verified");
+            logWarning(routineLogResearchLine("Tech Research Back missing; no blind tap"));
+            return;
+        }
+        sleepTask(220);
+        var second=ResearchPageFrame.safeBack(emuManager.captureScreen(EMULATOR_NUMBER));
+        if (!dev.frostguard.engine.helper.RecognitionConsensus.agrees(first,second,15)) {
+            markWorkIncomplete("Research Back moved or changed");
+            logWarning(routineLogResearchLine("Tech Research changed before exit; no tap"));
+            return;
+        }
+        tapNear(second.getPoint());
+        sleepTask(580);
+        if (ResearchPageFrame.titleVisible(emuManager.captureScreen(EMULATOR_NUMBER))) {
+            markWorkIncomplete("Research tree still visible after one Back");
+            logWarning(routineLogResearchLine("Research header still visible; refusing repeated blind Back"));
+            return;
+        }
+        try {
+            navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME,this::checkPreemption);
+            logInfo(routineLogResearchLine("Returned Home after verified Tech Research header exit"));
+        } catch(dev.frostguard.engine.error.HomeNotFoundException missing) {
+            markWorkIncomplete("Research: Home not verified after exiting Tech Research");
+            logWarning(routineLogResearchLine("Research ran but Home not verified: "+missing.getMessage()));
+        }
     }
 
 private PointData findResearchEntryHandTarget() {

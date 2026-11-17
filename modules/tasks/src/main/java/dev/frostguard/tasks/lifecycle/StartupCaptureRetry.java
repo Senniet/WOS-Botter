@@ -3,6 +3,7 @@ package dev.frostguard.tasks.lifecycle;
 import dev.frostguard.engine.error.StartupCaptureException;
 
 import java.util.Objects;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.LongConsumer;
 import java.util.function.Supplier;
@@ -20,10 +21,20 @@ final class StartupCaptureRetry {
             Supplier<T> capture,
             Consumer<String> warningLog,
             LongConsumer sleeper) {
+        return capture(context, capture, warningLog, sleeper, (attempt, failure) -> {});
+    }
+
+    static <T> T capture(
+            CaptureContext context,
+            Supplier<T> capture,
+            Consumer<String> warningLog,
+            LongConsumer sleeper,
+            BiConsumer<Integer, RuntimeException> recovery) {
         Objects.requireNonNull(context);
         Objects.requireNonNull(capture);
         Objects.requireNonNull(warningLog);
         Objects.requireNonNull(sleeper);
+        Objects.requireNonNull(recovery);
 
         RuntimeException lastFailure = null;
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -38,7 +49,21 @@ final class StartupCaptureRetry {
                 }
                 return frame;
             } catch (RuntimeException failure) {
+                if (failure instanceof java.util.concurrent.CancellationException
+                        || Thread.currentThread().isInterrupted()) throw failure;
                 lastFailure = failure;
+                if (attempt == 1 && isDeviceOffline(failure)) {
+                    try {
+                        recovery.accept(attempt, failure);
+                        warningLog.accept(context.prefix(attempt)
+                                + "; recovery=one bounded emulator/ADB repair requested");
+                    } catch (RuntimeException repairFailure) {
+                        if (repairFailure instanceof java.util.concurrent.CancellationException
+                                || Thread.currentThread().isInterrupted()) throw repairFailure;
+                        warningLog.accept(context.prefix(attempt)
+                                + "; recovery failed=" + causeChain(repairFailure));
+                    }
+                }
                 String decision = attempt < MAX_ATTEMPTS
                         ? "retry fresh frame after " + RETRY_DELAY_MS + " ms"
                         : "delegate to bounded task-failure reschedule";
@@ -56,6 +81,20 @@ final class StartupCaptureRetry {
                         + "; cause=" + causeChain(lastFailure)
                         + "; retryDecision=bounded task-failure reschedule after capture retry limit",
                 lastFailure);
+    }
+
+    static boolean isDeviceOffline(Throwable failure) {
+        Throwable current = failure;
+        for (int depth = 0; current != null && depth < 6; depth++) {
+            String message = Objects.requireNonNullElse(current.getMessage(), "").toLowerCase(java.util.Locale.ROOT);
+            if (message.contains("device is offline") || message.contains("device offline")
+                    || message.contains("device not found") || message.contains("device is not online")) {
+                return true;
+            }
+            if (current.getCause() == current) break;
+            current = current.getCause();
+        }
+        return false;
     }
 
     private static String causeChain(Throwable failure) {

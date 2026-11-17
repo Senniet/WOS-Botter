@@ -5,6 +5,8 @@ import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.api.domain.AreaData;
 import dev.frostguard.api.domain.ImageSearchResultData;
 import dev.frostguard.api.domain.PointData;
+import dev.frostguard.api.domain.RawImageData;
+import dev.frostguard.vision.match.OpenCvPatternLocator;
 import dev.frostguard.engine.emulator.EmulatorController;
 import dev.frostguard.engine.error.HomeNotFoundException;
 import dev.frostguard.engine.nav.SearchConfigConstants;
@@ -66,7 +68,22 @@ public class IntelScreenHelper {
             log.info("Daily Intel availability evidence: greenGainPattern=true, greenPixels=" + greenPixels
                     + ", available=" + available);
         } else {
-            log.info("Daily Intel availability evidence: greenGainPattern=false, available=false");
+            // The fixed "Intel Gain" template changes with localization, font,
+            // and the numeric count. A Lighthouse-row anchored positive-green
+            // status on TWO fresh frames is accepted as availability evidence.
+            BufferedImage first = ImageConverter.toBufferedImage(emu.captureScreen(dev));
+            int firstGreen = availableGreenPixels(first, intelGainStatusArea(lighthouseRow));
+            if (firstGreen >= INTEL_AVAILABLE_GREEN_MIN) {
+                pause(250);
+                BufferedImage second = ImageConverter.toBufferedImage(emu.captureScreen(dev));
+                int secondGreen = availableGreenPixels(second, intelGainStatusArea(lighthouseRow));
+                available = secondGreen >= INTEL_AVAILABLE_GREEN_MIN;
+                log.info("Daily Intel anchored green status: first=" + firstGreen + " second=" + secondGreen
+                        + " confirmed=" + available);
+            } else {
+                log.info("Daily Intel availability evidence: template=false, anchoredGreenPixels="
+                        + firstGreen + ", available=false");
+            }
         }
 
         if (!nav.closeSidebar()) {
@@ -128,6 +145,18 @@ public class IntelScreenHelper {
         return PixelStats.count(frame, availabilityAreaFor(gainPattern), GameColors::isVividGreen);
     }
 
+    static AreaData intelGainStatusArea(ImageSearchResultData lighthouseRow) {
+        PointData point = lighthouseRow.getPoint();
+        if (point == null) throw new IllegalArgumentException("Lighthouse row must be visible");
+        // Restrict to the *status line*, not the row's arrow or nearby entries.
+        return AreaData.of(105, Math.max(300, point.getY() + 8),
+                325, Math.min(885, point.getY() + 48));
+    }
+
+    static int availableGreenPixels(BufferedImage frame, AreaData status) {
+        return PixelStats.count(frame, status, GameColors::isVividGreen);
+    }
+
     static AreaData intelGainRowArea(ImageSearchResultData lighthouseRow) {
         PointData center = lighthouseRow.getPoint();
         if (center == null) {
@@ -148,17 +177,25 @@ public class IntelScreenHelper {
     }
 
     public boolean isIntelScreenActive() {
-        for (int i = 0; i < 2; i++) {
-            if (tpl.locatePattern(TemplatesEnum.INTEL_SCREEN_1,
-                    SearchConfigConstants.DEFAULT_SINGLE).isFound()
-                    || tpl.locatePattern(TemplatesEnum.INTEL_SCREEN_2,
-                            SearchConfigConstants.DEFAULT_SINGLE).isFound()) {
-                log.debug("Intel confirmed, probe " + (i + 1));
-                return true;
+        // Two screen-title variants on ONE screenshot. Previous implementation
+        // did up to four independent ADB captures per status check, including
+        // a fixed delay even when the first frame was an animation.
+        for (int attempt=0; attempt<2; attempt++) {
+            RawImageData frame=emu.captureScreen(dev);
+            if (frame != null && frame.isValid()) {
+                if (OpenCvPatternLocator.locatePattern(frame,
+                        TemplatesEnum.INTEL_SCREEN_1.getTemplate(),
+                        new PointData(0,0),
+                        new PointData(frame.getWidth(),frame.getHeight()),90).isFound()
+                    || OpenCvPatternLocator.locatePattern(frame,
+                        TemplatesEnum.INTEL_SCREEN_2.getTemplate(),
+                        new PointData(0,0),
+                        new PointData(frame.getWidth(),frame.getHeight()),90).isFound()) {
+                    log.debug("Intel title confirmed in current frame");
+                    return true;
+                }
             }
-            if (i == 0) {
-                pause(300);
-            }
+            if(attempt==0) pause(180);
         }
         return false;
     }

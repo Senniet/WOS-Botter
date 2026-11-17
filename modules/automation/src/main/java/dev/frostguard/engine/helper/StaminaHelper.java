@@ -1,10 +1,17 @@
 package dev.frostguard.engine.helper;
 
 import dev.frostguard.api.configs.TpMessageSeverityEnum;
+import dev.frostguard.api.configs.TemplatesEnum;
+import dev.frostguard.api.domain.AreaData;
 import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.api.domain.RawImageData;
 import dev.frostguard.engine.diagnostics.DiagnosticSnapshotStore;
 import dev.frostguard.engine.emulator.EmulatorController;
+import dev.frostguard.engine.error.ADBConnectionException;
+import dev.frostguard.engine.error.ProfileCooldownException;
+import dev.frostguard.engine.error.ProfileInReconnectStateException;
+import dev.frostguard.engine.error.StopExecutionException;
+import dev.frostguard.engine.error.TaskPreemptedException;
 import dev.frostguard.engine.input.TapInteractionService;
 import dev.frostguard.engine.input.TapJitterPolicy;
 import dev.frostguard.engine.nav.CommonGameAreas;
@@ -44,6 +51,7 @@ public class StaminaHelper {
 
     interface HudStaminaUi {
         void openStaminaDialog(int settleMs) throws Exception;
+        boolean isStaminaDialogVisible() throws Exception;
         Integer readStamina(int attempts, long retryMs) throws Exception;
         void cleanup() throws Exception;
     }
@@ -69,11 +77,57 @@ public class StaminaHelper {
         this.hudStaminaUi = new HudStaminaUi() {
             @Override
             public void openStaminaDialog(int settleMs) {
-                taps.tapInside(CommonGameAreas.HUD_STAMINA_ENTRY, 1, settleMs);
+                // Reproduced on the live emulator 16-Nov: the old arrow at
+                // (34,140), despite matching at >90%, opens CITY BONUS.
+                // Only the green stamina HUD bar at (42,106) opens Obtain more.
+                // A positive root anchor is required by updateStaminaFromHud.
+                RawImageData first = device.captureScreen(deviceSlot);
+                var firstTarget = StaminaHudEntry.verifiedTarget(first);
+                if (firstTarget == null) {
+                    throw new IllegalStateException(
+                            "Stamina bar absent; refusing City Bonus arrow and legacy coordinates");
+                }
+                try { Thread.sleep(160); }
+                catch (InterruptedException stop) {
+                    Thread.currentThread().interrupt();
+                    throw new java.util.concurrent.CancellationException(
+                            "Interrupted before verifying Stamina bar");
+                }
+                var secondTarget=StaminaHudEntry.verifiedTarget(
+                        device.captureScreen(deviceSlot));
+                if (!firstTarget.equals(secondTarget)) {
+                    throw new IllegalStateException(
+                            "Stamina bar changed before tap; refusing unverified HUD click");
+                }
+                taps.tapInside(AreaData.of(29,103,56,110),1,settleMs);
+            }
+
+            @Override
+            public boolean isStaminaDialogVisible() {
+                var first = device.locatePattern(deviceSlot,
+                        device.captureScreen(deviceSlot), TemplatesEnum.SERVE_EMU_STAMINA_TITLE,
+                        new dev.frostguard.api.domain.PointData(100, 105),
+                        new dev.frostguard.api.domain.PointData(650, 310), 90);
+                if (!first.isFound()) return false;
+                try { Thread.sleep(150); }
+                catch (InterruptedException e) { Thread.currentThread().interrupt(); return false; }
+                var second = device.locatePattern(deviceSlot,
+                        device.captureScreen(deviceSlot), TemplatesEnum.SERVE_EMU_STAMINA_TITLE,
+                        new dev.frostguard.api.domain.PointData(100, 105),
+                        new dev.frostguard.api.domain.PointData(650, 310), 90);
+                return RecognitionConsensus.agrees(first, second, 18);
             }
 
             @Override
             public Integer readStamina(int attempts, long retryMs) {
+                Integer current = numberReader.attemptRecognition(
+                        CommonGameAreas.STAMINA_OCR_AREA_CURRENT.topLeft(),
+                        CommonGameAreas.STAMINA_OCR_AREA_CURRENT.bottomRight(),
+                        attempts, retryMs,
+                        CommonOCRSettings.STAMINA_FRACTION_SETTINGS,
+                        RegexNumberParser::hasFractionSyntax,
+                        RegexNumberParser::numerator);
+                if (current != null) return current;
                 return numberReader.attemptRecognition(
                         CommonGameAreas.STAMINA_OCR_AREA.topLeft(),
                         CommonGameAreas.STAMINA_OCR_AREA.bottomRight(),
@@ -107,11 +161,28 @@ public class StaminaHelper {
 
     // Reads the stable City/World HUD entry via bounded OCR retries, persists, then closes its dialog.
     public void updateStaminaFromHud() {
+        if (device != null && !verifiedStaminaHudAvailable()) {
+            emitWarn("Stamina HUD is not on a verified City/World screen; skipping OCR and Back cleanup");
+            return;
+        }
         emitDebug("Opening HUD stamina dialog");
         long startMs = System.currentTimeMillis();
+        boolean dialogVerified = false;
 
         try {
             hudStaminaUi.openStaminaDialog(STAMINA_DIALOG_SETTLE_MS);
+            dialogVerified = hudStaminaUi.isStaminaDialogVisible();
+            if (!dialogVerified) {
+                // On a loaded serve-emu the HUD tap can be acknowledged before
+                // the dialog finishes animating. Reobserve without a second tap.
+                pause(350);
+                dialogVerified = hudStaminaUi.isStaminaDialogVisible();
+            }
+            if (!dialogVerified) {
+                emitWarn("Stamina dialog was not confirmed after HUD tap; "
+                        + "skipping OCR and blind Back; " + retainStaminaOcrFailureSnapshot());
+                return;
+            }
 
             Integer reading = hudStaminaUi.readStamina(STAMINA_OCR_ATTEMPTS, STAMINA_OCR_RETRY_MS);
 
@@ -124,15 +195,50 @@ public class StaminaHelper {
                 persistence.setStamina(accountKey, reading);
             }
         } catch (Exception ex) {
+            propagateControlFailure(ex);
             emitWarn("Stamina update error: " + ex.getMessage());
         } finally {
-            // Safety navigation back
-            try {
-                hudStaminaUi.cleanup();
-            } catch (Exception ex) {
-                emitDebug("Press-back cleanup error: " + ex.getMessage());
+            // An unexpected screen might be Chief Profile or a mission page.
+            // Only close a positively identified Obtain-more dialog here.
+            if (dialogVerified) {
+                try {
+                    hudStaminaUi.cleanup();
+                } catch (Exception ex) {
+                    emitDebug("Stamina dialog cleanup error: " + ex.getMessage());
+                }
             }
         }
+    }
+
+    static void propagateControlFailure(Throwable failure) {
+        // The OCR transport may wrap an ADB or scheduler signal inside an
+        // ordinary RuntimeException. Such failures must reach TaskQueue.
+        java.util.Set<Throwable> seen = java.util.Collections.newSetFromMap(
+                new java.util.IdentityHashMap<>());
+        for (Throwable cause = failure; cause != null && seen.add(cause); cause = cause.getCause()) {
+            if (cause instanceof StopExecutionException stop) throw stop;
+            if (cause instanceof TaskPreemptedException preempted) throw preempted;
+            if (cause instanceof ProfileInReconnectStateException reconnect) throw reconnect;
+            if (cause instanceof ProfileCooldownException cooldown) throw cooldown;
+            if (cause instanceof ADBConnectionException adb) throw adb;
+        }
+        if (Thread.currentThread().isInterrupted()) throw StopExecutionException.userCancelled();
+    }
+
+    private boolean verifiedStaminaHudAvailable() {
+        RawImageData frame = device.captureScreen(deviceSlot);
+        AreaData anchor = AreaData.of(590, 1145, 715, 1275);
+        for (TemplatesEnum template : new TemplatesEnum[] {
+                TemplatesEnum.SERVE_EMU_CITY_ANCHOR,
+                TemplatesEnum.SERVE_EMU_WORLD_ANCHOR_CURRENT,
+                TemplatesEnum.GAME_HOME_FURNACE,
+                TemplatesEnum.GAME_HOME_WORLD }) {
+            if (device.locatePattern(deviceSlot, frame, template,
+                    anchor.topLeft(), anchor.bottomRight(), 90).isFound()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -193,6 +299,12 @@ public class StaminaHelper {
     }
 
     private StaminaTopUpResult useItemsInOpenDialog(int targetStamina, int itemReserve) {
+        // The current UI replaces the free "Use" action with "Buy & Use"
+        // when no free stamina cans are available. Never spend gems for a refill.
+        if (premiumBuyVisible()) {
+            emitWarn("Stamina screen offers only Buy & Use; skipping premium purchase");
+            return StaminaTopUpResult.uiNotFound();
+        }
         var useButton = device.locatePattern(deviceSlot, dev.frostguard.api.configs.TemplatesEnum.STAMINA_ITEM_USE_BUTTON,
                 CommonGameAreas.STAMINA_DIALOG_USE_BUTTON.topLeft(),
                 CommonGameAreas.STAMINA_DIALOG_USE_BUTTON.bottomRight(), 85);
@@ -216,6 +328,10 @@ public class StaminaHelper {
 
             @Override
             public boolean useItem() {
+                if (premiumBuyVisible()) {
+                    emitWarn("Stamina premium Buy & Use became visible; aborting refill without spending");
+                    return false;
+                }
                 var currentUseButton = device.locatePattern(
                         deviceSlot,
                         dev.frostguard.api.configs.TemplatesEnum.STAMINA_ITEM_USE_BUTTON,
@@ -233,6 +349,19 @@ public class StaminaHelper {
         }, targetStamina, itemReserve);
         logTopUpResult(result, targetStamina, itemReserve);
         return result;
+    }
+
+    private boolean premiumBuyVisible() {
+        try {
+            return device.locatePattern(deviceSlot,
+                    dev.frostguard.api.configs.TemplatesEnum.SERVE_EMU_PREMIUM_BUY,
+                    new dev.frostguard.api.domain.PointData(475, 495),
+                    new dev.frostguard.api.domain.PointData(693, 640), 90).isFound();
+        } catch (RuntimeException failure) {
+            emitWarn("Stamina purchase guard could not validate button: " + failure.getMessage());
+            // Fail closed: an unavailable screenshot never authorizes gem spending.
+            return true;
+        }
     }
 
     private void logTopUpResult(StaminaTopUpResult result, int targetStamina, int itemReserve) {

@@ -15,6 +15,22 @@ class AndroidTouchSessionTest {
         assertEquals(java.util.List.of(12345), AndroidTouchSession.ownedForwardPorts(listing, "one", socket));
     }
 
+    @Test void resolvesOwnedForwardWhenAdbReturnsEmptyOrTcpPrefix() throws Exception {
+        String owned = "localabstract:scrcpy_00000001";
+        String list = "other tcp:4444 " + owned + "\n"
+                + "one tcp:12543 " + owned + "\n"
+                + "one tcp:3333 localabstract:scrcpy_00000002\n";
+        assertEquals(12543, AndroidTouchSession.resolveOwnedForwardPort(
+                "", "one", owned, () -> list));
+        assertEquals(12543, AndroidTouchSession.resolveOwnedForwardPort(
+                "tcp:12543", "one", owned, () -> { throw new AssertionError("Do not list"); }));
+        assertThrows(IOException.class, () -> AndroidTouchSession.resolveOwnedForwardPort(
+                "invalid", "one", owned, () -> "one tcp:12543 " + owned
+                        + "\none tcp:12544 " + owned));
+        assertThrows(IOException.class, () -> AndroidTouchSession.resolveOwnedForwardPort(
+                "", "one", owned, () -> "other tcp:12543 " + owned));
+    }
+
     @Test void bundledServerIsPinnedAndModifiedBytesAreRefused() throws Exception {
         try (var resource = getClass().getResourceAsStream("/android/scrcpy-server-v4.1")) {
             assertNotNull(resource);

@@ -5,12 +5,18 @@ import dev.frostguard.api.configs.TpMessageSeverityEnum;
 import dev.frostguard.api.domain.AreaData;
 import dev.frostguard.api.domain.ImageSearchResultData;
 import dev.frostguard.api.domain.PointData;
+import dev.frostguard.vision.match.OpenCvPatternLocator;
 import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.engine.emulator.EmulatorController;
 import dev.frostguard.engine.service.LoggingService;
 import dev.frostguard.vision.logging.ProfileContextLogger;
 
 import java.util.List;
+import java.util.Locale;
+import java.time.Instant;
+import java.time.Duration;
+import java.util.concurrent.ConcurrentHashMap;
+import dev.frostguard.engine.diagnostics.DiagnosticSnapshotStore;
 import java.util.Objects;
 
 /**
@@ -29,6 +35,10 @@ public class TemplateSearchHelper {
     private final AccountDescriptor profile;
     private final LoggingService logs;
     private int missCount;
+    private static final ConcurrentHashMap<String, Instant> SNAPSHOT_RATE_LIMIT = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, Integer> FAILURE_COUNTS = new ConcurrentHashMap<>();
+    private static final Duration SNAPSHOT_INTERVAL = Duration.ofMinutes(10);
+    private static final int FALLBACK_CONFIRMATION_DISTANCE = 18;
 
     private Runnable preemptionHook = () -> {};
 
@@ -42,6 +52,16 @@ public class TemplateSearchHelper {
         this.logs        = LoggingService.obtain();
     }
 
+    private EmulatorRecognitionPolicy recognitionPolicy() {
+        // Helpers can be created before an emulator is initialized (notably
+        // during scheduling). Read the selected backend at SEARCH time so a
+        // helper never permanently caches the legacy/null policy.
+        return EmulatorRecognitionPolicy.forEmulator(
+                emu == null ? null : emu.getSelectedEmulatorType());
+    }
+
+    public boolean usesServeEmuRecognition() { return recognitionPolicy().isServeEmu(); }
+
     public int getFailedSearches() { return missCount; }
 
     public void setPreemptionCheck(Runnable check) {
@@ -54,6 +74,17 @@ public class TemplateSearchHelper {
         return retrySearch(tpl, cfg, false, false);
     }
 
+    /** Cheap first-pass observation for passive navigation anchors only.
+     * No greyscale/multiscale retries, diagnostic snapshots or implicit taps.
+     * Never use this alone to authorize an action.
+     */
+    public ImageSearchResultData locatePatternFast(TemplatesEnum tpl, SearchConfig cfg) {
+        if (!recognitionPolicy().shouldProbe(tpl)) return ImageSearchResultData.miss();
+        preemptionHook.run();
+        ImageSearchResultData result = doSearch(tpl, cfg);
+        return result == null ? ImageSearchResultData.miss() : result;
+    }
+
     // ── single-match (greyscale) ─────────────────────────────────────
 
     public ImageSearchResultData locatePatternMono(TemplatesEnum tpl, SearchConfig cfg) {
@@ -62,6 +93,71 @@ public class TemplateSearchHelper {
 
     public ImageSearchResultData locatePatternMultiScale(TemplatesEnum tpl, SearchConfig cfg) {
         return retrySearch(tpl, cfg, false, true);
+    }
+
+    /**
+     * Recognize a semantic action using several known visual variants. The
+     * preferred template uses the standard resilient matcher; alternatives
+     * need two independent agreeing frames before they may be tapped.
+     * Callers must choose variants for the SAME action and screen context.
+     */
+    public ImageSearchResultData locateAction(TemplatesEnum preferred, SearchConfig cfg,
+                                               TemplatesEnum... alternatives) {
+        Objects.requireNonNull(preferred, "preferred");
+        Objects.requireNonNull(cfg, "cfg");
+        if (!recognitionPolicy().shouldProbe(preferred)) return ImageSearchResultData.miss();
+        ImageSearchResultData primary = locatePattern(preferred, cfg);
+        if (confirmedAction(preferred, cfg, primary, false)) return primary;
+        if (alternatives != null) {
+            for (TemplatesEnum alternative : alternatives) {
+                if (alternative == null || alternative == preferred || !alternative.existsAtPath()
+                        || !recognitionPolicy().shouldProbe(alternative)) continue;
+                preemptionHook.run();
+                ImageSearchResultData exact = doSearch(alternative, cfg);
+                if (confirmedAction(alternative, cfg, exact, false)) {
+                    dbg("Action " + preferred.name() + " confirmed via " + alternative.name() + " exact");
+                    return exact;
+                }
+                // The same button artwork often changes size under BlueStacks scaling.
+                if (!recognitionPolicy().useScaledAlternative(alternative)) continue;
+                ImageSearchResultData scaled = doSearchMultiScale(alternative, cfg);
+                if (confirmedAction(alternative, cfg, scaled, true)) {
+                    dbg("Action " + preferred.name() + " confirmed via " + alternative.name() + " multiscale");
+                    return scaled;
+                }
+            }
+        }
+        recordMiss(preferred, cfg, primary);
+        return ImageSearchResultData.miss();
+    }
+
+    private boolean confirmedAction(TemplatesEnum template, SearchConfig cfg,
+                                    ImageSearchResultData first, boolean multiScale) {
+        if (first == null || !first.isFound() || first.getPoint() == null) return false;
+        sleepWithPreemption(180);
+        preemptionHook.run();
+        ImageSearchResultData second = multiScale
+                ? doSearchMultiScale(template, cfg) : doSearch(template, cfg);
+        if (RecognitionConsensus.agrees(first, second, FALLBACK_CONFIRMATION_DISTANCE)) return true;
+        // locatePattern may have found the first frame via its verified
+        // multiscale/greyscale fallback. Confirm against a fresh frame using
+        // those same methods rather than rejecting it with exact-only search.
+        if (!multiScale) {
+            preemptionHook.run();
+            second = doSearchMultiScale(template, cfg);
+            if (RecognitionConsensus.agrees(first, second, FALLBACK_CONFIRMATION_DISTANCE)) {
+                dbg("Action " + template.name() + " confirmed via multiscale second frame");
+                return true;
+            }
+            preemptionHook.run();
+            second = doSearchGrey(template, cfg);
+            if (RecognitionConsensus.agrees(first, second, FALLBACK_CONFIRMATION_DISTANCE)) {
+                dbg("Action " + template.name() + " confirmed via greyscale second frame");
+                return true;
+            }
+        }
+        dbg("Action " + template.name() + " failed two-frame confirmation");
+        return false;
     }
 
     // ── multi-match (colour) ─────────────────────────────────────────
@@ -80,6 +176,10 @@ public class TemplateSearchHelper {
 
     private ImageSearchResultData retrySearch(TemplatesEnum tpl, SearchConfig cfg,
                                               boolean mono, boolean multiScale) {
+        if (!recognitionPolicy().shouldProbe(tpl)) {
+            dbg("Skipped obsolete " + tpl.name() + " for SERVE_EMU; other emulators unaffected");
+            return ImageSearchResultData.miss();
+        }
         ImageSearchResultData last = null;
         for (int a = 1; a <= cfg.getMaxAttempts(); a++) {
             preemptionHook.run();
@@ -90,12 +190,102 @@ public class TemplateSearchHelper {
             }
             if (a < cfg.getMaxAttempts()) sleepWithPreemption(cfg.getDelayBetweenAttempts());
         }
-        dbg(tpl.name() + (multiScale ? " (multi-scale)" : "") + " not found after " + cfg.getMaxAttempts() + " attempts");
+        // Only the general colour matcher gets a shared, conservative
+        // fallback. Explicit mono or multiscale callers retain their semantics.
+        if (!mono && !multiScale && cfg.getThreshold() >= 90
+                && recognitionPolicy().useImplicitFallback(tpl)) {
+            ImageSearchResultData fallback = verifiedFallback(tpl, cfg);
+            if (fallback != null && fallback.isFound()) return fallback;
+        }
+        dbg(tpl.name() + (multiScale ? " (multi-scale)" : "") + " not found after "
+                + cfg.getMaxAttempts() + " attempts; score=" + score(last));
+        recordMiss(tpl, cfg, last);
         return last;
+    }
+
+    /**
+     * Shared secondary recognition with two-frame confirmation. Never click
+     * using a single weak match. Both methods retain the caller's search area.
+     */
+    private ImageSearchResultData verifiedFallback(TemplatesEnum tpl, SearchConfig cfg) {
+        // Serve-EMU lives across the network. An absent template previously
+        // caused two additional full ADB screencaps (scale then mono), even
+        // though both methods inspected an unchanged screen. Run both methods
+        // locally against ONE fresh captured frame instead. A possible hit
+        // is still confirmed against another independent fresh frame before
+        // any action can use it. Other emulator backends remain untouched.
+        if (recognitionPolicy().isServeEmu())
+            return verifiedFallbackSharedFrame(tpl,cfg);
+        for (boolean greyscale : new boolean[]{false, true}) {
+            preemptionHook.run();
+            ImageSearchResultData first = greyscale ? doSearchGrey(tpl, cfg) : doSearchMultiScale(tpl, cfg);
+            if (first == null || !first.isFound() || first.getPoint() == null) continue;
+            sleepWithPreemption(160);
+            preemptionHook.run();
+            ImageSearchResultData second = greyscale ? doSearchGrey(tpl, cfg) : doSearchMultiScale(tpl, cfg);
+            if (RecognitionConsensus.agrees(first, second, FALLBACK_CONFIRMATION_DISTANCE)) {
+                dbg(tpl.name() + " verified via " + (greyscale ? "greyscale" : "multiscale")
+                        + " scores=" + score(first) + "/" + score(second));
+                return second;
+            }
+            dbg(tpl.name() + " secondary match unconfirmed via "
+                    + (greyscale ? "greyscale" : "multiscale"));
+        }
+        return null;
+    }
+
+    private ImageSearchResultData verifiedFallbackSharedFrame(TemplatesEnum tpl, SearchConfig cfg) {
+        return ServeEmuFrameFallback.confirm(() -> emu.captureScreen(device),
+                (frame,mono) -> {
+                    PointData start=cfg.hasArea() ? cfg.getArea().topLeft()
+                            : cfg.hasCoordinates() ? cfg.getStartPoint() : new PointData(0,0);
+                    PointData end=cfg.hasArea() ? cfg.getArea().bottomRight()
+                            : cfg.hasCoordinates() ? cfg.getEndPoint()
+                            : new PointData(frame.getWidth(),frame.getHeight());
+                    return mono
+                            ? OpenCvPatternLocator.locatePatternMono(frame,tpl.getTemplate(),
+                                    start,end,cfg.getThreshold())
+                            : OpenCvPatternLocator.locatePatternMultiScale(frame,tpl.getTemplate(),
+                                    start,end,cfg.getThreshold());
+                },preemptionHook,() -> sleepWithPreemption(120),FALLBACK_CONFIRMATION_DISTANCE);
+    }
+
+    private static String score(ImageSearchResultData match) {
+        return match == null ? "unavailable" : String.format(Locale.ROOT, "%.1f", match.getMatchScore());
+    }
+
+    /**
+     * Capture one anonymized-by-filename frame per device/template per 10 minutes.
+     * The snapshot store limits retained PNGs and respects the user's diagnostics toggle.
+     */
+    private void recordMiss(TemplatesEnum tpl, SearchConfig cfg, ImageSearchResultData last) {
+        String key = device + ":" + tpl.name();
+        // Optional/missing UI templates are common. Avoid a screenshot storm
+        // when scanning large screens: persist only recurring failures.
+        if (FAILURE_COUNTS.merge(key, 1, Integer::sum) < 3) return;
+        Instant now = Instant.now();
+        Instant previous = SNAPSHOT_RATE_LIMIT.get(key);
+        if (previous != null && Duration.between(previous, now).compareTo(SNAPSHOT_INTERVAL) < 0) return;
+        DiagnosticSnapshotStore store = DiagnosticSnapshotStore.forCurrentWorkspace();
+        if (!store.isEnabled()) return;
+        if (SNAPSHOT_RATE_LIMIT.put(key, now) != null
+                && previous != null && Duration.between(previous, now).compareTo(SNAPSHOT_INTERVAL) < 0) return;
+        try {
+            String note = store.write(emu.captureScreen(device), "recognition",
+                    tpl.name().toLowerCase(Locale.ROOT), now).orElse("not saved");
+            warn("Recognition diagnostics: template=" + tpl.name() + " threshold=" + cfg.getThreshold()
+                    + " score=" + score(last) + " snapshot=" + note);
+        } catch (RuntimeException failure) {
+            if (failure instanceof java.util.concurrent.CancellationException
+                    || Thread.currentThread().isInterrupted()) throw failure;
+            dbg("Recognition diagnostics unavailable for " + tpl.name() + ": "
+                    + failure.getClass().getSimpleName());
+        }
     }
 
     private List<ImageSearchResultData> retryMultiSearch(TemplatesEnum tpl, SearchConfig cfg,
                                                          boolean mono) {
+        if (!recognitionPolicy().shouldProbe(tpl)) return List.of();
         List<ImageSearchResultData> last = null;
         for (int a = 1; a <= cfg.getMaxAttempts(); a++) {
             preemptionHook.run();

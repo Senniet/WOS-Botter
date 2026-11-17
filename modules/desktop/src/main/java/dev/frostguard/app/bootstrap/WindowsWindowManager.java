@@ -50,7 +50,14 @@ public final class WindowsWindowManager {
     private static final int HTCLIENT = 1;
     private static final int HTCAPTION = 2;
     private static final int HTLEFT = 10;
+    private static final int HTRIGHT = 11;
+    private static final int HTTOP = 12;
+    private static final int HTTOPLEFT = 13;
+    private static final int HTTOPRIGHT = 14;
+    private static final int HTBOTTOM = 15;
+    private static final int HTBOTTOMLEFT = 16;
     private static final int HTBOTTOMRIGHT = 17;
+    private static final int MIN_NATIVE_RESIZE_BORDER = 10;
 
     private static final int CUSTOM_TITLE_BAR_HEIGHT = 32;
     private static final int WINDOW_CONTROL_WIDTH = 46;
@@ -182,6 +189,46 @@ public final class WindowsWindowManager {
         return hitTestResult >= HTLEFT && hitTestResult <= HTBOTTOMRIGHT;
     }
 
+    /**
+     * The stage is UNDECORATED and WM_NCCALCSIZE removes its standard frame.
+     * DefWindowProc therefore commonly returns HTCLIENT even if WS_THICKFRAME
+     * was added for Aero Snap. Explicitly supply Win32 edge/corner hit tests.
+     * Coordinates and margin are physical screen pixels (multi-monitor safe).
+     */
+    static int resizeHitTest(int screenX, int screenY, RECT bounds, int margin, boolean maximized) {
+        if (maximized || bounds == null || margin <= 0
+                || screenX < bounds.left || screenX >= bounds.right
+                || screenY < bounds.top || screenY >= bounds.bottom) {
+            return HTCLIENT;
+        }
+        boolean left = screenX < bounds.left + margin;
+        boolean right = screenX >= bounds.right - margin;
+        boolean top = screenY < bounds.top + margin;
+        boolean bottom = screenY >= bounds.bottom - margin;
+        if (left && top) return HTTOPLEFT;
+        if (right && top) return HTTOPRIGHT;
+        if (left && bottom) return HTBOTTOMLEFT;
+        if (right && bottom) return HTBOTTOMRIGHT;
+        if (left) return HTLEFT;
+        if (right) return HTRIGHT;
+        if (top) return HTTOP;
+        if (bottom) return HTBOTTOM;
+        return HTCLIENT;
+    }
+
+    private static int nativeResizeMargin(HWND hwnd) {
+        try {
+            int dpi = User32Extensions.INSTANCE.GetDpiForWindow(hwnd);
+            if (dpi >= 96 && dpi <= 768) {
+                return Math.min(32, Math.max(MIN_NATIVE_RESIZE_BORDER,
+                        (int) Math.round(MIN_NATIVE_RESIZE_BORDER * dpi / 96.0)));
+            }
+        } catch (UnsatisfiedLinkError | ExceptionInInitializerError | IllegalArgumentException failure) {
+            // Preserve resizing on older Windows versions without GetDpiForWindow.
+        }
+        return MIN_NATIVE_RESIZE_BORDER;
+    }
+
     private static HWND findCurrentProcessWindow(String title) {
         int processId = Kernel32.INSTANCE.GetCurrentProcessId();
         AtomicReference<HWND> match = new AtomicReference<>();
@@ -211,6 +258,9 @@ public final class WindowsWindowManager {
         boolean IsZoomed(HWND hwnd);
 
         boolean ClientToScreen(HWND hwnd, POINT point);
+
+        // Windows 10+; fail safely to a 10px border on older systems.
+        int GetDpiForWindow(HWND hwnd);
     }
 
     private static final class BorderlessWindowProcedure implements WindowProc {
@@ -239,6 +289,14 @@ public final class WindowsWindowManager {
                 int screenY = (short) ((packedPoint >>> 16) & 0xFFFF);
                 RECT clientBounds = getClientBoundsOnScreen(hwnd);
                 if (clientBounds != null) {
+                    // Handle the undecorated edge ourselves. Windows may not
+                    // provide HTLEFT/HTRIGHT from its original WndProc because
+                    // WM_NCCALCSIZE has removed all non-client borders.
+                    int resizeHit = resizeHitTest(screenX, screenY, clientBounds,
+                            nativeResizeMargin(hwnd), User32Extensions.INSTANCE.IsZoomed(hwnd));
+                    if (resizeHit != HTCLIENT) {
+                        return new LRESULT(resizeHit);
+                    }
                     if (isCaptionHit(screenX, screenY, clientBounds)) {
                         return new LRESULT(HTCAPTION);
                     }

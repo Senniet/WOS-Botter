@@ -2,6 +2,8 @@ package dev.frostguard.engine.helper;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -14,6 +16,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import dev.frostguard.api.domain.RawImageData;
 import dev.frostguard.engine.diagnostics.DiagnosticSnapshotStore;
+import dev.frostguard.engine.error.ADBConnectionException;
 import dev.frostguard.engine.service.StaminaService;
 
 class StaminaHelperHudReadTest {
@@ -29,13 +32,27 @@ class StaminaHelperHudReadTest {
 
         helper.updateStaminaFromHud();
 
-        assertEquals(List.of("open-hud", "read", "cleanup"), ui.events);
+        assertEquals(List.of("open-hud", "verify-dialog", "read", "cleanup"), ui.events);
         assertEquals(1, ui.dialogOpenCount);
         assertEquals(1, ui.ocrCount);
         assertEquals(5, ui.ocrAttempts);
         assertEquals(200L, ui.ocrRetryMs);
         assertEquals(1, ui.cleanupCount);
         assertEquals(42, service.findCurrentStamina(9301L).orElseThrow());
+    }
+
+    @Test
+    void delayedDialogIsRecheckedWithoutRepeatingHudTap() {
+        StaminaService service = StaminaService.getServices();
+        RecordingHudUi ui = new RecordingHudUi(51);
+        ui.dialogVisibleAfterSecondCheck = true;
+        StaminaHelper helper = new StaminaHelper(service, 9320L, ui);
+
+        helper.updateStaminaFromHud();
+
+        assertEquals(List.of("open-hud", "verify-dialog", "verify-dialog", "read", "cleanup"), ui.events);
+        assertEquals(1, ui.dialogOpenCount);
+        assertEquals(51, service.findCurrentStamina(9320L).orElseThrow());
     }
 
     @Test
@@ -47,7 +64,7 @@ class StaminaHelperHudReadTest {
         helper.updateStaminaFromHud();
 
         assertTrue(service.findCurrentStamina(9302L).isEmpty());
-        assertEquals(List.of("open-hud", "read", "snapshot", "cleanup"), ui.events);
+        assertEquals(List.of("open-hud", "verify-dialog", "read", "snapshot", "cleanup"), ui.events);
         assertEquals(1, ui.cleanupCount);
         assertEquals(1, helper.captureCount);
         assertTrue(helper.snapshotResult.startsWith("snapshot=logs/snapshot/stamina/"));
@@ -69,7 +86,7 @@ class StaminaHelperHudReadTest {
         helper.updateStaminaFromHud();
 
         assertTrue(service.findCurrentStamina(9303L).isEmpty());
-        assertEquals(List.of("open-hud", "read", "cleanup"), ui.events);
+        assertEquals(List.of("open-hud", "verify-dialog", "read", "cleanup"), ui.events);
         assertEquals(0, helper.captureCount);
         assertEquals(1, ui.cleanupCount);
         assertEquals("snapshot=disabled", helper.snapshotResult);
@@ -86,13 +103,46 @@ class StaminaHelperHudReadTest {
         helper.updateStaminaFromHud();
 
         assertTrue(service.findCurrentStamina(9304L).isEmpty());
-        assertEquals(List.of("open-hud", "read", "cleanup"), ui.events);
+        assertEquals(List.of("open-hud", "verify-dialog", "read", "cleanup"), ui.events);
+        assertEquals(1, ui.cleanupCount);
+    }
+
+    @Test
+    void wrongScreenSkipsOcrAndBackAfterStaminaHudTap() {
+        StaminaService service = StaminaService.getServices();
+        RecordingHudUi ui = new RecordingHudUi(472);
+        ui.dialogVisible = false;
+        SnapshotStaminaHelper helper = new SnapshotStaminaHelper(service, 9310L, ui, workspace);
+
+        helper.updateStaminaFromHud();
+
+        assertEquals(List.of("open-hud", "verify-dialog", "verify-dialog", "snapshot"), ui.events);
+        assertEquals(0, ui.ocrCount);
+        assertEquals(0, ui.cleanupCount);
+        assertEquals(1, helper.captureCount);
+        assertTrue(service.findCurrentStamina(9310L).isEmpty());
+    }
+
+    @Test
+    void wrappedAdbFailurePropagatesToSchedulerAfterConfirmedDialog() {
+        RecordingHudUi ui = new RecordingHudUi(null);
+        var adbFailure = new ADBConnectionException("test connection lost");
+        ui.readFailure = new IllegalStateException("OCR transport failed", adbFailure);
+        StaminaHelper helper = new StaminaHelper(StaminaService.getServices(), 9311L, ui);
+
+        assertSame(adbFailure, assertThrows(ADBConnectionException.class,
+                helper::updateStaminaFromHud));
+        assertEquals(List.of("open-hud", "verify-dialog", "read", "cleanup"), ui.events);
         assertEquals(1, ui.cleanupCount);
     }
 
     private static final class RecordingHudUi implements StaminaHelper.HudStaminaUi {
         private final Integer reading;
         private boolean failRead;
+        private RuntimeException readFailure;
+        private boolean dialogVisible = true;
+        private boolean dialogVisibleAfterSecondCheck;
+        private int dialogChecks;
         private final List<String> events = new ArrayList<>();
         private int dialogOpenCount;
         private int ocrCount;
@@ -111,11 +161,19 @@ class StaminaHelperHudReadTest {
         }
 
         @Override
+        public boolean isStaminaDialogVisible() {
+            events.add("verify-dialog");
+            dialogChecks++;
+            return dialogVisibleAfterSecondCheck ? dialogChecks > 1 : dialogVisible;
+        }
+
+        @Override
         public Integer readStamina(int attempts, long retryMs) {
             events.add("read");
             ocrCount++;
             ocrAttempts = attempts;
             ocrRetryMs = retryMs;
+            if (readFailure != null) throw readFailure;
             if (failRead) {
                 throw new IllegalStateException("simulated OCR failure");
             }

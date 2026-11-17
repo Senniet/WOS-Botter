@@ -27,6 +27,12 @@
                         <VBox spacing="10">
                             <CheckBox fx:id="checkBoxUpgradeFurnace" mnemonicParsing="false"
                                       text="Upgrade Furnace" />
+                            <CheckBox fx:id="checkBoxDoubleTime"
+                                      text="Use Double Time before a new Furnace upgrade (Chief Order points)">
+                                <tooltip>
+                                    <Tooltip text="When a new Furnace upgrade is ready, try the five-minute Double Time order first. Skip if on cooldown, points insufficient, or cost not verified. Never use gems." />
+                                </tooltip>
+                            </CheckBox>
                             <CheckBox fx:id="checkBoxReserveProduction" mnemonicParsing="false"
                                       text="Reserve training/research for required upgrades">
                                 <tooltip>

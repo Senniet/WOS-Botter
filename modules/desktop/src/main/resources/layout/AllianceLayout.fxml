@@ -81,7 +81,7 @@
                                                         <RadioButton fx:id="radioAllTroops" mnemonicParsing="false" text="All Troops" />
                                                         <RadioButton fx:id="radioUseFormation" mnemonicParsing="false" text="Use Formation" />
                                                         <Separator style="-fx-opacity: 0.25;" />
-                                                        <CheckBox fx:id="checkBoxHelpRequests" mnemonicParsing="false" text="Help alliance requests" />
+                                                        <CheckBox fx:id="checkBoxHelpRequests" mnemonicParsing="false" text="Alliance Help Request (separate task, 10 min checks)" />
                                                     </children>
                                                 </VBox>
                                             </children>

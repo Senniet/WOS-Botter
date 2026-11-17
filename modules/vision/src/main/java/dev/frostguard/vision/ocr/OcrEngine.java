@@ -142,19 +142,27 @@ public final class OcrEngine {
         if (capture == null) {
             throw new IllegalArgumentException("Screen capture must not be null.");
         }
+        if (!capture.isValid()) {
+            throw new IllegalArgumentException("Screen capture has invalid dimensions, pixel depth, or payload length: "
+                    + capture);
+        }
     }
 
     /**
      * Converts two corners into a clamped {@code [x, y, w, h]} clip rect.
      */
-    private static int[] computeClipRect(PointData c1, PointData c2, RawImageData capture) {
-        int x = (int) Math.min(c1.getX(), c2.getX());
-        int y = (int) Math.min(c1.getY(), c2.getY());
-        int w = (int) Math.abs(c1.getX() - c2.getX());
-        int h = (int) Math.abs(c1.getY() - c2.getY());
-        if (x + w > capture.getWidth() || y + h > capture.getHeight()) {
-            throw new IllegalArgumentException("Clip rect exceeds capture dimensions.");
+    static int[] computeClipRect(PointData c1, PointData c2, RawImageData capture) {
+        if (c1 == null || c2 == null) throw new IllegalArgumentException("OCR region corners must not be null");
+        long left = Math.min(c1.getX(), c2.getX());
+        long top = Math.min(c1.getY(), c2.getY());
+        long width = Math.abs((long) c1.getX() - c2.getX());
+        long height = Math.abs((long) c1.getY() - c2.getY());
+        if (left < 0 || top < 0 || width <= 0 || height <= 0
+                || left + width > capture.getWidth() || top + height > capture.getHeight()) {
+            throw new IllegalArgumentException("Invalid OCR clip rect: x=" + left + ", y=" + top
+                    + ", w=" + width + ", h=" + height + ", frame=" + capture.getWidth()
+                    + "x" + capture.getHeight());
         }
-        return new int[]{ x, y, w, h };
+        return new int[]{ (int) left, (int) top, (int) width, (int) height };
     }
 }

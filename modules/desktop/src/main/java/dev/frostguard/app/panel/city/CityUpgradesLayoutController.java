@@ -13,8 +13,11 @@ public class CityUpgradesLayoutController extends AbstractProfileController {
 	@FXML
 	private CheckBox checkBoxUpgradeFurnace;
 
-	@FXML
-	private CheckBox checkBoxReserveProduction;
+    @FXML
+    private CheckBox checkBoxDoubleTime;
+
+    @FXML
+    private CheckBox checkBoxReserveProduction;
 
 	@FXML
 	private CheckBox checkBoxPrioritiseFurnace;
@@ -33,7 +36,8 @@ public class CityUpgradesLayoutController extends AbstractProfileController {
 
 	private void registerCityUpgradeControls() {
 		Map.of(
-				checkBoxUpgradeFurnace, ConfigurationKeyEnum.CITY_UPGRADE_FURNACE_BOOL,
+                checkBoxUpgradeFurnace, ConfigurationKeyEnum.CITY_UPGRADE_FURNACE_BOOL,
+                checkBoxDoubleTime, ConfigurationKeyEnum.CITY_UPGRADE_DOUBLE_TIME_BOOL,
 				checkBoxReserveProduction, ConfigurationKeyEnum.CITY_UPGRADE_RESERVE_PRODUCTION_BOOL,
 				checkBoxPrioritiseFurnace, ConfigurationKeyEnum.CITY_UPGRADE_PRIORITISE_FURNACE_BOOL,
 				checkboxAcceptNewSurvivors, ConfigurationKeyEnum.CITY_ACCEPT_NEW_SURVIVORS_BOOL)

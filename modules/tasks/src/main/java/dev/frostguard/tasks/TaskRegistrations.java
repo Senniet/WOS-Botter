@@ -53,6 +53,7 @@ public class TaskRegistrations {
             case CITY_UPGRADE_PRIORITISE_FURNACE -> new PrioritiseFurnaceRoutine(profile, type);
             case CITY_SURVIVORS -> new NewSurvivorsRoutine(profile, type);
             case TRAINING_TROOPS -> new TrainingRoutine(profile, type);
+            case HEAL_TROOPS -> new HealTroopsRoutine(profile, type);
             case RESEARCH -> new ResearchRoutine(profile, type);
 
             // Dailies
@@ -91,6 +92,7 @@ public class TaskRegistrations {
 
             // Alliance
             case ALLIANCE_AUTOJOIN -> new AllianceAutojoinRoutine(profile, type);
+            case ALLIANCE_HELP_REQUEST -> new AllianceHelpRoutine(profile, type);
             case ALLIANCE_TECH -> new AllianceTechRoutine(profile, type);
             case ALLIANCE_SHOP -> new AllianceShopRoutine(profile, type);
             case ALLIANCE_PET_TREASURE -> new PetAllianceTreasuresRoutine(profile, type);

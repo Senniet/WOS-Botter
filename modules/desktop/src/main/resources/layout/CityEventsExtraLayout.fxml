@@ -144,8 +144,24 @@
 
                             <Separator style="-fx-opacity: 0.15;" />
 
-                            <CheckBox fx:id="checkBoxHeroRecruitment"
-                                      text="Open recruitment hero chests" />
+                            <VBox maxWidth="Infinity" spacing="8">
+                                <CheckBox fx:id="checkBoxHeroRecruitment"
+                                          text="Hero Recruitment automation" />
+                                <VBox spacing="7" style="-fx-padding: 0 0 0 24;">
+                                    <CheckBox fx:id="checkBoxHeroAdvancedFree"
+                                              text="Advanced Recruitment - claim free recruits" />
+                                    <CheckBox fx:id="checkBoxHeroEpicFree"
+                                              text="Epic Recruitment - claim free recruits" />
+                                    <CheckBox fx:id="checkBoxHeroAdvancedKeys"
+                                              text="Advanced - use saved keys (max. 1 each run)" />
+                                    <CheckBox fx:id="checkBoxHeroEpicKeys"
+                                              text="Epic - use saved keys (max. 1 each run)" />
+                                    <CheckBox fx:id="checkBoxHeroPointsChest"
+                                              text="Points Chest - check and claim after recruitment" />
+                                    <Label styleClass="task-card-description" wrapText="true"
+                                           text="Order: Advanced, Epic, then Points Chest. Key use is optional and OFF by default. Only existing keys are used; never gems or purchases." />
+                                </VBox>
+                            </VBox>
 
                             <Separator style="-fx-opacity: 0.15;" />
 

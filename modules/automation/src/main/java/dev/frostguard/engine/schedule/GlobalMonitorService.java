@@ -115,6 +115,10 @@ public class GlobalMonitorService {
         for (MonitoredEntry entry : monitoredProfiles.values()) {
             try {
                 String devIdx = entry.profile.getEmulatorNumber();
+                // One running Android screen can be configured for multiple
+                // profiles. Only the queue's current physical-device owner
+                // may yield preemptions and injections from its screenshot.
+                if (!controller.isActiveProfileOwner(entry.profile)) continue;
                 if (!controller.isRunning(devIdx)) continue;
                 RawImageData frame = controller.captureScreen(devIdx);
                 processPreemptionRules(entry, frame);

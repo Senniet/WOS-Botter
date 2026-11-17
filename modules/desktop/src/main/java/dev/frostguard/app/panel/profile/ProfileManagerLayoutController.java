@@ -835,7 +835,7 @@ public class ProfileManagerLayoutController implements IProfileChangeObserver {
 	private FileChooser profileJsonChooser(String title) {
 		FileChooser chooser = new FileChooser();
 		chooser.setTitle(title);
-		chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("Frostguard profile files", "*.json"));
+		chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("SurvivalOps-profielbestanden", "*.json"));
 		return chooser;
 	}
 

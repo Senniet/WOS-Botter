@@ -20,6 +20,7 @@ import dev.frostguard.engine.schedule.LaunchPoint;
 import dev.frostguard.engine.schedule.TaskQueue;
 import dev.frostguard.engine.service.StaminaService;
 import dev.frostguard.engine.service.StatisticsService;
+import dev.frostguard.tasks.diagnostics.TaskDiagnosticSnapshots;
 import dev.frostguard.engine.service.TaskManagementService;
 import dev.frostguard.vision.convert.GameTimeUtils;
 import dev.frostguard.vision.ocr.ResilientOcrExecutor;
@@ -33,6 +34,9 @@ import java.util.function.Consumer;
 import java.util.List;
 
 public class IntelligenceRoutine extends DelayedTask {
+
+    @Override
+    protected boolean acceptsInjections() { return false; }
 
 private static final int MIN_STAMINA_REQUIRED_FLOOR = 30;
 
@@ -54,9 +58,112 @@ private static final long JOURNEY_RESULT_TIMEOUT_MILLIS = 30_000L;
 
 private static final long JOURNEY_INITIAL_RESULT_WAIT_MILLIS = 4_000L;
 
-private static final long JOURNEY_RESULT_POLL_MILLIS = 1_000L;
+private static final long JOURNEY_RESULT_POLL_MILLIS = 500L;
 
-private static final AreaData JOURNEY_VICTORY_CONTINUE_AREA = AreaData.of(400, 990, 658, 1038);
+// Current victory results close from the visible "Tap anywhere to exit"
+// footer; tapping the rewards content around y=1010 does not dismiss them.
+private static final AreaData JOURNEY_VICTORY_CONTINUE_AREA = AreaData.of(290, 1150, 430, 1205);
+
+static final SearchConfig INTEL_JOURNEY_FIGHT_ACTION_SEARCH = SearchConfig.builder()
+        .withMaxAttempts(1).withDelay(0L).withThreshold(90)
+        .withArea(AreaData.of(365, 1145, 705, 1275)).build();
+
+static AreaData journeyVictoryContinueArea() {
+    return JOURNEY_VICTORY_CONTINUE_AREA;
+}
+
+// View is confined to the Intel mission modal. A real saved frame from
+// 2026-11-11 scored 89.56%, below the old default of 90.
+static final SearchConfig INTEL_VIEW_ACTION_SEARCH = SearchConfig.builder()
+        .withMaxAttempts(1).withDelay(0L).withThreshold(88)
+        .withArea(AreaData.of(205, 850, 535, 1015))
+        .build();
+
+// Text label images are thin and sensitive to anti-aliasing. Require two
+// agreeing frames, retrying after the View -> wilderness transition settles.
+static final SearchConfig INTEL_SURVIVOR_ACTION_SEARCH = SearchConfig.builder()
+        .withMaxAttempts(1).withDelay(0L).withThreshold(89)
+        .withArea(AreaData.of(220, 565, 510, 690)).build();
+static final SearchConfig INTEL_JOURNEY_ACTION_SEARCH = SearchConfig.builder()
+        .withMaxAttempts(1).withDelay(0L).withThreshold(89)
+        .withArea(AreaData.of(220, 565, 510, 690)).build();
+
+// Poll for readiness rather than sleeping 2 s for every modal. All matches
+// are still verified in two independently captured frames by locateAction.
+private ImageSearchResultData awaitIntelAction(TemplatesEnum primary, SearchConfig config,
+        long timeoutMillis, TemplatesEnum... legacyVariants) {
+    long started = System.nanoTime();
+    long deadline = started + timeoutMillis * 1_000_000L;
+    do {
+        ImageSearchResultData ready = templateSearchHelper.locateAction(
+                primary, config, legacyVariants);
+        if (ready.isFound()) {
+            logDebug(routineLogIntelligenceLine(primary + " ready after "
+                    + ((System.nanoTime() - started) / 1_000_000L) + " ms"));
+            return ready;
+        }
+        if (System.nanoTime() >= deadline) break;
+        sleepTask(140);
+    } while (true);
+    // One compatibility attempt for older artwork, with two-frame confirmation.
+    for (TemplatesEnum old : legacyVariants) {
+        ImageSearchResultData fallback = templateSearchHelper.locateAction(old,
+                SearchConfig.builder().withArea(config.getArea())
+                        .withMaxAttempts(1).withThreshold(86).build());
+        if (fallback.isFound()) return fallback;
+    }
+    return ImageSearchResultData.miss();
+}
+
+// Treat disappearance as acknowledgement only after two consecutive complete
+// observations, separated by a settled frame. A one-frame animation or a
+// legacy label must not be mistaken for a successful Rescue/Explore tap.
+private boolean awaitIntelActionAcknowledged(TemplatesEnum action, SearchConfig config,
+        long timeoutMillis, TemplatesEnum... alternatives) {
+    long deadline = System.nanoTime() + timeoutMillis * 1_000_000L;
+    IntelActionAcknowledgementPolicy observations = new IntelActionAcknowledgementPolicy();
+    do {
+        boolean stillPresent = templateSearchHelper.locatePattern(action, config).isFound();
+        if (!stillPresent && alternatives != null) {
+            for (TemplatesEnum alternative : alternatives) {
+                if (alternative != null && templateSearchHelper.locatePattern(alternative, config).isFound()) {
+                    stillPresent = true;
+                    break;
+                }
+            }
+        }
+        if (observations.record(!stillPresent)) return true;
+        if (System.nanoTime() >= deadline) return false;
+        sleepTask(160);
+    } while (true);
+}
+
+private void deferIntelMissingAction(String mission, String action, String snapshotKind) {
+    String snapshot = TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+            "intel-actions", snapshotKind);
+    logWarning(routineLogIntelligenceLine(mission + " " + action
+            + " not verified on screen; " + snapshot
+            + ". No blind Back tap; retrying in five minutes."));
+    markWorkIncomplete("Intel " + mission + ": " + action + " unavailable");
+    reschedule(LocalDateTime.now().plusMinutes(5));
+    processingTask = false;
+}
+
+
+// Hero formation screens may use a different sized Deploy label.
+// Recognition requires the action to be confirmed in two successive frames.
+static final SearchConfig INTEL_DEPLOY_ACTION_SEARCH = SearchConfig.builder()
+        .withMaxAttempts(2).withDelay(250).withThreshold(88)
+        .withArea(AreaData.of(425, 1135, 710, 1279)).build();
+
+private ImageSearchResultData findIntelDeploy() {
+    return templateSearchHelper.locateAction(TemplatesEnum.INTEL_DEPLOY_BUTTON_MODERN,
+            INTEL_DEPLOY_ACTION_SEARCH, TemplatesEnum.DEPLOY_BUTTON);
+}
+
+private String intelDiagnostic(String kind) {
+    return TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER, "intel-deploy", kind);
+}
 
 private static final SearchConfig INTEL_CLAIM_ALL_SEARCH = SearchConfig.builder()
 		.withMaxAttempts(2)
@@ -171,6 +278,9 @@ public IntelligenceRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
 		IntelCyclePolicy.Decision entryDecision = intelCyclePolicy.evaluateDailyAvailability(
 				dailyIntelAvailable, LocalDateTime.now(), ZoneId.systemDefault());
 		if (entryDecision.action() == IntelCyclePolicy.Action.WAIT_FOR_NEXT_REFRESH) {
+			logInfo(routineLogIntelligenceLine("Daily unavailable evidence; "
+					+ TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+							"intel", "daily-not-available")));
 			logInfo(routineLogIntelligenceLine("Daily sidebar has no green Intel availability evidence and no "
 					+ "Intel cycle is active. Planning the next UTC Intel refresh at: "
 					+ entryDecision.nextRun().format(DATETIME_FORMATTER)));
@@ -185,7 +295,10 @@ public IntelligenceRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
 		}
 		boolean intelMissionsDetected = hasVisibleIntelMissionFlow();
 		if (!intelMissionsDetected) {
-			logInfo(routineLogIntelligenceLine("Daily reported Intel, but no enabled mission marker was detected."));
+			logWarning(routineLogIntelligenceLine("No enabled Intel mission marker detected; "
+					+ TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+							"intel", "mission-markers-missing")));
+			markWorkIncomplete("Intel: enabled mission markers not verified");
 			tryRescheduleFromCooldownFlow();
 			processingTask = false;
 			return;
@@ -195,6 +308,7 @@ public IntelligenceRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
 			logWarning(routineLogIntelligenceLine("Daily sidebar reports available Intel, but no Intel mission "
 					+ "categories were enabled for this task snapshot. Retrying at: "
 					+ retryAt.format(DATETIME_FORMATTER)));
+			markWorkIncomplete("Intel: available missions but no mission categories enabled");
 			reschedule(retryAt);
 			processingTask = false;
 			return;
@@ -218,11 +332,23 @@ public IntelligenceRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
 			}
 		}
 
-		if (!useSmartProcessing || recallGatherTroopsFlow) {
-			navigationHelper.ensureCorrectScreenLocation(LaunchPoint.WORLD);
+        // Recall is a destructive, expensive operation. Turning off smart
+        // processing must NEVER implicitly recall all gathering marches.
+        // Intel mission processing and deployment capacity checks work without
+        // opening the march queue unless recall was explicitly enabled.
+        if (shouldRecallGatherTroops(recallGatherTroopsFlow)) {
+            navigationHelper.ensureCorrectScreenLocation(LaunchPoint.WORLD);
 			logInfo(routineLogIntelligenceLine("Intel gather-priority mode active (smart=" + useSmartProcessing
 					+ ", recall=" + recallGatherTroopsFlow + "). Recalling all gather troops..."));
-			recallGatherTroopsFlow();
+            if (!recallGatherTroopsFlow()) {
+                // A World view with occupied marches but no Recall controls
+                // is NOT proof that gather marches were recalled. Yield
+                // instead of blocking other serial queue tasks for an hour.
+				markWorkIncomplete("Intel: gathering march recall not verified");
+                processingTask = false;
+                reschedule(LocalDateTime.now().plusMinutes(10));
+                return;
+            }
 			shouldRequeueGatherAfterIntel = true;
 			logInfo(routineLogIntelligenceLine("All gather troops recalled. Proceeding with intel processing."));
 			initiallyIdleMarches = resolveConfiguredIntelMarchesFlow();
@@ -302,6 +428,10 @@ public IntelligenceRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
 		}
 
 	}
+
+static boolean shouldRecallGatherTroops(boolean explicitlyEnabled) {
+        return explicitlyEnabled;
+    }
 
 private boolean hasEnabledIntelMissionType() {
 		return beastsEnabled || fireBeastsEnabled || survivorCampsEnabled || explorationsEnabled;
@@ -388,7 +518,10 @@ private void tryRescheduleFromCooldownFlow() {
 		}
 
 		if (cooldown == null) {
-			logWarning(routineLogIntelligenceLine("Could not read cooldown timer via OCR. Planning next run in 10 minutes."));
+			logWarning(routineLogIntelligenceLine("Could not read cooldown timer via OCR; "
+					+ TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+							"intel", "cooldown-unreadable")
+					+ ". Planning next run in 10 minutes."));
 			reschedule(LocalDateTime.now().plusMinutes(10));
 			pressBack();
 			return;
@@ -504,26 +637,42 @@ private int redeemCompletedMissions() {
 	}
 
 private int redeemAllCompletedMissions(ImageSearchResultData claimAll) {
-		List<ImageSearchResultData> completed = templateSearchHelper.locateAllPatterns(
-				TemplatesEnum.INTEL_COMPLETED, searchConfigMultiple);
-		logInfo(routineLogIntelligenceLine("Intel Claim All detected. Collecting "
-				+ Math.max(1, completed.size()) + " completed mission(s) with one action."));
-		tapInside(claimAll);
-		sleepTask(1_500);
-		tapInside(new PointData(700, 1270), new PointData(710, 1280), 6, 250);
-		sleepTask(1_000);
+        List<ImageSearchResultData> completed = templateSearchHelper.locateAllPatterns(
+                TemplatesEnum.INTEL_COMPLETED, searchConfigMultiple);
+        logInfo(routineLogIntelligenceLine("Intel Claim All detected. Attempting one verified claim action."));
+        tapInside(claimAll);
+        sleepTask(700);
 
-		ImageSearchResultData remaining = templateSearchHelper.locatePattern(
-				TemplatesEnum.INTEL_CLAIM_ALL, INTEL_CLAIM_ALL_SEARCH);
-		if (!remaining.isFound()) {
-			logInfo(routineLogIntelligenceLine("Intel Claim All completed and the button disappeared."));
-			return Math.max(1, completed.size());
-		}
+        // Real Intel Claim All opens the Rewards overlay. The previous six
+        // blind taps at (705,1275) could navigate away after dismissing it.
+        ImageSearchResultData rewards = templateSearchHelper.locateAction(
+                TemplatesEnum.SERVE_EMU_REWARDS_BANNER,
+                SearchConfig.builder().withMaxAttempts(2).withDelay(180)
+                        .withThreshold(90).withArea(AreaData.of(40,245,680,425)).build());
+        if (rewards.isFound()) {
+            tapInside(AreaData.of(290, 1140, 430, 1205));
+            sleepTask(500);
+        }
 
-		logWarning(routineLogIntelligenceLine(
-				"Intel Claim All remained visible after the tap. Falling back to individual completed markers."));
-		return redeemCompletedMissionsIndividually();
-	}
+        boolean intelVisible = intelScreenHelper.isIntelScreenActive();
+        if (!intelVisible) {
+            logWarning(routineLogIntelligenceLine("Claim All did not return to verified Intel map; "
+                    + intelDiagnostic("claim-all-map-unverified") + ". Stopping instead of blind recovery."));
+            markWorkIncomplete("Intel Claim All: map not confirmed after claim");
+            reschedule(LocalDateTime.now().plusMinutes(5));
+            processingTask = false;
+            return 0;
+        }
+        ImageSearchResultData remaining = templateSearchHelper.locatePattern(
+                TemplatesEnum.INTEL_CLAIM_ALL, INTEL_CLAIM_ALL_SEARCH);
+        if (IntelClaimRewardConfirmation.isConfirmed(intelVisible, remaining.isFound())) {
+            logInfo(routineLogIntelligenceLine("Intel Claim All confirmed: map visible and active button absent."));
+            return Math.max(1, completed.size());
+        }
+        logWarning(routineLogIntelligenceLine("Intel Claim All still active on verified map; "
+                + "trying individually only from the known Intel screen."));
+        return redeemCompletedMissionsIndividually();
+    }
 
 private int redeemCompletedMissionsIndividually() {
 		int claimedRewards = 0;
@@ -601,21 +750,35 @@ private void finalizePostIntelTaskFlow() {
 			requeueAutoJoinTaskFlow();
 		}
 
-		autoJoinDisabledForIntel = false;
-		shouldRequeueGatherAfterIntel = false;
-		shouldRequeueAutoJoinAfterIntel = false;
+        autoJoinDisabledForIntel = false;
+        shouldRequeueGatherAfterIntel = false;
+        shouldRequeueAutoJoinAfterIntel = false;
+        if (!Thread.currentThread().isInterrupted()) {
+            try {
+                navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME, this::checkPreemption);
+                logInfo(routineLogIntelligenceLine("Intel flow returned to verified Home"));
+            } catch (dev.frostguard.engine.error.HomeNotFoundException missing) {
+                logWarning(routineLogIntelligenceLine("Intel finished but could not verify Home: "
+                        + missing.getMessage()));
+            }
+        }
 	}
 
-private void recallGatherTroopsFlow() {
-		int maxRetries = 120;
+private boolean recallGatherTroopsFlow() {
+        // 120 legacy attempts caused >1-hour repeated template probes on a
+        // World screen where two marches were busy and no recall buttons
+        // were present. A bounded retry is safer for a serial task queue.
+        final int maxRetries = 3;
+        int unchangedMissingEvidence = 0;
+        int lastUnresolvedIdleCount = -1;
 
 		int attempt = 0;
 
 		logInfo(routineLogIntelligenceLine("Recalling all gather troops to the city..."));
 		SearchConfig marchStatusSearchConfig = SearchConfig.builder()
 				.withThreshold(90)
-				.withMaxAttempts(5)
-				.withDelay(200L)
+                .withMaxAttempts(1)
+                .withDelay(0L)
 				.build();
 
 		while (attempt < maxRetries) {
@@ -640,13 +803,41 @@ private void recallGatherTroopsFlow() {
 
 			if (!foundReturning && !foundView && !foundSpeedup) {
 				// Changed by pernerch | Date: 2026-07-04 | Why: replace hard-coded march ceiling with configured/adjusted runtime capacity.
-				int configuredMarches = resolveConfiguredIntelMarchesFlow();
-				int idleMarches = countIdleMarchesFlow();
-				if (idleMarches >= configuredMarches) {
+                int configuredMarches = resolveConfiguredIntelMarchesFlow();
+                List<MarchSlotState> queueSlots = marchHelper.readMarchQueue();
+                int idleMarches = countIdleMarchesFlow(queueSlots);
+                if (idleMarches >= configuredMarches) {
 					logInfo(routineLogIntelligenceLine("Zero march indicators detected and all marches are idle ("
 							+ idleMarches + "/" + configuredMarches + "). Recall is complete."));
-					return;
+					return true;
 				}
+
+                // Actual live March Queue: 4 Idle, #5 Unlock and #6 Unavailable,
+                // although configured march count remains 6. Verify this
+                // stable, complete six-row state twice before concluding that
+                // no physical gathering march requires recall.
+                int firstUsable = IntelMarchSlotCapacityPolicy.fullyIdleUsableCapacity(
+                        queueSlots, configuredMarches);
+                if (firstUsable > 0) {
+                    List<MarchSlotState> confirmation = marchHelper.readMarchQueue();
+                    int secondUsable = IntelMarchSlotCapacityPolicy.fullyIdleUsableCapacity(
+                            confirmation, configuredMarches);
+                    if (IntelMarchSlotCapacityPolicy.confirmedByTwoReadings(
+                            firstUsable, secondUsable)) {
+                        applyIntelMarchCapacityOverrideFlow(firstUsable,
+                                "March Queue twice confirmed " + firstUsable
+                                        + " usable Idle slots and " + (6 - firstUsable)
+                                        + " locked/unavailable slots");
+                        logInfo(routineLogIntelligenceLine(
+                                "All actually usable march slots are idle (" + firstUsable
+                                        + "/" + configuredMarches + " configured). "
+                                        + "No recall required; continuing Intel."));
+                        return true;
+                    }
+                    logWarning(routineLogIntelligenceLine(
+                            "March Queue usable-slot readings disagreed: " + firstUsable
+                                    + "/" + secondUsable + "; no capacity adjustment"));
+                }
 
 				int vipAdjustedMarches = Math.max(MIN_INTEL_MARCH_SLOTS, configuredMarches - 1);
 				// Changed by pernerch | Date: 2026-07-04 | Why: treat configured-1 idle marches with zero indicators as possible VIP slot expiry.
@@ -656,16 +847,31 @@ private void recallGatherTroopsFlow() {
 									+ " marches idle, possibly VIP expired.");
 					logInfo(routineLogIntelligenceLine("Recall treated as complete with adjusted Intel march capacity "
 							+ vipAdjustedMarches + "/" + configuredMarches + "."));
-					return;
+					return true;
 				}
 
-				logWarning(routineLogIntelligenceLine(
-						"Zero recall/view/speedup indicators detected, but only " + idleMarches +
-						"/" + configuredMarches + " marches are idle. Retrying recall to avoid false success."));
+                unchangedMissingEvidence = IntelRecallEvidencePolicy.nextMissingEvidenceStreak(
+                        unchangedMissingEvidence, lastUnresolvedIdleCount, idleMarches);
+                lastUnresolvedIdleCount = idleMarches;
+                if (IntelRecallEvidencePolicy.shouldStopUnverified(
+                        unchangedMissingEvidence, idleMarches, configuredMarches)) {
+                    logWarning(routineLogIntelligenceLine(
+                            "Recall could not be verified: " + idleMarches + "/" + configuredMarches
+                            + " idle and no Recall/View/Speedup control on "
+                            + unchangedMissingEvidence + " consecutive checks. "
+                            + "Leaving active marches untouched and retrying Intel later."));
+                    return false;
+                }
+                logWarning(routineLogIntelligenceLine(
+                        "No recall controls, " + idleMarches + "/" + configuredMarches
+                        + " marches idle; checking for a stable unresolved state ("
+                        + unchangedMissingEvidence + "/3)."));
 				sleepTask(600);
 				continue;
 			}
 
+            unchangedMissingEvidence = 0;
+            lastUnresolvedIdleCount = -1;
 			if (foundReturning) {
 				logInfo(routineLogIntelligenceLine("Returning arrow detected - attempting to tap recall button"));
 				tapInside(returningArrow.getPoint(), returningArrow.getPoint(), 1, 300);
@@ -680,7 +886,9 @@ private void recallGatherTroopsFlow() {
 			sleepTask(200);
 		}
 
-		logError(routineLogIntelligenceLine("recallGatherTroopsFlow exceeded max attempts (" + maxRetries + "), exiting to avoid deadlock"));
+        logWarning(routineLogIntelligenceLine("Recall was not verified within " + maxRetries
+                + " checks; yielding to the task scheduler without claiming success"));
+        return false;
 	}
 
 	// Changed by pernerch | Date: 2026-07-02 | Why: keep detection and recall click in the same
@@ -1169,64 +1377,103 @@ private void manageRescheduling(boolean anyIntelProcessed, boolean nonBeastIntel
 	}
 
 private void handleSurvivor(ImageSearchResultData result) {
+    runExclusiveUiTransaction(() -> handleSurvivorExclusive(result));
+}
+
+private void handleSurvivorExclusive(ImageSearchResultData result) {
 		tapInside(result);
-		sleepTask(2000);
 
-		ImageSearchResultData view = templateSearchHelper.locatePattern(TemplatesEnum.INTEL_VIEW, SearchConfigConstants.SINGLE_WITH_RETRIES);
+        ImageSearchResultData view = awaitIntelAction(TemplatesEnum.INTEL_VIEW,
+                INTEL_VIEW_ACTION_SEARCH, 2400);
 		if (!view.isFound()) {
-			logWarning(routineLogIntelligenceLine("Could not find the 'View' button for the survivor. Going back."));
-			pressBack();
-			return;
+            deferIntelMissingAction("Survivor", "View", "survivor-view-missing");
+            return;
 		}
 
-		tapInside(view);
-		sleepTask(500);
+        tapInside(view);
+        logInfo(routineLogIntelligenceLine("Survivor after View: "
+                + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+                        "intel-actions", "survivor-after-view")));
+        ImageSearchResultData rescue = awaitIntelAction(
+                TemplatesEnum.INTEL_RESCUE_BUTTON_MODERN, INTEL_SURVIVOR_ACTION_SEARCH,
+                2900, TemplatesEnum.SERVE_EMU_INTEL_SURVIVOR_RESCUE,
+                TemplatesEnum.INTEL_RESCUE);
+        if (!rescue.isFound()) {
+            deferIntelMissingAction("Survivor", "Rescue", "survivor-rescue-missing");
+            return;
+        }
 
-		ImageSearchResultData rescue = templateSearchHelper.locatePattern(TemplatesEnum.INTEL_RESCUE, SearchConfigConstants.SINGLE_WITH_RETRIES);
-		if (!rescue.isFound()) {
-			logWarning(routineLogIntelligenceLine("Could not find the 'Rescue' button for the survivor. Going back."));
-			pressBack();
-			pressBack();
-
-			return;
-		}
-
-		tapInside(rescue);
-		sleepTask(800);
-		intelScreenHelper.returnToIntelFromWilderness();
+        tapInside(rescue);
+        // Never count a Rescue unless the action has visibly left its modal.
+        if (!awaitIntelActionAcknowledged(TemplatesEnum.INTEL_RESCUE_BUTTON_MODERN,
+                INTEL_SURVIVOR_ACTION_SEARCH, 1700,
+                TemplatesEnum.SERVE_EMU_INTEL_SURVIVOR_RESCUE,
+                TemplatesEnum.INTEL_RESCUE)) {
+            deferIntelMissingAction("Survivor", "Rescue tap not acknowledged", "survivor-rescue-still-visible");
+            return;
+        }
+        intelScreenHelper.returnToIntelFromWilderness();
 		survivorMissionsSincePause++;
 		StaminaService.getServices().subtractStamina(profile.getId(), SURVIVOR_STAMINA_COST_VALUE);
 		StatisticsService.obtain().addToCounter(profile, "Intel Survivor Camps", 1);
 	}
 
 private void handleJourney(ImageSearchResultData result) {
+    runExclusiveUiTransaction(() -> handleJourneyExclusive(result));
+}
+
+private void handleJourneyExclusive(ImageSearchResultData result) {
 		tapInside(result);
-		sleepTask(2000);
 
-		ImageSearchResultData view = templateSearchHelper.locatePattern(TemplatesEnum.INTEL_VIEW, SearchConfigConstants.SINGLE_WITH_RETRIES);
+        ImageSearchResultData view = awaitIntelAction(TemplatesEnum.INTEL_VIEW,
+                INTEL_VIEW_ACTION_SEARCH, 2400);
 		if (!view.isFound()) {
-			logWarning(routineLogIntelligenceLine("Could not find the 'View' button for the journey. Going back."));
-			pressBack();
-			return;
+            deferIntelMissingAction("Journey", "View", "journey-view-missing");
+            return;
 		}
 
-		tapInside(view);
-		sleepTask(500);
+        tapInside(view);
+        logInfo(routineLogIntelligenceLine("Journey after View: "
+                + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+                        "intel-actions", "journey-after-view")));
+        ImageSearchResultData explore = awaitIntelAction(
+                TemplatesEnum.INTEL_EXPLORE_BUTTON_MODERN, INTEL_JOURNEY_ACTION_SEARCH,
+                2900, TemplatesEnum.SERVE_EMU_INTEL_JOURNEY_EXPLORE,
+                TemplatesEnum.INTEL_EXPLORE);
+        if (!explore.isFound()) {
+            deferIntelMissingAction("Journey", "Explore", "journey-explore-missing");
+            return;
+        }
 
-		ImageSearchResultData explore = templateSearchHelper.locatePattern(TemplatesEnum.INTEL_EXPLORE, SearchConfigConstants.SINGLE_WITH_RETRIES);
-		if (!explore.isFound()) {
-			logWarning(routineLogIntelligenceLine("Could not find the 'Explore' button for the journey. Going back."));
-			pressBack();
-			pressBack();
-
-			return;
-		}
-
-		tapInside(explore);
-		sleepTask(500);
-		tapNear(new PointData(520, 1200));
-		long deadline = System.nanoTime() + JOURNEY_RESULT_TIMEOUT_MILLIS * 1_000_000L;
-		sleepTask(JOURNEY_INITIAL_RESULT_WAIT_MILLIS);
+        tapInside(explore);
+        if (!awaitIntelActionAcknowledged(TemplatesEnum.INTEL_EXPLORE_BUTTON_MODERN,
+                INTEL_JOURNEY_ACTION_SEARCH, 1700,
+                TemplatesEnum.SERVE_EMU_INTEL_JOURNEY_EXPLORE,
+                TemplatesEnum.INTEL_EXPLORE)) {
+            deferIntelMissingAction("Journey", "Explore tap not acknowledged", "journey-explore-still-visible");
+            return;
+        }
+        // Modern Journey opens Squad Settings after Explore. The old flow
+        // skipped Fight entirely, then waited 30 seconds for a victory that
+        // could not happen. Never tap the formation screen without confirming
+        // the green Fight action on two fresh frames.
+        ImageSearchResultData fight = awaitIntelAction(TemplatesEnum.INTEL_JOURNEY_FIGHT_LIVE,
+                INTEL_JOURNEY_FIGHT_ACTION_SEARCH, 4000);
+        if (fight.isFound()) {
+            tapInside(fight);
+            logInfo(routineLogIntelligenceLine("Journey Fight tapped after verified Squad Settings action"));
+        } else if (!templateSearchHelper.locatePattern(TemplatesEnum.EXPLORATION_VICTORY,
+                SearchConfigConstants.DEFAULT_SINGLE).isFound()) {
+            // Older builds can jump directly to Victory after Explore.
+            // Only skip Fight when the actual victory artwork is confirmed.
+            deferIntelMissingAction("Journey", "Fight/Victory", "journey-fight-missing");
+            return;
+        } else {
+            logInfo(routineLogIntelligenceLine("Journey already at verified Victory; no Fight tap required"));
+        }
+        // Fight starts the battle. Only a verified Victory is success;
+        // otherwise retain the existing bounded retry and no stamina debit.
+        long deadline = System.nanoTime() + JOURNEY_RESULT_TIMEOUT_MILLIS * 1_000_000L;
 
 		ImageSearchResultData victory = ImageSearchResultData.miss();
 		while (System.nanoTime() < deadline) {
@@ -1254,6 +1501,10 @@ private void handleJourney(ImageSearchResultData result) {
 	}
 
 private void handleBeast(ImageSearchResultData beast) {
+    runExclusiveUiTransaction(() -> handleBeastExclusive(beast));
+}
+
+private void handleBeastExclusive(ImageSearchResultData beast) {
 		if (marchQueueLimitReached) {
 			logInfo(routineLogIntelligenceLine("Beast detected but march queue is full. Skipping deployment but marking as detected."));
 			return;
@@ -1267,10 +1518,11 @@ private void handleBeast(ImageSearchResultData beast) {
 		tapInside(beast);
 		sleepTask(2000);
 
-		ImageSearchResultData view = templateSearchHelper.locatePattern(TemplatesEnum.INTEL_VIEW, SearchConfigConstants.SINGLE_WITH_RETRIES);
+		ImageSearchResultData view = templateSearchHelper.locateAction(TemplatesEnum.INTEL_VIEW, INTEL_VIEW_ACTION_SEARCH);
 		if (!view.isFound()) {
-			logWarning(routineLogIntelligenceLine("Could not find the 'View' button for the beast. Going back."));
-			pressBack();
+            // An unrecognized modal is not proof that Android Back is safe:
+            // on the City/World HUD it can open Quit game instead.
+            deferIntelMissingAction("Beast", "View", "beast-view-missing");
 			return;
 		}
 		tapInside(view);
@@ -1278,10 +1530,9 @@ private void handleBeast(ImageSearchResultData beast) {
 
 		ImageSearchResultData attack = templateSearchHelper.locatePattern(TemplatesEnum.INTEL_ATTACK, SearchConfigConstants.SINGLE_WITH_RETRIES);
 		if (!attack.isFound()) {
-			logWarning(routineLogIntelligenceLine("Could not find the 'Attack' button for the beast. Going back."));
-			pressBack();
-			pressBack();
-
+            // The post-View page cannot be identified as a safe Back target.
+            // Retain an unknown outcome and retry instead of sending blind Back.
+            deferIntelMissingAction("Beast", "Attack", "beast-attack-missing");
 			return;
 		}
 		tapInside(attack);
@@ -1296,12 +1547,15 @@ private void handleBeast(ImageSearchResultData beast) {
 		}
 
 
-		ImageSearchResultData deployButton = templateSearchHelper.locatePattern(TemplatesEnum.DEPLOY_BUTTON,
-				SearchConfigConstants.SINGLE_WITH_RETRIES);
+        logInfo(routineLogIntelligenceLine("Formation screen reached after Attack; "
+                + intelDiagnostic("formation-after-attack")));
+        ImageSearchResultData deployButton = findIntelDeploy();
 		if (!deployButton.isFound()) {
 			logWarning(routineLogIntelligenceLine(
-					"Deploy screen was not confirmed after Attack. No march was sent; retrying in 5 minutes."));
-			reschedule(LocalDateTime.now().plusMinutes(5));
+					"Deploy screen was not confirmed after Attack; " + intelDiagnostic("deploy-button-missing-after-attack")
+                            + ". No march was sent; retrying in 5 minutes."));
+			markWorkIncomplete("Intel Beast: Deploy button not confirmed after Attack");
+            reschedule(LocalDateTime.now().plusMinutes(5));
 			processingTask = false;
 			return;
 		}
@@ -1328,7 +1582,8 @@ private void handleBeast(ImageSearchResultData beast) {
 		int spentStamina = deployment.staminaCost();
 		if (deploymentHelper.hasNoDeployableTroops()) {
 			logWarning(routineLogIntelligenceLine(
-					"Deployment has no available troops. No march was sent; retrying in 5 minutes."));
+					"Deployment has no available troops; " + intelDiagnostic("formation-troops-empty")
+                            + ". No march was sent; retrying in 5 minutes."));
 			pressBack();
 			reschedule(LocalDateTime.now().plusMinutes(5));
 			processingTask = false;
@@ -1336,7 +1591,8 @@ private void handleBeast(ImageSearchResultData beast) {
 		}
 		if (deploymentHelper.isDeployCostRed()) {
 			logWarning(routineLogIntelligenceLine(
-					"Deployment stamina cost is red. No march was sent or deducted; retrying in 5 minutes."));
+					"Deployment stamina cost is red; " + intelDiagnostic("formation-stamina-red")
+                            + ". No march was sent or deducted; retrying in 5 minutes."));
 			pressBack();
 			reschedule(LocalDateTime.now().plusMinutes(5));
 			processingTask = false;
@@ -1346,7 +1602,8 @@ private void handleBeast(ImageSearchResultData beast) {
 		IntelDeploymentPreflight.Decision preflight = IntelDeploymentPreflight.assess(travelTimeSeconds);
 		if (!preflight.allowed()) {
 			logWarning(routineLogIntelligenceLine("Deployment refused before tapping Deploy: "
-					+ preflight.evidence() + ". Retrying in 5 minutes."));
+					+ preflight.evidence() + "; " + intelDiagnostic("preflight-rejected")
+                        + ". Retrying in 5 minutes."));
 			pressBack();
 			reschedule(LocalDateTime.now().plusMinutes(5));
 			processingTask = false;
@@ -1354,10 +1611,12 @@ private void handleBeast(ImageSearchResultData beast) {
 		}
 
 
-		ImageSearchResultData deploy = templateSearchHelper.locatePattern(TemplatesEnum.DEPLOY_BUTTON, SearchConfigConstants.SINGLE_WITH_RETRIES);
+		ImageSearchResultData deploy = findIntelDeploy();
 		if (!deploy.isFound()) {
-			logError(routineLogIntelligenceLine("Deploy button not detected. Planning next run to try again in 5 minutes."));
-			reschedule(LocalDateTime.now().plusMinutes(5));
+			logError(routineLogIntelligenceLine("Deploy button not detected after formation setup; " + intelDiagnostic("deploy-button-missing-before-click")
+                    + ". Planning next run to try again in 5 minutes."));
+			markWorkIncomplete("Intel Beast: Deploy button missing before click");
+            reschedule(LocalDateTime.now().plusMinutes(5));
 			processingTask = false;
 
 			return;
@@ -1396,16 +1655,36 @@ private void handleBeast(ImageSearchResultData beast) {
 			return;
 		}
 
-		deploy = templateSearchHelper.locatePattern(TemplatesEnum.DEPLOY_BUTTON, SearchConfigConstants.SINGLE_WITH_RETRIES);
-		if (deploy.isFound()) {
-			logWarning(routineLogIntelligenceLine("Deploy button still present after deployment attempt. March may not have completed. Planning next run in 5 minutes."));
-			reschedule(LocalDateTime.now().plusMinutes(5));
-			processingTask = false;
+		deploy = templateSearchHelper.locatePattern(TemplatesEnum.INTEL_DEPLOY_BUTTON_MODERN,
+                INTEL_DEPLOY_ACTION_SEARCH);
+        if (deploy.isFound()) {
+            logWarning(routineLogIntelligenceLine("Deploy button still visible after tap; "
+                    + intelDiagnostic("deploy-still-visible") + ". No verified march; retrying later."));
+            markWorkIncomplete("Intel Beast: Deploy still visible after tap");
+            reschedule(LocalDateTime.now().plusMinutes(5));
+            processingTask = false;
+            return;
+        }
 
-			return;
-		}
+        // Disappearance alone does not prove that the march started. Confirm
+        // the world HUD before updating stamina, statistics, or mission progress.
+        // Serve-EMU current World HUD is the positively recorded post-Deploy
+        // anchor (including real mono/multiscale hits). The retired Frostguard
+        // GAME_HOME_WORLD never matched the selected 2026 emulator.
+        ImageSearchResultData verifiedWorld = templateSearchHelper.locatePattern(
+                TemplatesEnum.SERVE_EMU_WORLD_ANCHOR_CURRENT,
+                SearchConfig.builder().withMaxAttempts(3).withDelay(400)
+                        .withThreshold(90).withArea(AreaData.of(590,1145,715,1275)).build());
+        if (!verifiedWorld.isFound()) {
+            logWarning(routineLogIntelligenceLine("Deploy disappeared, but no World screen was confirmed; "
+                    + intelDiagnostic("deploy-transition-unknown") + ". No progress deducted."));
+            markWorkIncomplete("Intel Beast: launch transition not confirmed");
+            reschedule(LocalDateTime.now().plusMinutes(5));
+            processingTask = false;
+            return;
+        }
 
-		logInfo(routineLogIntelligenceLine("Beast march deployed finished cleanly."));
+        logInfo(routineLogIntelligenceLine("Beast march deployment verified on World screen."));
 		beastMarchSent = true;
 		intelMarchesRemaining = Math.max(0, intelMarchesRemaining - 1);
 		if (intelMarchesRemaining <= 0) {

@@ -105,6 +105,7 @@ public final class DiagnosticSnapshotStore {
         }
         Optional<String> saved = persist(image, activity, type, capturedAt);
         if (saved.isPresent() && !DESKTOP_ACTIVITY.equals(activityToken(activity))) {
+            LanDiagnosticReporter.snapshot(activity, type, saved.get());
             accompanyDesktop(type, capturedAt);
         }
         return saved;

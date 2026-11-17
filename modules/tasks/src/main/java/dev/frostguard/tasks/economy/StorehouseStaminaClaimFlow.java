@@ -9,11 +9,17 @@ import dev.frostguard.api.domain.ImageSearchResultData;
 final class StorehouseStaminaClaimFlow {
 
     interface Actions {
+        /** Begin a new poll using one fresh frame for all screen-state checks. */
+        default void beginObservation() { }
+
         boolean isRewardDialogVisible();
 
         ImageSearchResultData findClaimButton();
 
         boolean isTooltipVisible();
+
+        /** Detect a return to the City HUD instead of waiting for a reward button. */
+        default boolean isBackAtCity() { return false; }
 
         void pressBack();
 
@@ -36,13 +42,23 @@ final class StorehouseStaminaClaimFlow {
         long deadline = nanoTime.getAsLong() + timeout.toNanos();
         boolean tooltipDismissed = false;
         boolean rewardDialogSeen = false;
+        int cityObservations = 0;
         while (nanoTime.getAsLong() < deadline) {
+            actions.beginObservation();
             if (actions.isRewardDialogVisible()) {
                 rewardDialogSeen = true;
                 ImageSearchResultData claimButton = actions.findClaimButton();
                 if (claimButton != null && claimButton.isFound()) {
                     return new Result(claimButton, true);
                 }
+            }
+
+            if (!rewardDialogSeen && actions.isBackAtCity()) {
+                if (++cityObservations >= 2) {
+                    return new Result(null, false);
+                }
+            } else {
+                cityObservations = 0;
             }
 
             if (!tooltipDismissed && actions.isTooltipVisible()) {

@@ -7,6 +7,7 @@ import dev.frostguard.api.domain.ImageSearchResultData;
 import dev.frostguard.api.domain.PointData;
 import dev.frostguard.api.domain.OcrSettingsData;
 import dev.frostguard.engine.nav.SearchConfigConstants;
+import dev.frostguard.engine.emulator.EmulatorType;
 import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.schedule.LaunchPoint;
 import dev.frostguard.tasks.diagnostics.TaskDiagnosticSnapshots;
@@ -39,7 +40,7 @@ private static final PointData CONFIRM_BUTTON_VALUE = new PointData(358, 828);
 
 private static final int MIN_RESEARCH_CENTERS_REQUIRED_FLOOR = 2;
 
-private static final int BUILDING_TAP_COUNT_VALUE = 5;
+private static final int BUILDING_TAP_COUNT_VALUE = 1;
 
 private static final int BUILDING_TAP_DELAY_MS = 100;
 
@@ -53,20 +54,27 @@ private static final OcrSettingsData SHARDS_OCR_SETTINGS_VALUE = OcrSettingsData
             .charWhitelist("0123456789")
             .build();
 
+private boolean onlyCenterResearchVisible;
+
 public WarAcademyRoutine(AccountDescriptor profile, TpDailyTaskEnum tpDailyTask) {
         super(profile, tpDailyTask);
     }
 
 @Override
     protected void execute() {
-
+        onlyCenterResearchVisible = false;
         if (!reachWarAcademy()) {
+            markWorkIncomplete("War Academy: destination absent or navigation unverified");
             logWarning(routineLogWarAcademyLine("Could not navigate to War Academy."));
-            reschedule(LocalDateTime.now().plusMinutes(RETRY_DELAY_MINUTES_MS));
+            // Live 5554 Nov 2026 shows only Center Research. Do not retry
+            // a locked building every five minutes or tap an unrelated site.
+            reschedule(onlyCenterResearchVisible ? GameTimeUtils.dailyResetTime()
+                    : LocalDateTime.now().plusMinutes(RETRY_DELAY_MINUTES_MS));
             return;
         }
 
         if (!openUpRedeemSection()) {
+            markWorkIncomplete("War Academy: Redeem section not verified");
             logWarning(routineLogWarAcademyLine("Could not open Redeem section."));
             reschedule(LocalDateTime.now().plusMinutes(RETRY_DELAY_MINUTES_MS));
             return;
@@ -87,7 +95,14 @@ public WarAcademyRoutine(AccountDescriptor profile, TpDailyTaskEnum tpDailyTask)
 
         logInfo(routineLogWarAcademyLine(String.format("Detected %d shards to redeem.", remainingShards)));
 
-        redeemMaximumShardsFlow();
+        if (!redeemMaximumShardsFlow()) {
+            markWorkIncomplete("War Academy: redemption controls not verified safe");
+            String evidence = TaskDiagnosticSnapshots.capture(
+                    emuManager, EMULATOR_NUMBER, "waracademy", "redeem-unverified");
+            logWarning(routineLogWarAcademyLine("Skipping blind shard conversion: " + evidence));
+            reschedule(GameTimeUtils.dailyResetTime());
+            return;
+        }
         managePostRedemptionCheck(remainingShards);
     }
 
@@ -130,7 +145,14 @@ private String routineLogWarAcademyLine(String note) {
         return "WarAcademyRoutine | " + note;
     }
 
+static boolean isLegacyRedeemFlowAllowed(EmulatorType emulator) {
+        // Current Serve-EMU redemption controls have no validated templates;
+        // blind legacy coordinates could spend shards on the wrong page.
+        return emulator != EmulatorType.SERVE_EMU;
+    }
+
 private boolean redeemMaximumShardsFlow() {
+        if (!isLegacyRedeemFlowAllowed(emuManager.getSelectedEmulatorType())) return false;
         logInfo(routineLogWarAcademyLine("Redeeming maximum available shards."));
 
 
@@ -154,6 +176,7 @@ private boolean redeemMaximumShardsFlow() {
     }
 
 private void scheduleOcrRetry(String reason, String type) {
+        markWorkIncomplete("War Academy: " + reason);
         LocalDateTime retryAt = LocalDateTime.now().plusMinutes(RETRY_DELAY_MINUTES_MS);
         String snapshot = TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER, "waracademy", type);
         logWarning(routineLogWarAcademyLine(reason + "; retrying at "
@@ -208,6 +231,7 @@ private boolean reachWarAcademy() {
                 SearchConfigConstants.MULTIPLE_RESULTS);
 
         if (researchCenters.size() < MIN_RESEARCH_CENTERS_REQUIRED_FLOOR) {
+            onlyCenterResearchVisible = researchCenters.size() == 1;
             logError(routineLogWarAcademyLine(String.format("Only detected %d Research Centers, need at least %d.",
                     researchCenters.size(), MIN_RESEARCH_CENTERS_REQUIRED_FLOOR)));
             return false;

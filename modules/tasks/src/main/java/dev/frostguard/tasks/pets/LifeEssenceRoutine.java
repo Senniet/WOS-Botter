@@ -24,6 +24,7 @@ import dev.frostguard.engine.schedule.LaunchPoint;
 import dev.frostguard.engine.nav.SidebarDestination;
 import dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig;
 import dev.frostguard.tasks.diagnostics.TaskDiagnosticSnapshots;
+import dev.frostguard.tasks.diagnostics.TaskControlSignals;
 
 public class LifeEssenceRoutine extends DelayedTask {
 
@@ -67,11 +68,16 @@ public class LifeEssenceRoutine extends DelayedTask {
 			return;
 		}
 
-		boolean weeklyScrollUnresolved = buyWeeklyScroll && shouldBuyWeeklyScroll() && !buyWeeklyFreeScroll();
-		if (!countsAsCompletedRun(weeklyScrollUnresolved)) {
-			scheduleRetry("Weekly scroll outcome is unknown");
-			return;
-		}
+        // Collecting island Life Essence and buying the OPTIONAL weekly scroll
+        // are separate outcomes. Missing shop stock must not defer the normal
+        // resource collection for six hours or block the usual schedule.
+        logInfo("Life Essence marker collection complete: " + claim.confirmedClaims()
+                + " confirmed; checking optional weekly scroll separately");
+        boolean weeklyScrollUnresolved = buyWeeklyScroll && shouldBuyWeeklyScroll() && !buyWeeklyFreeScroll();
+        if (weeklyScrollUnresolved) {
+            logWarning("Optional weekly free scroll unavailable or not verified. "
+                    + "Life Essence collection was successful; leaving normal scheduling intact.");
+        }
 
 		likeIsland();
 
@@ -107,13 +113,19 @@ public class LifeEssenceRoutine extends DelayedTask {
 				? configOffset
 				: DEFAULT_OFFSET_MINUTES;
 
-		this.buyWeeklyScroll = profile.getConfig(
+		this.buyWeeklyScroll = isWeeklyFreeScrollConfigured(profile.getConfig(
 				ConfigurationKeyEnum.LIFE_ESSENCE_BUY_WEEKLY_SCROLL_BOOL,
-				Boolean.class);
+				Boolean.class));
 
 		logDebug("Configuration loaded: offsetMinutes=" + offsetMinutes +
 				", buyWeeklyScroll=" + buyWeeklyScroll);
 	}
+
+    static boolean isWeeklyFreeScrollConfigured(Boolean enabled) {
+        // Older profiles can lack this optional setting. Defaulting to false
+        // prevents a null Boolean from crashing the main Life Essence task.
+        return Boolean.TRUE.equals(enabled);
+    }
 
 	private void loadFailureState() {
 		Integer failures = profile.getConfig(
@@ -160,10 +172,15 @@ public class LifeEssenceRoutine extends DelayedTask {
 					sleepTask(500);
 				}
 				case WAIT -> sleepTask(500);
-				case FINISH -> {
-					logInfo("Claimed " + step.confirmedClaims() + " Life Essence items");
-					return new ClaimRun(true, step.confirmedClaims());
-				}
+                case FINISH -> {
+                    logInfo("Claimed " + step.confirmedClaims() + " Life Essence items");
+                    if (step.confirmedClaims() == 0) {
+                        logInfo("No visible Life Essence markers; diagnostic for the next check: "
+                                + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+                                        "lifeessence", "no-claim-markers-visible"));
+                    }
+                    return new ClaimRun(true, step.confirmedClaims());
+                }
 				case RETRY -> {
 					logWarning("Life Essence claim stopped: " + step.reason()
 							+ ". Confirmed claims: " + step.confirmedClaims());
@@ -180,6 +197,9 @@ public class LifeEssenceRoutine extends DelayedTask {
 			return LifeEssenceClaimPolicy.Observation.markers(
 					LifeEssenceSearchKind.COLOR.open(null).find(image));
 		} catch (Exception ex) {
+            // ADB disconnect, task preemption, stop and profile cooldown are
+            // scheduler signals, not an ordinary "no Life Essence" result.
+            TaskControlSignals.rethrowControlSignal(ex);
 			logWarning("Life Essence capture failed: " + ex.getClass().getSimpleName()
 					+ ": " + ex.getMessage());
 			return LifeEssenceClaimPolicy.Observation.failed();
@@ -294,9 +314,11 @@ public class LifeEssenceRoutine extends DelayedTask {
 		return false;
 	}
 
-	static boolean countsAsCompletedRun(boolean weeklyScrollUnresolved) {
-		return !weeklyScrollUnresolved;
-	}
+    static boolean countsAsCompletedRun(boolean coreCollectionFinished, boolean weeklyScrollUnresolved) {
+        // Optional purchases have independent outcomes and cannot cancel a
+        // successful main Life Essence collection.
+        return coreCollectionFinished;
+    }
 
 	static LocalDateTime nextMondayReset(ZonedDateTime nowUtc) {
 		ZonedDateTime nextMonday = nowUtc
@@ -323,6 +345,7 @@ public class LifeEssenceRoutine extends DelayedTask {
 	}
 
 	private void scheduleRetry(String reason) {
+        markWorkIncomplete("Life Essence: "+reason);
 		LifeEssenceRetryPolicy.Decision decision =
 				LifeEssenceRetryPolicy.afterFailure(consecutiveFailures);
 		consecutiveFailures = decision.persistedFailures();

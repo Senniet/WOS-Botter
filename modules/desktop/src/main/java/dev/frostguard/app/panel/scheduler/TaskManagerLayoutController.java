@@ -412,6 +412,7 @@ public class TaskManagerLayoutController implements ProfileDataChangeListener {
 		TableView<TaskManagerAux> table = new TableView<>();
 		table.getStyleClass().add("table-view");
 		table.getColumns().add(taskNameColumn());
+		table.getColumns().add(lastOutcomeColumn());
 		table.getColumns().add(lastExecutionColumn());
 		table.getColumns().add(nextExecutionColumn());
 		table.getColumns().add(actionsColumn());
@@ -444,6 +445,32 @@ public class TaskManagerLayoutController implements ProfileDataChangeListener {
 				setStyle("-fx-text-fill: white; -fx-font-size: 14px; -fx-font-weight: bold;");
 			}
 		});
+		return column;
+	}
+
+	/** Latest attempt result, not the next-run scheduling state. */
+	private TableColumn<TaskManagerAux, String> lastOutcomeColumn() {
+		TableColumn<TaskManagerAux, String> column = new TableColumn<>("Last Result");
+		column.setPrefWidth(125);
+		column.setCellValueFactory(cell -> Bindings.createStringBinding(() -> {
+			TaskManagerAux task = cell.getValue();
+			if (task.getTaskEnum() == null) return "—";
+			TaskStateData state = TaskManagementService.shared().lookupTaskState(
+					task.getProfileId(), task.getTaskEnum().getId(),
+					task.isCustomTask() ? task.getCustomTaskName() : null);
+			if (state == null || state.getExecutionOutcome() == TaskStateData.ExecutionOutcome.NOT_RUN)
+				return "—";
+			return switch (state.getExecutionOutcome()) {
+				case RUNNING -> "Running";
+				case SUCCEEDED -> "Succeeded";
+				case DEFERRED -> "Deferred";
+				case PREEMPTED -> "Preempted";
+				case FAILED -> "Failed";
+				case UNKNOWN -> "Unknown";
+				case NOT_RUN -> "—";
+			};
+		}, globalClock));
+		column.setCellFactory(col -> plainTextCell("-fx-text-fill: white; -fx-font-size: 13px;"));
 		return column;
 	}
 

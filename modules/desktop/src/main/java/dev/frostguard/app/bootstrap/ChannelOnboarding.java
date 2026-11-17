@@ -37,9 +37,9 @@ final class ChannelOnboarding {
 
     private static void explainFreshNightly(WorkspaceSettingsSnapshot snapshot) throws IOException {
         Alert alert = new Alert(Alert.AlertType.INFORMATION);
-        alert.setTitle("Set up Frostguard Nightly");
+        alert.setTitle("SurvivalOps Nightly instellen");
         alert.setHeaderText("Nightly keeps its own settings");
-        alert.setContentText("No Stable workspace was found. Frostguard Nightly will start with new profiles, "
+        alert.setContentText("No Stable workspace was found. SurvivalOps Nightly will start with new profiles, "
                 + "tasks, schedules, and Telegram settings. Stable remains unchanged.");
         alert.showAndWait();
         snapshot.startFresh();
@@ -49,9 +49,9 @@ final class ChannelOnboarding {
         ButtonType fresh = new ButtonType("Start fresh", ButtonBar.ButtonData.OK_DONE);
         ButtonType retryLater = new ButtonType("Exit and retry later", ButtonBar.ButtonData.CANCEL_CLOSE);
         Alert alert = new Alert(Alert.AlertType.CONFIRMATION, "", fresh, retryLater);
-        alert.setTitle("Set up Frostguard Nightly");
+        alert.setTitle("SurvivalOps Nightly instellen");
         alert.setHeaderText("Stable is currently using its settings");
-        alert.setContentText("Close Frostguard Stable and its Telegram watcher, then restart Nightly to copy a "
+        alert.setContentText("Close SurvivalOps Stable and its Telegram watcher, then restart Nightly to copy a "
                 + "safe snapshot. You can also start Nightly with separate, empty settings now.");
         if (alert.showAndWait().filter(fresh::equals).isPresent()) {
             snapshot.startFresh();
@@ -65,7 +65,7 @@ final class ChannelOnboarding {
         ButtonType fresh = new ButtonType("Start fresh", ButtonBar.ButtonData.OTHER);
         ButtonType cancel = new ButtonType("Exit", ButtonBar.ButtonData.CANCEL_CLOSE);
         Alert alert = new Alert(Alert.AlertType.CONFIRMATION, "", copy, fresh, cancel);
-        alert.setTitle("Set up Frostguard Nightly");
+        alert.setTitle("SurvivalOps Nightly instellen");
         alert.setHeaderText("Nightly keeps an independent copy of your settings");
         alert.setContentText("Copying creates a one-time snapshot of Stable profiles, tasks, schedules, "
                 + "Telegram configuration, custom tasks, and desktop preferences. Later changes are not "
@@ -87,7 +87,7 @@ final class ChannelOnboarding {
         alert.setTitle("Nightly settings setup failed");
         alert.setHeaderText("Stable settings were not changed");
         alert.setContentText(failure.getMessage() == null
-                ? "Could not prepare the Nightly workspace. Restart Frostguard Nightly to try again."
+                ? "Could not prepare the Nightly workspace. Restart SurvivalOps Nightly to try again."
                 : failure.getMessage());
         alert.showAndWait();
     }

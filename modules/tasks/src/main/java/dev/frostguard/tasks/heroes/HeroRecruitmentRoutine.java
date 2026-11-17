@@ -1,21 +1,28 @@
 package dev.frostguard.tasks.heroes;
 
 import dev.frostguard.vision.convert.GameTimeUtils;
+import dev.frostguard.vision.convert.ImageConverter;
 import dev.frostguard.vision.ocr.ResilientOcrExecutor;
-import dev.frostguard.vision.convert.GameTimeUtils;
-import dev.frostguard.vision.convert.GameTimeUtils;
 import dev.frostguard.api.configs.TemplatesEnum;
+import dev.frostguard.api.configs.ConfigurationKeyEnum;
 import dev.frostguard.api.configs.TpDailyTaskEnum;
 import dev.frostguard.api.domain.ImageSearchResultData;
 import dev.frostguard.api.domain.PointData;
+import dev.frostguard.api.domain.AreaData;
 import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.api.domain.OcrSettingsData;
+import dev.frostguard.api.domain.RawImageData;
+import dev.frostguard.vision.match.OpenCvPatternLocator;
+import dev.frostguard.engine.error.TaskOutcomeUnknownException;
 import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.schedule.LaunchPoint;
 import dev.frostguard.engine.helper.TemplateSearchHelper;
+import dev.frostguard.engine.helper.RecognitionConsensus;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Task responsible for managing hero recruitment rewards.
@@ -60,6 +67,8 @@ public class HeroRecruitmentRoutine extends DelayedTask {
 
     /** Delay between OCR retry attempts (milliseconds) */
     private static final long OCR_RETRY_DELAY_MS = 200L;
+    private static final Pattern MODERN_COOLDOWN = Pattern.compile(
+            "(?<![0-9])([0-9]{1,2}):([0-9]{2}):([0-9]{2})(?![0-9])");
 
     // Navigation coordinates
     private static final PointData NAV_TAP_1_MIN = new PointData(160, 1190);
@@ -89,6 +98,9 @@ public class HeroRecruitmentRoutine extends DelayedTask {
 
     /** Helper for flexible OCR-based time recognition */
     private final ResilientOcrExecutor<Duration> timeHelper;
+
+    private boolean confirmedDailyMissionProgress;
+    private boolean unknownClaimOutcome;
 
     // ===============================
     // CONSTRUCTOR
@@ -129,15 +141,478 @@ public class HeroRecruitmentRoutine extends DelayedTask {
     @Override
     protected void execute() {
 
+        confirmedDailyMissionProgress = false;
+        unknownClaimOutcome = false;
+        if (currentHeroRecruitmentVisible()) {
+            processCurrentFreeRecruitment();
+            return;
+        }
         navigateToHeroRecruitment();
-
-        LocalDateTime advancedTime = processAdvancedRecruitment();
-        LocalDateTime epicTime = processEpicRecruitment();
+        if (currentHeroRecruitmentVisible()) {
+            processCurrentFreeRecruitment();
+            return;
+        }
+        // Legacy interface can still be used after its existing navigation.
+        // Do not run blind recruitment taps if the caller did not verify a
+        // recognized classic or modern reward screen.
+        if (!templateSearchHelper.locatePattern(TemplatesEnum.HERO_RECRUIT_CLAIM,
+                TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
+                        .withThreshold(95).build()).isFound()) {
+            logWarning("Hero Recruitment screen unrecognized; not pressing Free or paid keys");
+            reschedule(LocalDateTime.now().plusMinutes(OCR_FAILURE_RETRY_MINUTES));
+            return;
+        }
+        // The same Advanced/Epic free toggles also apply on classic emulators.
+        // Saved-key recruitment is intentionally limited to the visually
+        // verified modern screen; never use legacy fixed coordinates for keys.
+        LocalDateTime advancedTime = configEnabled(
+                ConfigurationKeyEnum.HERO_RECRUIT_ADVANCED_FREE_BOOL, true)
+                ? processAdvancedRecruitment() : null;
+        LocalDateTime epicTime = configEnabled(
+                ConfigurationKeyEnum.HERO_RECRUIT_EPIC_FREE_BOOL, true)
+                ? processEpicRecruitment() : null;
 
         LocalDateTime nextExecution = calculateNextExecution(advancedTime, epicTime);
 
         logInfo("Next hero recruitment check scheduled for: " + nextExecution.format(DATETIME_FORMATTER));
         reschedule(nextExecution);
+        if (shouldFailOnUnknownOutcome(unknownClaimOutcome, confirmedDailyMissionProgress)) {
+            throw new TaskOutcomeUnknownException(
+                    "Hero recruitment claim could not be confirmed; bounded retry scheduled without recording completion.");
+        }
+    }
+
+    private boolean currentHeroRecruitmentVisible() {
+        // Hero Recruitment remains open throughout Advanced, Epic and Points
+        // processing. On the remote 720x1280 Serve-EMU, read ONE screenshot
+        // for both the modern and legacy title variants instead of issuing
+        // two expensive ADB captures for every stage/status observation.
+        if (emuManager.getSelectedEmulatorType()
+                == dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU) {
+            RawImageData frame=emuManager.captureScreen(EMULATOR_NUMBER);
+            if (frame==null || !frame.isValid() || frame.getWidth()!=720 || frame.getHeight()!=1280)
+                return false;
+            if (OpenCvPatternLocator.locatePattern(frame,
+                    TemplatesEnum.SERVE_EMU_HERO_MODERN_RECRUIT_TITLE.getTemplate(),
+                    new PointData(390,70),new PointData(715,330),90).isFound()) return true;
+            return OpenCvPatternLocator.locatePattern(frame,
+                    TemplatesEnum.SERVE_EMU_HERO_RECRUIT_TITLE.getTemplate(),
+                    new PointData(390,130),new PointData(710,315),90).isFound();
+        }
+        // The 2026 Hero page moved the heading higher. The old title template
+        // fails on the 23:58 frame, so confirm either known title in its own
+        // header ROI before deciding whether to navigate or click.
+        if (templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_HERO_MODERN_RECRUIT_TITLE,
+                TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1).withThreshold(90)
+                        .withArea(AreaData.of(390, 70, 715, 330)).build()).isFound()) return true;
+        return templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_HERO_RECRUIT_TITLE,
+                TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1).withThreshold(90)
+                        .withArea(AreaData.of(390, 130, 710, 315)).build()).isFound();
+    }
+
+    /** A stable, per-profile stage plan: Advanced first, Epic second, Points Chest last. */
+    static boolean runModernStages(boolean advanced, boolean epic, boolean points,
+                                   RecruitmentStage advancedStage, RecruitmentStage epicStage,
+                                   RecruitmentStage pointsStage) {
+        return (!advanced || advancedStage.run())
+                && (!epic || epicStage.run())
+                && (!points || pointsStage.run());
+    }
+
+    @FunctionalInterface
+    interface RecruitmentStage {
+        boolean run();
+    }
+
+    private boolean configEnabled(ConfigurationKeyEnum key, boolean defaultValue) {
+        Boolean configured = profile.getConfig(key, Boolean.class);
+        return configured == null ? defaultValue : configured;
+    }
+
+    private void processCurrentFreeRecruitment() {
+        if (!currentHeroRecruitmentVisible()) {
+            logWarning("Hero Recruitment page vanished; refusing recruitment actions");
+            reschedule(LocalDateTime.now().plusMinutes(OCR_FAILURE_RETRY_MINUTES));
+            return;
+        }
+        boolean advancedFree = configEnabled(ConfigurationKeyEnum.HERO_RECRUIT_ADVANCED_FREE_BOOL, true);
+        boolean epicFree = configEnabled(ConfigurationKeyEnum.HERO_RECRUIT_EPIC_FREE_BOOL, true);
+        boolean advancedKeys = configEnabled(ConfigurationKeyEnum.HERO_RECRUIT_ADVANCED_KEYS_BOOL, false);
+        boolean epicKeys = configEnabled(ConfigurationKeyEnum.HERO_RECRUIT_EPIC_KEYS_BOOL, false);
+        boolean points = configEnabled(ConfigurationKeyEnum.HERO_RECRUIT_POINTS_CHEST_BOOL, true);
+        // Each category has a separate Free, owned-key Recruit Once and
+        // cooldown state. A failed stage can only block later actions when
+        // the recruitment screen itself is no longer confirmed.
+        boolean complete = true;
+        if (advancedFree || advancedKeys) {
+            boolean advancedOk = recruitModernCategory("Advanced",
+                    AreaData.of(40, 801, 350, 904),
+                    TemplatesEnum.SERVE_EMU_HERO_ADVANCED_KEY_ONCE,
+                    AreaData.of(45, 792, 350, 903),
+                    new PointData(224, 89), new PointData(267, 127),
+                    advancedFree, advancedKeys);
+            complete &= advancedOk;
+            if (!advancedOk && !currentHeroRecruitmentVisible()) {
+                logWarning("Advanced transition unknown; later recruitment taps blocked");
+                reschedule(LocalDateTime.now().plusMinutes(OCR_FAILURE_RETRY_MINUTES));
+                throw new TaskOutcomeUnknownException(
+                        "Advanced claim transition not safely on Hero Recruitment");
+            }
+        }
+        if (epicFree || epicKeys) {
+            boolean epicOk = recruitModernCategory("Epic",
+                    AreaData.of(40, 1150, 350, 1262),
+                    TemplatesEnum.SERVE_EMU_HERO_EPIC_KEY_ONCE,
+                    AreaData.of(45, 1147, 350, 1270),
+                    new PointData(418, 89), new PointData(461, 127),
+                    epicFree, epicKeys);
+            complete &= epicOk;
+            if (!epicOk && !currentHeroRecruitmentVisible()) {
+                logWarning("Epic transition unknown; Points Chest tap blocked");
+                reschedule(LocalDateTime.now().plusMinutes(OCR_FAILURE_RETRY_MINUTES));
+                throw new TaskOutcomeUnknownException(
+                        "Epic claim transition not safely on Hero Recruitment");
+            }
+        }
+        if (points && currentHeroRecruitmentVisible()) {
+            claimReadyPointsChest();
+        }
+        if (!complete) {
+            reschedule(LocalDateTime.now().plusMinutes(OCR_FAILURE_RETRY_MINUTES));
+            throw new TaskOutcomeUnknownException("Hero Recruitment outcome uncertain; "
+                    + "no second tap or later stage; retry scheduled");
+        }
+        // A missing green Free button with a visible Next Free timer is a
+        // normal cooldown, not a recognition failure. Recheck at the actual
+        // countdown instead of revisiting this screen every five minutes.
+        Duration advancedWait = advancedFree ? readModernCooldown(
+                "Advanced", ADVANCED_OCR_TOP_LEFT, ADVANCED_OCR_BOTTOM_RIGHT) : null;
+        Duration epicWait = epicFree ? readModernCooldown(
+                "Epic", EPIC_OCR_TOP_LEFT, EPIC_OCR_BOTTOM_RIGHT) : null;
+        LocalDateTime next = nextModernCheck(LocalDateTime.now(), advancedWait,
+                epicWait, advancedFree, epicFree, advancedKeys || epicKeys);
+        reschedule(next);
+        logInfo("Hero Recruitment next check scheduled for " + next.format(DATETIME_FORMATTER));
+        // DelayedTask only restores Home automatically if it was requested.
+        // This routine starts at ANY (so it can resume an opened Hero page),
+        // and without this verified exit the next task can inherit Hero UI.
+        // NavigationHelper requires two agreeing Back-arrow frames and a
+        // verified Home/World anchor; it never blindly presses Android Back.
+        returnFromRecruitmentToCity();
+    }
+
+    private void returnFromRecruitmentToCity() {
+        // Prefer the two known header backs over the expensive global
+        // unknown-screen recovery sweep recorded in the 20:49 Task Coach run.
+        for (int step=0; step<2; step++) {
+            RawImageData frame=emuManager.captureScreen(EMULATOR_NUMBER);
+            if (cityHudVisible(frame)) {
+                logInfo("Hero Recruitment returned to City via direct header navigation");
+                return;
+            }
+            if (!currentHeroRecruitmentVisible() && !heroPageVisible(frame)) break;
+            var arrow=OpenCvPatternLocator.locatePattern(frame,
+                    TemplatesEnum.GAME_HEADER_BACK_ARROW_CURRENT.getTemplate(),
+                    new PointData(0,0),new PointData(110,105),90);
+            if (!arrow.isFound()) break;
+            sleepTask(130);
+            RawImageData check=emuManager.captureScreen(EMULATOR_NUMBER);
+            var confirmed=OpenCvPatternLocator.locatePattern(check,
+                    TemplatesEnum.GAME_HEADER_BACK_ARROW_CURRENT.getTemplate(),
+                    new PointData(0,0),new PointData(110,105),90);
+            if (!RecognitionConsensus.agrees(arrow,confirmed,12)) break;
+            tapInside(confirmed);
+            sleepTask(450);
+        }
+        navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME);
+    }
+
+    private boolean heroPageVisible(RawImageData frame) {
+        return frame!=null && frame.isValid()
+                && OpenCvPatternLocator.locatePattern(frame,
+                    TemplatesEnum.SERVE_EMU_HEROES_PAGE_TITLE.getTemplate(),
+                    new PointData(65,0),new PointData(435,190),90).isFound();
+    }
+
+    private boolean cityHudVisible(RawImageData frame) {
+        return frame!=null && frame.isValid()
+                && OpenCvPatternLocator.locatePattern(frame,
+                    TemplatesEnum.SERVE_EMU_CITY_ANCHOR.getTemplate(),
+                    new PointData(590,1145),new PointData(715,1275),90).isFound();
+    }
+
+    static Duration parseModernCooldown(String raw) {
+        if (raw == null) return null;
+        Matcher matcher = MODERN_COOLDOWN.matcher(raw);
+        while (matcher.find()) {
+            String timer = matcher.group();
+            if (GameTimeUtils.isAcceptedFormat(timer)) {
+                Duration duration = GameTimeUtils.parseDuration(timer);
+                if (!duration.isZero() && !duration.isNegative()
+                        && duration.compareTo(Duration.ofDays(1)) <= 0) return duration;
+            }
+        }
+        return null;
+    }
+
+    static LocalDateTime nextModernCheck(LocalDateTime now, Duration advanced,
+            Duration epic, boolean advancedEnabled, boolean epicEnabled,
+            boolean savedKeysEnabled) {
+        LocalDateTime fallback = now.plusMinutes(OCR_FAILURE_RETRY_MINUTES);
+        // Preserve the existing key cadence when paid-with-owned-keys mode is
+        // explicitly enabled. The Free timers cannot predict available keys.
+        if (savedKeysEnabled || (advancedEnabled && advanced == null)
+                || (epicEnabled && epic == null)) return fallback;
+        LocalDateTime next = null;
+        if (advancedEnabled && advanced != null) next = now.plus(advanced).plusSeconds(12);
+        if (epicEnabled && epic != null) {
+            LocalDateTime candidate = now.plus(epic).plusSeconds(12);
+            if (next == null || candidate.isBefore(next)) next = candidate;
+        }
+        if (next == null) return fallback;
+        return next.isBefore(now.plusSeconds(30)) ? now.plusSeconds(30) : next;
+    }
+
+    private Duration readModernCooldown(String category, PointData topLeft, PointData bottomRight) {
+        try {
+            String ocr = emuManager.readText(EMULATOR_NUMBER, topLeft, bottomRight,
+                    OcrSettingsData.configurator()
+                            .textLayout(OcrSettingsData.TextLayout.SINGLE_LINE)
+                            .allowedGlyphs("0123456789:").build(), false);
+            Duration countdown = parseModernCooldown(ocr);
+            if (countdown != null) {
+                logInfo(category + " free recruitment cooldown: " + countdown);
+                return countdown;
+            }
+            logWarning(category + " recruitment countdown OCR unconfirmed: " + ocr);
+        } catch (Exception error) {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new java.util.concurrent.CancellationException("Recruitment cooldown OCR interrupted");
+            }
+            logWarning(category + " recruitment countdown OCR failed: "
+                    + error.getClass().getSimpleName());
+        }
+        return null;
+    }
+
+    /** Handles one category; spends at most one already-owned key per scheduled run. */
+    private boolean recruitModernCategory(String type, AreaData freeArea,
+            TemplatesEnum keyButton, AreaData keyArea,
+            PointData keyCountTopLeft, PointData keyCountBottomRight,
+            boolean freeEnabled, boolean keysEnabled) {
+        if (!currentHeroRecruitmentVisible()) return false;
+        if (freeEnabled) {
+            var free = templateSearchHelper.locateAction(TemplatesEnum.SERVE_EMU_HERO_FREE_BUTTON,
+                    TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(2)
+                            .withDelay(180).withThreshold(89).withArea(freeArea).build());
+            if (free.isFound()) {
+                logInfo(type + ": free button verified; claiming free recruitment once");
+                tapInside(free);
+                if (!waitForFreeRewardsAndReturn()) {
+                    logWarning(type + ": free claim was not confirmed; no duplicate action");
+                    return false;
+                }
+                confirmedDailyMissionProgress = true;
+            } else {
+                logInfo(type + ": free recruitment unavailable (timer still running)");
+            }
+        }
+        if (!keysEnabled) {
+            logInfo(type + ": saved-key recruitment disabled in profile settings");
+            return true;
+        }
+        if (!currentHeroRecruitmentVisible()) return false;
+        int before = readRecruitmentKeyCount(keyCountTopLeft, keyCountBottomRight);
+        sleepTask(190);
+        int confirmedBefore = readRecruitmentKeyCount(keyCountTopLeft, keyCountBottomRight);
+        if (before < 1 || before != confirmedBefore) {
+            logInfo(type + ": no two-frame confirmation of a positive owned-key count ("
+                    + before + "/" + confirmedBefore + "); no key spent");
+            return true;
+        }
+        // Only the exact x1 key artwork is authorized, never the right-side
+        // multi-recruit button, red x10 cost, gems or a generic yellow button.
+        var keyOnce = templateSearchHelper.locateAction(keyButton,
+                TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(2)
+                        .withDelay(160).withThreshold(96).withArea(keyArea).build());
+        if (!HeroRecruitmentKeyPolicy.mayRecruitWithKey(keysEnabled, before,
+                confirmedBefore, keyOnce.isFound())) {
+            logWarning(type + ": verified x1 key button absent; refusing to spend");
+            return true;
+        }
+        logInfo(type + ": spending one owned key (confirmed count " + before + ")");
+        tapInside(keyOnce);
+        if (!waitForModernRewardsAndReturn()) {
+            logWarning(type + ": key recruitment Rewards/exit unverified; never repeating key tap");
+            return false;
+        }
+        int after = readRecruitmentKeyCount(keyCountTopLeft, keyCountBottomRight);
+        sleepTask(140);
+        int confirmedAfter = readRecruitmentKeyCount(keyCountTopLeft, keyCountBottomRight);
+        if (after != confirmedAfter || !HeroRecruitmentKeyPolicy.verifiedSingleKeySpent(before, after)) {
+            logWarning(type + ": claimed key did not have verified one-key decrement: "
+                    + before + " -> " + after + "/" + confirmedAfter);
+            return false;
+        }
+        confirmedDailyMissionProgress = true;
+        logInfo(type + ": one saved-key recruitment confirmed; remaining keys=" + after);
+        return true;
+    }
+
+    /** Preserve the established green-Free reward flow independently of key rewards. */
+    private boolean waitForFreeRewardsAndReturn() {
+        boolean chestAdvanced = false;
+        for (int attempt = 0; attempt < 16; attempt++) {
+            sleepTask(250);
+            // The 14:05 diagnostic captured a full-screen blue chest in the
+            // snowy Hero Recruitment cutscene. This is a post-Free-claim
+            // animation, not the Rewards exit overlay. Advance it once only
+            // after a two-frame visual match; never repeat a Recruit tap.
+            if (!chestAdvanced && attempt >= 2 && confirmFreeChestCutscene()) {
+                logInfo("Advanced free recruitment chest animation confirmed; "
+                        + "opening the already-awarded chest once, no keys or gems used");
+                tapInside(AreaData.of(335, 705, 410, 810));
+                chestAdvanced = true;
+                sleepTask(600);
+                continue;
+            }
+            var exit = locateFreeRewardExit();
+            if (!exit.isFound()) continue;
+            sleepTask(150);
+            var confirmed = locateFreeRewardExit();
+            if (!RecognitionConsensus.agrees(exit, confirmed, 12)) continue;
+            tapInside(confirmed);
+            // Rendering may lag after the verified exit tap on gfxstream.
+            // Poll without tapping again, so an uncertain reward never causes
+            // a second claim or a blind navigation action.
+            for (int settle = 0; settle < 5; settle++) {
+                sleepTask(350);
+                if (currentHeroRecruitmentVisible()) return true;
+            }
+            return false;
+        }
+        return false;
+    }
+
+    private dev.frostguard.api.domain.ImageSearchResultData locateFreeRewardExit() {
+        if (emuManager.getSelectedEmulatorType()
+                == dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU) {
+            RawImageData frame=emuManager.captureScreen(EMULATOR_NUMBER);
+            if (frame==null || !frame.isValid() || frame.getWidth()!=720 || frame.getHeight()!=1280)
+                return ImageSearchResultData.miss();
+            PointData start=new PointData(190,1135),end=new PointData(530,1240);
+            ImageSearchResultData live=OpenCvPatternLocator.locatePattern(frame,
+                    TemplatesEnum.SERVE_EMU_HERO_REWARD_EXIT_LIVE_2026.getTemplate(),start,end,89);
+            return live.isFound() ? live : OpenCvPatternLocator.locatePattern(frame,
+                    TemplatesEnum.SERVE_EMU_HERO_REWARD_EXIT.getTemplate(),start,end,89);
+        }
+        var config = TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
+                .withThreshold(89).withArea(AreaData.of(190, 1135, 530, 1240)).build();
+        var live = templateSearchHelper.locatePattern(
+                TemplatesEnum.SERVE_EMU_HERO_REWARD_EXIT_LIVE_2026, config);
+        return live.isFound() ? live : templateSearchHelper.locatePattern(
+                TemplatesEnum.SERVE_EMU_HERO_REWARD_EXIT, config);
+    }
+
+    private boolean confirmFreeChestCutscene() {
+        var config = TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
+                .withThreshold(92).withArea(AreaData.of(250, 620, 510, 860)).build();
+        var first = templateSearchHelper.locatePattern(
+                TemplatesEnum.SERVE_EMU_HERO_FREE_CHEST_CUTSCENE_2026, config);
+        if (!first.isFound()) return false;
+        sleepTask(180);
+        var second = templateSearchHelper.locatePattern(
+                TemplatesEnum.SERVE_EMU_HERO_FREE_CHEST_CUTSCENE_2026, config);
+        return RecognitionConsensus.agrees(first, second, 12);
+    }
+
+    /** Read only the numeric top-HUD slot; ambiguous OCR must never permit a key purchase. */
+    private int readRecruitmentKeyCount(PointData topLeft, PointData bottomRight) {
+        try {
+            String text = emuManager.readText(EMULATOR_NUMBER, topLeft, bottomRight,
+                    OcrSettingsData.configurator()
+                            .textLayout(OcrSettingsData.TextLayout.SINGLE_LINE)
+                            .allowedGlyphs("0123456789")
+                            .build(), false);
+            return HeroRecruitmentKeyPolicy.countFromOcr(text);
+        } catch (Exception error) {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new java.util.concurrent.CancellationException("Recruitment counter OCR interrupted");
+            }
+            logWarning("Recruitment key OCR unavailable: " + error.getClass().getSimpleName());
+            return -1;
+        }
+    }
+
+    private boolean waitForModernRewardsAndReturn() {
+        // Wait for both independent overlay anchors. The exit is attempted
+        // once only; never trigger repeated UI actions while frames are moving.
+        boolean ready = false;
+        for (int attempt = 0; attempt < 20; attempt++) {
+            sleepTask(350);
+            var title = templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_HERO_KEY_REWARDS_TITLE,
+                    TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
+                            .withThreshold(92).withArea(AreaData.of(230,215,500,355)).build());
+            if (!title.isFound()) continue;
+            var exit = templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_HERO_REWARDS_EXIT,
+                    TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
+                            .withThreshold(90).withArea(AreaData.of(190,1150,525,1240)).build());
+            if (exit.isFound()) {ready = true;break;}
+        }
+        if (!ready || !dismissVerifiedRecruitmentRewards()) return false;
+        sleepTask(450);
+        return currentHeroRecruitmentVisible();
+    }
+
+    /** One bounded free Points Chest claim; never press the paid recruit buttons. */
+    private void claimReadyPointsChest() {
+        if (!currentHeroRecruitmentVisible() || !pointsChestBadgeVisible()) return;
+        sleepTask(170);
+        if (!currentHeroRecruitmentVisible() || !pointsChestBadgeVisible()) {
+            logWarning("Recruitment Points Chest badge was not stable across frames");
+            return;
+        }
+        // Confirmed live on WOS_Sennie121: chest icon is in the right header.
+        tapInside(new PointData(645, 437), new PointData(670, 465));
+        boolean rewardsVisible = false;
+        for (int attempt = 0; attempt < 14; attempt++) {
+            sleepTask(250);
+            rewardsVisible = templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_REWARDS_BANNER,
+                    TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
+                            .withThreshold(88).withArea(AreaData.of(220, 280, 505, 440)).build()).isFound();
+            if (rewardsVisible) break;
+        }
+        if (!rewardsVisible) {
+            logWarning("Recruitment Points Chest was tapped, but Rewards overlay was not verified");
+            return;
+        }
+        for (int attempt = 0; attempt < 14; attempt++) {
+            sleepTask(250);
+            var exit = templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_HERO_POINTS_REWARD_EXIT,
+                    TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
+                            .withThreshold(89).withArea(AreaData.of(190, 1140, 530, 1240)).build());
+            if (!exit.isFound()) continue;
+            sleepTask(150);
+            var confirmed = templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_HERO_POINTS_REWARD_EXIT,
+                    TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
+                            .withThreshold(89).withArea(AreaData.of(190, 1140, 530, 1240)).build());
+            if (!RecognitionConsensus.agrees(exit, confirmed, 12)) continue;
+            tapInside(confirmed);
+            sleepTask(450);
+            if (currentHeroRecruitmentVisible() && !pointsChestBadgeVisible()) {
+                confirmedDailyMissionProgress = true;
+                logInfo("Recruitment Points Chest claimed and red badge disappeared (no keys or gems spent)");
+            } else {
+                logWarning("Recruitment Points Chest result unverified; not retrying the tap");
+            }
+            return;
+        }
+        logWarning("Recruitment Points Chest Rewards shown but exit label not verified");
+    }
+
+    private boolean pointsChestBadgeVisible() {
+        return HeroPointsChestDetector.isReady(
+                ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER)));
     }
 
     // ===============================
@@ -152,13 +627,34 @@ public class HeroRecruitmentRoutine extends DelayedTask {
      * The framework will handle returning to home screen after task completion.
      */
     private void navigateToHeroRecruitment() {
-        logInfo("Navigating to hero recruitment interface");
-
-        tapInside(NAV_TAP_1_MIN, NAV_TAP_1_MAX);
-        sleepTask(500); // Wait for first menu to open
-
+        logInfo("Opening Hero Recruitment using short verified Heroes route");
+        RawImageData before=emuManager.captureScreen(EMULATOR_NUMBER);
+        if (currentHeroRecruitmentVisible()) return;
+        if (!heroPageVisible(before)) {
+            // Bottom Heroes tab is available directly on the City HUD.
+            // Do not tap an unknown page just because a fixed position exists.
+            if (!cityHudVisible(before)) {
+                navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME);
+                before=emuManager.captureScreen(EMULATOR_NUMBER);
+                if (!cityHudVisible(before)) return;
+            }
+            tapInside(NAV_TAP_1_MIN, NAV_TAP_1_MAX);
+            for(int i=0;i<5;i++) {
+                sleepTask(180);
+                if (heroPageVisible(emuManager.captureScreen(EMULATOR_NUMBER))) break;
+            }
+        }
+        if (currentHeroRecruitmentVisible()) return;
+        if (!heroPageVisible(emuManager.captureScreen(EMULATOR_NUMBER))) {
+            logWarning("Heroes page not confirmed; refusing second navigation tap");
+            return;
+        }
         tapInside(NAV_TAP_2_MIN, NAV_TAP_2_MAX);
-        sleepTask(500); // Wait for hero recruitment interface to load
+        for(int i=0;i<6;i++) {
+            sleepTask(180);
+            if (currentHeroRecruitmentVisible()) return;
+        }
+        logWarning("Hero Recruitment title did not appear after Heroes entry");
     }
 
     // ===============================
@@ -244,7 +740,17 @@ public class HeroRecruitmentRoutine extends DelayedTask {
             PointData ocrTopLeft,
             PointData ocrBottomRight) {
 
-        checkAndClaimRecruitment(type, searchMin, searchMax, claimMin, claimMax);
+        ClaimOutcome claimOutcome = checkAndClaimRecruitment(type, searchMin, searchMax, claimMin, claimMax);
+        if (countsAsProgress(claimOutcome)) {
+            confirmedDailyMissionProgress = true;
+        }
+        if (shouldUseUnknownRetry(claimOutcome)) {
+            unknownClaimOutcome = true;
+            logWarning(type + " recruitment claim remains available after the tap. "
+                    + "The result is unknown; no second tap will be sent in this run.");
+            return new RecruitmentResult(getFallbackTime(), false);
+        }
+
         LocalDateTime nextTime = extractNextRecruitmentTime(type, ocrTopLeft, ocrBottomRight);
 
         if (nextTime != null) {
@@ -263,31 +769,78 @@ public class HeroRecruitmentRoutine extends DelayedTask {
      * @param searchMax Bottom-right corner of search region
      * @param claimMin  Top-left corner of claim tap region
      * @param claimMax  Bottom-right corner of claim tap region
-     * @return true if reward was claimed, false if not available
+     * @return confirmed, unavailable, or unknown claim outcome
      */
-    private void checkAndClaimRecruitment(
-            String type,
-            PointData searchMin,
-            PointData searchMax,
-            PointData claimMin,
-            PointData claimMax) {
-
-        ImageSearchResultData claimResult = templateSearchHelper.locatePattern(
-                TemplatesEnum.HERO_RECRUIT_CLAIM,
-                TemplateSearchHelper.SearchConfig.builder()
-                        .withMaxAttempts(1)
-                        .withThreshold(95)
-                        .withDelay(300L)
-                        .withCoordinates(searchMin, searchMax)
-                        .build());
-
-        if (claimResult.isFound()) {
-            logInfo(type + " recruitment reward available. Claiming now.");
-            tapInside(claimMin, claimMax);
-            sleepTask(1000); // Wait for claim animation
-        } else {
+    private ClaimOutcome checkAndClaimRecruitment(
+            String type, PointData searchMin, PointData searchMax,
+            PointData claimMin, PointData claimMax) {
+        ImageSearchResultData free = locateRecruitmentClaimButton(searchMin, searchMax);
+        if (!free.isFound()) {
             logInfo(type + " recruitment reward not available yet.");
+            return ClaimOutcome.NOT_AVAILABLE;
         }
+        // Never tap a fixed coordinate that could become a paid Recruit x1.
+        logInfo(type + " verified free recruitment at " + free.getPoint());
+        tapInside(free);
+        sleepTask(450);
+        boolean rewardsDismissed = dismissVerifiedRecruitmentRewards();
+        if (!rewardsDismissed) {
+            logWarning(type + " Rewards transition unverified after one free tap; not repeating");
+            return ClaimOutcome.UNKNOWN;
+        }
+        ImageSearchResultData remaining = locateRecruitmentClaimButton(searchMin, searchMax);
+        if (!remaining.isFound()) {
+            logInfo(type + " free recruitment confirmed after verified Rewards exit");
+            return ClaimOutcome.CONFIRMED;
+        }
+        logWarning(type + " free recruitment remains available after Rewards exit");
+        return ClaimOutcome.UNKNOWN;
+    }
+
+    private ImageSearchResultData locateRecruitmentClaimButton(PointData searchMin, PointData searchMax) {
+        return templateSearchHelper.locateAction(TemplatesEnum.HERO_RECRUIT_CLAIM,
+                TemplateSearchHelper.SearchConfig.builder()
+                        .withMaxAttempts(2).withThreshold(92).withDelay(150L)
+                        .withCoordinates(searchMin, searchMax).build());
+    }
+
+    /** A successful free recruitment displays a Rewards page with a second
+     * orange "Recruit once" button that consumes a key. Only dismiss the
+     * verified Rewards overlay by tapping the empty area, never that button. */
+    private boolean dismissVerifiedRecruitmentRewards() {
+        var exitArea = TemplateSearchHelper.SearchConfig.builder()
+                .withMaxAttempts(2).withDelay(120).withThreshold(90)
+                .withCoordinates(new PointData(190, 1150), new PointData(525, 1240)).build();
+        ImageSearchResultData exitHint = ImageSearchResultData.miss();
+        for (int attempt = 0; attempt < 4; attempt++) {
+            exitHint = templateSearchHelper.locateAction(
+                    TemplatesEnum.SERVE_EMU_HERO_REWARDS_EXIT, exitArea);
+            if (exitHint.isFound()) break;
+            if (attempt < 3) sleepTask(250);
+        }
+        if (!exitHint.isFound()) return false;
+        var title = templateSearchHelper.locatePattern(
+                TemplatesEnum.SERVE_EMU_HERO_KEY_REWARDS_TITLE,
+                TemplateSearchHelper.SearchConfig.builder()
+                        .withMaxAttempts(2).withDelay(120).withThreshold(92)
+                        .withCoordinates(new PointData(230, 215), new PointData(500, 355)).build());
+        if (!title.isFound()) title = templateSearchHelper.locatePattern(
+                TemplatesEnum.SERVE_EMU_HERO_REWARDS_TITLE,
+                TemplateSearchHelper.SearchConfig.builder()
+                        .withMaxAttempts(1).withThreshold(88)
+                        .withCoordinates(new PointData(230, 215), new PointData(500, 355)).build());
+        if (!title.isFound()) {
+            logWarning("Hero recruitment shows exit text without a verified Rewards header; no blind tap");
+            return false;
+        }
+        tapInside(new PointData(320, 912), new PointData(422, 1000));
+        sleepTask(300);
+        if (templateSearchHelper.locatePattern(
+                TemplatesEnum.SERVE_EMU_HERO_REWARDS_EXIT, exitArea).isFound()) {
+            logWarning("Hero recruitment Rewards overlay did not close after one safe tap; no second action");
+            return false;
+        }
+        return true;
     }
 
     /**
@@ -416,7 +969,7 @@ public class HeroRecruitmentRoutine extends DelayedTask {
      */
     @Override
     public boolean provideDailyMissionProgress() {
-        return true;
+        return confirmedDailyMissionProgress;
     }
 
     /**
@@ -442,6 +995,24 @@ public class HeroRecruitmentRoutine extends DelayedTask {
      * @param nextTime Next availability time (or fallback if extraction failed)
      * @param success  Whether OCR extraction was successful
      */
+    static boolean countsAsProgress(ClaimOutcome outcome) {
+        return outcome == ClaimOutcome.CONFIRMED;
+    }
+
+    static boolean shouldUseUnknownRetry(ClaimOutcome outcome) {
+        return outcome == ClaimOutcome.UNKNOWN;
+    }
+
+    static boolean shouldFailOnUnknownOutcome(boolean unknownClaimOutcome, boolean confirmedProgress) {
+        return unknownClaimOutcome && !confirmedProgress;
+    }
+
+    enum ClaimOutcome {
+        CONFIRMED,
+        NOT_AVAILABLE,
+        UNKNOWN
+    }
+
     private record RecruitmentResult(LocalDateTime nextTime, boolean success) {
     }
 }

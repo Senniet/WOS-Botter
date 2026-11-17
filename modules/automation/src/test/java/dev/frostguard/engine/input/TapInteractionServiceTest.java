@@ -91,6 +91,30 @@ class TapInteractionServiceTest {
         assertTrue(taps.taps.isEmpty());
     }
 
+    @Test
+    void verifiedActionNeverRepeatsUnknownTap() {
+        RecordingDispatcher taps = new RecordingDispatcher();
+        AtomicInteger checks = new AtomicInteger();
+        var svc = service(taps, new RecordingSleeper());
+        var target = ImageSearchResultData.hit(360, 640, 97.0, 40, 20);
+        assertEquals(TapInteractionService.VerifiedActionResult.UNKNOWN,
+                svc.tapAndVerify(target, () -> { checks.incrementAndGet(); return false; }));
+        assertEquals(1, taps.taps.size());
+        assertEquals(1, checks.get());
+    }
+
+    @Test
+    void verifiedActionReportsSuccessAndRejectsMissingTarget() {
+        RecordingDispatcher taps = new RecordingDispatcher();
+        var svc = service(taps, new RecordingSleeper());
+        assertEquals(TapInteractionService.VerifiedActionResult.TARGET_MISSING,
+                svc.tapAndVerify(ImageSearchResultData.miss(), () -> true));
+        assertTrue(taps.taps.isEmpty());
+        assertEquals(TapInteractionService.VerifiedActionResult.VERIFIED,
+                svc.tapAndVerify(ImageSearchResultData.hit(360, 640, 96.0, 30, 20), () -> true));
+        assertEquals(1, taps.taps.size());
+    }
+
     // ── delay semantics (legacy parity) ─────────────────────────────
 
     @Test

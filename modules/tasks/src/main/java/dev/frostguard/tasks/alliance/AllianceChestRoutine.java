@@ -6,6 +6,13 @@ import dev.frostguard.api.configs.TpDailyTaskEnum;
 import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.api.domain.ImageSearchResultData;
 import dev.frostguard.api.domain.PointData;
+import dev.frostguard.api.domain.AreaData;
+import dev.frostguard.engine.helper.RecognitionConsensus;
+import dev.frostguard.engine.helper.TemplateSearchHelper;
+import dev.frostguard.engine.error.HomeNotFoundException;
+import dev.frostguard.vision.convert.ImageConverter;
+import dev.frostguard.tasks.diagnostics.TaskDiagnosticSnapshots;
+import java.awt.image.BufferedImage;
 import dev.frostguard.engine.nav.SearchConfigConstants;
 import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.schedule.LaunchPoint;
@@ -38,15 +45,24 @@ public AllianceChestRoutine(AccountDescriptor profile, TpDailyTaskEnum tpDailyTa
 		}
 
 
-		gatherLootChests();
-		gatherAllianceGifts();
-		gatherHonorChest();
-
-
-		restoreHomeScreen();
-
-
-		queueNextRun();
+        if (!gatherLootChests()) {
+            // A failed claim must not strand the next scheduled task in Alliance.
+            // Navigate via the existing verified Home helper, never blind Back.
+            boolean home = restoreHomeScreen();
+            deferAndExit("Loot Claim All outcome not confirmed; Home restored=" + home);
+            return;
+        }
+        if (!gatherAllianceGifts()) {
+            boolean home = restoreHomeScreen();
+            deferAndExit("Alliance Gift claim not confirmed; Home restored=" + home);
+            return;
+        }
+        gatherHonorChest();
+        if (!restoreHomeScreen()) {
+            deferAndExit("Return Home not verified");
+            return;
+        }
+        queueNextRun();
 	}
 
 private String routineLogAllianceChestLine(String note) {
@@ -67,50 +83,61 @@ private boolean openUpAllianceChestScreen() {
 		return true;
 	}
 
-private void gatherIndividualGifts() {
-		int giftsClaimed = 0;
-		int consecutiveFailures = 0;
-		int maxConsecutiveFailures = 3;
+private BufferedImage currentFrame() {
+        checkPreemption();
+        return ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER));
+    }
 
+    // Alliance Gift has individual green Claim controls, but no Claim All.
+    // A claimed row is removed/reordered; the next green button can occupy
+    // the SAME coordinates. Verify the independent key counter changed.
+    private boolean gatherIndividualGifts() {
+        int claimed = 0;
+        for (int i=0; i<35; i++) {
+            BufferedImage before = currentFrame();
+            var button = AllianceChestLiveFrame.findGiftClaim(before);
+            if (!button.isFound()) {
+                logInfo(routineLogAllianceChestLine("No more green gift Claims; "
+                        + claimed + " validated"));
+                return true;
+            }
+            sleepTask(160);
+            var stable = AllianceChestLiveFrame.findGiftClaim(currentFrame());
+            if (!RecognitionConsensus.agrees(button, stable, 12)) return false;
+            tapInside(stable);
+            sleepTask(560);
+            boolean confirmed = AllianceChestLiveFrame.keyProgressChanged(before, currentFrame());
+            if (!confirmed) {
+                sleepTask(330);
+                confirmed = AllianceChestLiveFrame.keyProgressChanged(before, currentFrame());
+            }
+            if (!confirmed) {
+                logWarning(routineLogAllianceChestLine("Gift key progress unchanged; "
+                        + TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
+                                "alliance-chest", "gift-claim-unconfirmed")));
+                return false;
+            }
+            claimed++;
+        }
+        logWarning(routineLogAllianceChestLine("Gift batch limit 35 reached; returning for next pass"));
+        return false;
+    }
 
-		while (consecutiveFailures < maxConsecutiveFailures) {
-			ImageSearchResultData claimButton = templateSearchHelper.locatePattern(
-					TemplatesEnum.ALLIANCE_CHEST_CLAIM_BUTTON,
-					SearchConfigConstants.DEFAULT_SINGLE);
-
-			if (claimButton.isFound()) {
-				logDebug(routineLogAllianceChestLine("Collecting individual gift #" + (giftsClaimed + 1)));
-				tapInside(claimButton);
-				sleepTask(CLAIM_WAIT_TIME_MS);
-				giftsClaimed++;
-				consecutiveFailures = 0;
-
-
-				dismissPopupIfPresent();
-			} else {
-				consecutiveFailures++;
-
-
-				if (consecutiveFailures >= maxConsecutiveFailures) {
-					logDebug(routineLogAllianceChestLine("Zero additional individual gifts detected."));
-					break;
-				}
-			}
-		}
-
-		if (giftsClaimed > 0) {
-			logInfo(routineLogAllianceChestLine("Successfully collected " + giftsClaimed + " individual gifts."));
-		} else {
-			logInfo(routineLogAllianceChestLine("Zero individual gifts to claim."));
-		}
-	}
-
-private void dismissPopupIfPresent() {
-
-
-		tapInside(new PointData(578, 1180), new PointData(641, 1200), 2, 200);
-		sleepTask(SHORT_WAIT_TIME_MS);
-	}
+    // Only Loot Claim All opens a full-screen Rewards overlay in the observed
+    // 2026 UI. Dismiss once after checking the actual Rewards title.
+    private boolean dismissVerifiedLootRewards() {
+        AreaData title = AreaData.of(65,245,680,415);
+        var search = TemplateSearchHelper.SearchConfig.builder()
+                .withMaxAttempts(2).withDelay(170).withThreshold(90)
+                .withArea(title).build();
+        if (!templateSearchHelper.locatePattern(TemplatesEnum.SHARED_REWARDS_BANNER,search).isFound())
+            return false;
+        tapNear(new PointData(360,1188));
+        sleepTask(450);
+        return !templateSearchHelper.locatePattern(TemplatesEnum.SHARED_REWARDS_BANNER,
+                TemplateSearchHelper.SearchConfig.builder()
+                        .withMaxAttempts(1).withThreshold(90).withArea(title).build()).isFound();
+    }
 
 private boolean reachAllianceScreen() {
 		logInfo(routineLogAllianceChestLine("Moving to alliance screen"));
@@ -124,79 +151,77 @@ private boolean reachAllianceScreen() {
 		return allianceVerification.isFound();
 	}
 
-private void gatherAllianceGifts() {
-		logInfo(routineLogAllianceChestLine("Entering alliance gifts section."));
-		tapInside(new PointData(410, 375), new PointData(626, 420));
-		sleepTask(TAB_CHANGE_WAIT_TIME_MS);
+private boolean gatherAllianceGifts() {
+        tapInside(new PointData(410,375),new PointData(626,420));
+        sleepTask(330);
+        // No Claim All on Alliance Gift: skip that obsolete search entirely.
+        return gatherIndividualGifts();
+    }
 
+private boolean restoreHomeScreen() {
+        try {
+            navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME, this::checkPreemption);
+            return true;
+        } catch (HomeNotFoundException missing) {
+            logWarning(routineLogAllianceChestLine("Home not confirmed: " + missing.getMessage()));
+            return false;
+        }
+    }
 
-		ImageSearchResultData claimAllButton = templateSearchHelper.locatePattern(
-				TemplatesEnum.ALLIANCE_CHEST_CLAIM_ALL_BUTTON,
-				SearchConfigConstants.DEFAULT_SINGLE);
-
-		if (claimAllButton.isFound()) {
-			logInfo(routineLogAllianceChestLine("'Claim All' button detected. Collecting all gifts."));
-			tapInside(claimAllButton);
-			sleepTask(CLAIM_WAIT_TIME_MS);
-
-
-			dismissPopupIfPresent();
-		} else {
-			logInfo(routineLogAllianceChestLine("Zero 'Claim All' button for gifts. Inspecting for individual gifts."));
-			gatherIndividualGifts();
-		}
-		sleepTask(SHORT_WAIT_TIME_MS);
-	}
-
-private void restoreHomeScreen() {
-		logInfo(routineLogAllianceChestLine("Returning to home screen."));
-		pressBack();
-		sleepTask(SHORT_WAIT_TIME_MS);
-		pressBack();
-		sleepTask(SHORT_WAIT_TIME_MS);
-
-
-	}
-
-private void gatherLootChests() {
-		logInfo(routineLogAllianceChestLine("Collecting loot chests."));
-		tapInside(new PointData(56, 375), new PointData(320, 420));
-		sleepTask(TAB_CHANGE_WAIT_TIME_MS);
-
-
-		tapNear(new PointData(360, 1204));
-		sleepTask(CLAIM_WAIT_TIME_MS);
-
-
-		dismissPopupIfPresent();
-		sleepTask(SHORT_WAIT_TIME_MS);
-	}
+private boolean gatherLootChests() {
+        tapInside(new PointData(56,375),new PointData(320,420));
+        sleepTask(320);
+        var before = AllianceChestLiveFrame.findLootClaimAll(currentFrame());
+        if (!before.isFound()) {
+            logInfo(routineLogAllianceChestLine("Loot Claim All disabled/absent; no tap"));
+            return true;
+        }
+        sleepTask(160);
+        var stable = AllianceChestLiveFrame.findLootClaimAll(currentFrame());
+        if (!RecognitionConsensus.agrees(before,stable,12)) return false;
+        tapInside(stable);
+        sleepTask(450);
+        boolean dismissed = dismissVerifiedLootRewards();
+        if (!dismissed)
+            logWarning(routineLogAllianceChestLine("Loot Rewards not verified; no repeated tap"));
+        return dismissed;
+    }
 
 private void gatherHonorChest() {
-		boolean honorChestEnabled = profile.getConfig(ConfigurationKeyEnum.ALLIANCE_HONOR_CHEST_BOOL, Boolean.class);
-
-		if (honorChestEnabled) {
-			logInfo(routineLogAllianceChestLine("Collecting honor chest."));
-			tapInside(new PointData(320, 200), new PointData(400, 250));
-			sleepTask(TAB_CHANGE_WAIT_TIME_MS);
-
-
-			dismissPopupIfPresent();
-		} else {
-			logInfo(routineLogAllianceChestLine("Honor chest collection is disabled. Skipping."));
-		}
-	}
+        Boolean enabled = profile.getConfig(ConfigurationKeyEnum.ALLIANCE_HONOR_CHEST_BOOL,
+                Boolean.class);
+        if (!Boolean.TRUE.equals(enabled)) return;
+        // 2026 Serve-EMU's top chest is a progress display, not an available
+        // free Claim at 68,990/150,000. No blind click on this UI.
+        if (emuManager.getSelectedEmulatorType()
+                == dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU) {
+            logInfo(routineLogAllianceChestLine("Honor Chest claim unconfirmed; skipping"));
+            return;
+        }
+        var action = templateSearchHelper.locateAction(TemplatesEnum.ALLIANCE_HONOR_CHEST,
+                TemplateSearchHelper.SearchConfig.builder()
+                        .withMaxAttempts(1).withThreshold(93)
+                        .withArea(AreaData.of(260,130,470,300)).build());
+        if (action.isFound()) tapInside(action);
+    }
 
 private void queueNextRun() {
-		int offsetMinutes = profile.getConfig(ConfigurationKeyEnum.ALLIANCE_CHESTS_OFFSET_INT, Integer.class);
-		LocalDateTime nextExecutionTime = LocalDateTime.now().plusMinutes(offsetMinutes);
+        Integer configured = profile.getConfig(ConfigurationKeyEnum.ALLIANCE_CHESTS_OFFSET_INT,
+                Integer.class);
+        int offsetMinutes = safeChestInterval(configured);
+        LocalDateTime nextExecutionTime = LocalDateTime.now().plusMinutes(offsetMinutes);
 		nextExecutionTime = nextExecutionTime.isAfter(GameTimeUtils.dailyResetTime()) ? GameTimeUtils.dailyResetTime()
 				: nextExecutionTime;
 		reschedule(nextExecutionTime);
 		logInfo(routineLogAllianceChestLine("Alliance chest task completed. Next run at: " + nextExecutionTime.format(DATETIME_FORMATTER)));
 	}
 
+    static int safeChestInterval(Integer minutes) {
+        return minutes != null && minutes > 0 ? minutes : 60;
+    }
+
 private void deferAndExit(String reason) {
+        markWorkIncomplete("Alliance Chests: " + reason);
 		logWarning(routineLogAllianceChestLine(reason + ". Planning next run task to run in 5 minutes."));
 		LocalDateTime nextExecutionTime = LocalDateTime.now().plusMinutes(5);
 		reschedule(nextExecutionTime);

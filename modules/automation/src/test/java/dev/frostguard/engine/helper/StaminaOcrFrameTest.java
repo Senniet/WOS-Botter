@@ -29,6 +29,17 @@ class StaminaOcrFrameTest {
         assertEquals(130, RegexNumberParser.numerator(text));
     }
 
+    @Test
+    void currentServeEmuStaminaDialogReadsLower2026HudFraction() throws Exception {
+        String text = OcrEngine.recognizeText(
+                rgbaFrame(image("/stamina/current-stamina-bar-only.png")),
+                CommonGameAreas.STAMINA_OCR_AREA_CURRENT.topLeft(),
+                CommonGameAreas.STAMINA_OCR_AREA_CURRENT.bottomRight(),
+                CommonOCRSettings.STAMINA_FRACTION_SETTINGS).trim();
+        assertEquals("484/200", text);
+        assertEquals(484, RegexNumberParser.numerator(text));
+    }
+
     private BufferedImage image(String resource) throws Exception {
         return ImageIO.read(Objects.requireNonNull(getClass().getResourceAsStream(resource)));
     }

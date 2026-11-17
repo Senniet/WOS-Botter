@@ -40,8 +40,17 @@ public ManualRallyJoinRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask)
                 SearchConfigConstants.DEFAULT_SINGLE);
 
         if (indicator.isFound()) {
-            logInfo(routineLogManualRallyJoinLine("Rally indicator detected at " + indicator.getPoint()));
-            tapInside(indicator);
+            // A transient HUD match must not interrupt another task's navigation.
+            // Confirm on a second frame before changing the active game screen.
+            sleepTask(180);
+            ImageSearchResultData confirmedIndicator = templateSearchHelper.locatePattern(
+                    TemplatesEnum.RALLY_INDICATOR, SearchConfigConstants.DEFAULT_SINGLE);
+            if (!confirmedIndicator.isFound()) {
+                logInfo(routineLogManualRallyJoinLine("Rally indicator not stable across frames; skipping interruption."));
+                return;
+            }
+            logInfo(routineLogManualRallyJoinLine("Rally indicator confirmed at " + confirmedIndicator.getPoint()));
+            tapInside(confirmedIndicator);
             sleepTask(1000);
 
 

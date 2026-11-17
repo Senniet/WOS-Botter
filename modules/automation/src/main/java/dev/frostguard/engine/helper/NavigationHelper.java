@@ -32,6 +32,8 @@ public class NavigationHelper {
 
     private static final int MAX_INTEL_NAV_PASSES = 3;
     private static final int BANK_NAVIGATION_ATTEMPTS = 2;
+    private static final int UNKNOWN_SCREEN_PASSIVE_RECHECKS = 2;
+    private static final long UNKNOWN_SCREEN_PASSIVE_SETTLE_MS = 450L;
     private static final long DEALS_CAROUSEL_SETTLE_MS = 1000L;
     private static final long BANK_INTERFACE_SETTLE_MS = 1500L;
     private static final PointData DEALS_SWIPE_START = new PointData(630, 143);
@@ -612,20 +614,33 @@ public class NavigationHelper {
     /** Allows task-owned recovery to yield before every navigation action. */
     public LaunchPoint ensureCorrectScreenLocation(LaunchPoint target, Runnable checkpoint) {
         broadcastDebug("Locating screen - need " + target);
-        int budget = 10;
+        int budget = 4;
         int pass = 1;
+        boolean overviewDismissed = false;
+        boolean welcomeBackDismissed = false;
         while (pass <= budget) {
             checkpoint.run();
-            // detect reconnect
-            if (searcher.locatePattern(TemplatesEnum.GAME_HOME_RECONNECT,
-                    SearchConfigConstants.DEFAULT_SINGLE).isFound()) {
-                throw new ProfileInReconnectStateException(accountName + " in reconnect state");
+            // Healthy Serve-EMU City/World HUD: its correct bottom-right tab
+            // is already a positive root signal. Observe the root BEFORE
+            // checking a reconnect overlay; reconnect itself covers the tabs,
+            // so it cannot yield a positive root match on a healthy frame.
+            // On unknown/blocked HUD we still run the FULL reconnect guard
+            // before any recovery tap (including fast-path pass 1).
+            ImageSearchResultData cityButton = findHomeAnchor(pass == 1);
+            boolean atHome = cityButton.isFound();
+            ImageSearchResultData worldButton = atHome ? ImageSearchResultData.miss() : findWorldAnchor(pass == 1);
+            boolean atWorld = worldButton.isFound();
+            if (NavigationProbePlan.requiresFullReconnect(
+                    emu.getSelectedEmulatorType(),atHome,atWorld)) {
+                ImageSearchResultData reconnect = searcher.locatePattern(
+                        TemplatesEnum.GAME_HOME_RECONNECT, SearchConfigConstants.DEFAULT_SINGLE);
+                if (reconnect.isFound()) {
+                    throw new ProfileInReconnectStateException(accountName + " in reconnect state");
+                }
             }
-
-            boolean atHome = searcher.locatePattern(TemplatesEnum.GAME_HOME_FURNACE,
-                    SearchConfigConstants.DEFAULT_SINGLE).isFound();
-            boolean atWorld = !atHome && searcher.locatePattern(TemplatesEnum.GAME_HOME_WORLD,
-                    SearchConfigConstants.DEFAULT_SINGLE).isFound();
+            // A stable root tab means navigation may continue without the
+            // globally repeated reconnect/Welcome Back/offer/reward sweep.
+            // Screen transitions are still verified before any tap below.
 
             checkpoint.run();
             // check if already at desired location
@@ -635,43 +650,368 @@ public class NavigationHelper {
 
             // try to navigate to desired location
             if (target == LaunchPoint.HOME && atWorld) {
-                ImageSearchResultData w = searcher.locatePattern(TemplatesEnum.GAME_HOME_WORLD,
-                        SearchConfigConstants.DEFAULT_SINGLE);
-                if (w.isFound() && isStableScreenAnchorFlow(TemplatesEnum.GAME_HOME_WORLD)) {
+                if (stableHomeWorldAnchor(worldButton, false)) {
                     checkpoint.run();
-                    taps.tapInside(w);
-                    interruptibleWait(2000);
-                    if (searcher.locatePattern(TemplatesEnum.GAME_HOME_FURNACE,
-                            SearchConfigConstants.DEFAULT_SINGLE).isFound()) return target;
+                    taps.tapInside(worldButton);
+                    interruptibleWait(700);
+                    if (findHomeAnchor().isFound()) return target;
                 }
             } else if (target == LaunchPoint.WORLD && atHome) {
-                ImageSearchResultData h = searcher.locatePattern(TemplatesEnum.GAME_HOME_FURNACE,
-                        SearchConfigConstants.DEFAULT_SINGLE);
-                if (h.isFound() && isStableScreenAnchorFlow(TemplatesEnum.GAME_HOME_FURNACE)) {
+                if (stableHomeWorldAnchor(cityButton, true)) {
                     checkpoint.run();
-                    taps.tapInside(h);
-                    interruptibleWait(2000);
-                    if (searcher.locatePattern(TemplatesEnum.GAME_HOME_WORLD,
-                            SearchConfigConstants.DEFAULT_SINGLE).isFound()) return target;
+                    taps.tapInside(cityButton);
+                    interruptibleWait(700);
+                    if (findWorldAnchor().isFound()) return target;
                 }
             }
 
-            // unknown screen - go back
-            if (!atHome && !atWorld) {
-                broadcastDebug("Unknown screen - back (" + pass + "/" + budget + ")");
-                checkpoint.run();
-                emu.pressBack(device);
-                interruptibleWait(300);
+            // The offline-income dialog may appear after a promotion is closed,
+            // including when navigation resumes after startup. Confirm only a
+            // doubly verified title/button pair; never claim a generic green button.
+            if (!atHome && !atWorld && !welcomeBackDismissed
+                    && dismissVerifiedWelcomeBack(checkpoint)) {
+                welcomeBackDismissed = true;
+                pass++;
+                continue;
             }
-            pass++;
+
+            // Only dismiss a verified, named purchase offer. Never tap its price.
+            // An unrecognized promotion is left untouched rather than guessing X.
+            if (!atHome && !atWorld && dismissVerifiedResplendentOffer(checkpoint)) {
+                pass++;
+                continue;
+            }
+
+            // The Resource Production "Overview" modal hides the entire
+            // City/World navigation bar. It was confirmed in the 14:08-14:09
+            // diagnostics; without a typed recovery this loop probes unrelated
+            // Back and Wood/Meat patterns until HomeNotFoundException.
+            // Only close a double-confirmed Overview once in this invocation.
+            if (!atHome && !atWorld && !overviewDismissed
+                    && target != LaunchPoint.ANY
+                    && dismissVerifiedResourceOverview(checkpoint)) {
+                overviewDismissed = true;
+                pass++;
+                continue;
+            }
+
+            // A recognised Rewards overlay says "Tap anywhere to exit". Do
+            // not use ten blind Android Back events for this known screen.
+            if (!atHome && !atWorld && pass <= 2
+                    && (searcher.locateAction(TemplatesEnum.SHARED_REWARDS_BANNER_CURRENT,
+                            TemplateSearchHelper.SearchConfig.builder()
+                                    .withMaxAttempts(1).withThreshold(92)
+                                    .withArea(AreaData.of(50, 245, 670, 400)).build()).isFound()
+                        || searcher.locateAction(TemplatesEnum.SHARED_REWARDS_BANNER,
+                            TemplateSearchHelper.SearchConfig.builder()
+                                    .withMaxAttempts(1).withThreshold(85)
+                                    .withArea(AreaData.of(30, 245, 690, 400)).build()).isFound()
+                        || searcher.locateAction(TemplatesEnum.SERVE_EMU_REWARDS_BANNER,
+                            TemplateSearchHelper.SearchConfig.builder()
+                                    .withMaxAttempts(1).withThreshold(90)
+                                    .withArea(AreaData.of(235, 285, 495, 425)).build()).isFound())) {
+                broadcastDebug("Recognised Rewards overlay; dismissing with one verified tap");
+                checkpoint.run();
+                taps.tapInside(AreaData.of(340, 1125, 385, 1185));
+                interruptibleWait(600);
+                pass++;
+                continue;
+            }
+            // A blind Android Back on the wilderness map opens Quit game?.
+            // If it is already showing, cancel rather than sending another
+            // Back. Abort this recovery sequence to prevent a quit loop.
+            if (!atHome && !atWorld && searcher.locateAction(
+                    TemplatesEnum.GAME_QUIT_CONFIRMATION_PROMPT,
+                    TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
+                            .withThreshold(88).withArea(AreaData.of(250, 525, 470, 645))
+                            .build()).isFound()) {
+                broadcastWarn("Quit game? dialog detected, selecting Cancel; "
+                        + "no further blind Back attempts in this recovery");
+                checkpoint.run();
+                taps.tapInside(AreaData.of(110, 768, 298, 830));
+                interruptibleWait(550);
+                if (target == LaunchPoint.ANY) return LaunchPoint.ANY;
+                throw new HomeNotFoundException("Quit dialog cancelled; specific "
+                        + "home/world location not safely confirmed");
+            }
+            // ANY tasks, including an already-paid Fishing cast, own their entry
+            // screen. The scheduler must not close it before the routine inspects it.
+            if (target == LaunchPoint.ANY) {
+                broadcastDebug("Unrecognised location, but task accepts ANY; no navigation input sent");
+                return LaunchPoint.ANY;
+            }
+            // The blue on-screen Back arrow is a stronger signal than the
+            // generic "Wood/Meat" search templates. Check it FIRST so Intel,
+            // Arena, Research and Events exit promptly instead of wasting
+            // several seconds searching for a gathering panel on the wrong page.
+            var back = findVerifiedBackArrow();
+            if (back.isFound()) {
+                checkpoint.run();
+                taps.tapInside(back);
+                broadcastDebug("Used verified on-screen Back arrow; checking Home/World");
+                interruptibleWait(650);
+                pass++;
+                continue;
+            }
+            // Resource search recovery remains available only when no
+            // verified page header is present.
+            if (pass <= 2 && recoverVerifiedResourceSearch(checkpoint)) {
+                pass++;
+                continue;
+            }
+            // Neither a verified page arrow nor a resource-search recovery is
+            // present. Do not send an Android Back on the wilderness map.
+            if (shouldRecheckUnknownScreen(pass)) {
+                broadcastDebug("No Home/World anchor or verified Back arrow on pass " + pass
+                        + "; passively rechecking without tapping");
+                interruptibleWait(UNKNOWN_SCREEN_PASSIVE_SETTLE_MS);
+                pass++;
+                continue;
+            }
+            throw new HomeNotFoundException("Unknown location after passive checks; "
+                    + "no verified screen back arrow; refusing blind Android Back "
+                    + "to protect against Quit game dialog");
         }
-        throw new HomeNotFoundException("Home not found after " + budget + " attempts");
+        throw new HomeNotFoundException("Home not found after " + budget + " verified recovery attempts");
     }
 
-    // Require one immediate re-check before tapping a home/world anchor to reduce transient mis-taps.
-    private boolean isStableScreenAnchorFlow(TemplatesEnum anchorTemplate) {
-        interruptibleWait(120);
-        return searcher.locatePattern(anchorTemplate, SearchConfigConstants.DEFAULT_SINGLE).isFound();
+    /** Confirm the verified offline-income dialog; never act on an unrecognized green button. */
+    private boolean dismissVerifiedWelcomeBack(Runnable checkpoint) {
+        var titleConfig = TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
+                .withThreshold(90).withArea(AreaData.of(170, 170, 550, 340)).build();
+        var confirmConfig = TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
+                .withThreshold(90).withArea(AreaData.of(150, 880, 570, 1140)).build();
+        var title = searcher.locatePattern(TemplatesEnum.GAME_START_WELCOME_BACK_TITLE, titleConfig);
+        if (!title.isFound()) return false;
+        var confirm = searcher.locatePattern(TemplatesEnum.GAME_START_WELCOME_BACK_CONFIRM_BUTTON, confirmConfig);
+        if (!confirm.isFound()) return false;
+        interruptibleWait(160);
+        var titleAgain = searcher.locatePattern(TemplatesEnum.GAME_START_WELCOME_BACK_TITLE, titleConfig);
+        var confirmAgain = searcher.locatePattern(TemplatesEnum.GAME_START_WELCOME_BACK_CONFIRM_BUTTON, confirmConfig);
+        if (!RecognitionConsensus.agrees(title, titleAgain, 12)
+                || !RecognitionConsensus.agrees(confirm, confirmAgain, 12)) return false;
+        checkpoint.run();
+        taps.tapInside(confirmAgain);
+        interruptibleWait(550);
+        if (searcher.locatePattern(TemplatesEnum.GAME_START_WELCOME_BACK_TITLE, titleConfig).isFound()) {
+            throw new HomeNotFoundException("Welcome back remained open after confirmed tap; refusing repeat");
+        }
+        broadcastInfo("Confirmed verified Welcome back offline-income dialog");
+        return true;
+    }
+
+    /** Close the observed Resplendent Treasure Pack 1 promotion, not its purchase button. */
+    private boolean dismissVerifiedResplendentOffer(Runnable checkpoint) {
+        var titleConfig = TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
+                .withThreshold(91).withArea(AreaData.of(65, 125, 555, 235)).build();
+        var closeConfig = TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
+                .withThreshold(92).withArea(AreaData.of(560, 125, 675, 245)).build();
+        var title = searcher.locatePattern(TemplatesEnum.SERVE_EMU_OFFER_RESPLENDENT_TITLE_2026, titleConfig);
+        if (!title.isFound()) return false;
+        var close = searcher.locatePattern(TemplatesEnum.SERVE_EMU_OFFER_RESPLENDENT_CLOSE_2026, closeConfig);
+        if (!close.isFound()) return false;
+        interruptibleWait(160);
+        var titleAgain = searcher.locatePattern(TemplatesEnum.SERVE_EMU_OFFER_RESPLENDENT_TITLE_2026, titleConfig);
+        var closeAgain = searcher.locatePattern(TemplatesEnum.SERVE_EMU_OFFER_RESPLENDENT_CLOSE_2026, closeConfig);
+        if (!RecognitionConsensus.agrees(title, titleAgain, 12)
+                || !RecognitionConsensus.agrees(close, closeAgain, 12)) return false;
+        checkpoint.run();
+        taps.tapInside(closeAgain);
+        interruptibleWait(450);
+        if (searcher.locatePattern(TemplatesEnum.SERVE_EMU_OFFER_RESPLENDENT_TITLE_2026,
+                titleConfig).isFound()) {
+            throw new HomeNotFoundException("Resplendent offer did not close; refusing repeated taps");
+        }
+        broadcastInfo("Dismissed verified Resplendent Treasure Pack offer without purchasing");
+        return true;
+    }
+
+    /** Close only the recorded Resource Production Overview pop-up. */
+    private boolean dismissVerifiedResourceOverview(Runnable checkpoint) {
+        var titleConfig = TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
+                .withThreshold(92).withArea(AreaData.of(0, 315, 250, 420)).build();
+        var closeConfig = TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
+                .withThreshold(92).withArea(AreaData.of(610, 310, 718, 420)).build();
+        var title = searcher.locatePattern(TemplatesEnum.SERVE_EMU_RESOURCES_OVERVIEW_TITLE_2026,
+                titleConfig);
+        if (!title.isFound()) return false;
+        var close = searcher.locatePattern(TemplatesEnum.SERVE_EMU_RESOURCES_OVERVIEW_CLOSE_2026,
+                closeConfig);
+        if (!close.isFound()) return false;
+        interruptibleWait(150);
+        var titleAgain = searcher.locatePattern(
+                TemplatesEnum.SERVE_EMU_RESOURCES_OVERVIEW_TITLE_2026, titleConfig);
+        var closeAgain = searcher.locatePattern(
+                TemplatesEnum.SERVE_EMU_RESOURCES_OVERVIEW_CLOSE_2026, closeConfig);
+        if (!RecognitionConsensus.agrees(title, titleAgain, 12)
+                || !RecognitionConsensus.agrees(close, closeAgain, 12)) {
+            broadcastWarn("Resource Overview title/X were not stable; leaving popup untouched");
+            return false;
+        }
+        checkpoint.run();
+        taps.tapInside(closeAgain);
+        broadcastInfo("Closed confirmed Resource Production Overview using its X control");
+        interruptibleWait(500);
+        if (searcher.locatePattern(TemplatesEnum.SERVE_EMU_RESOURCES_OVERVIEW_TITLE_2026,
+                titleConfig).isFound()) {
+            throw new HomeNotFoundException("Resource Overview remained open after one verified close; "
+                    + "refusing a second tap");
+        }
+        return true;
+    }
+
+    static boolean shouldRecheckUnknownScreen(int pass) {
+        return pass > 0 && pass <= UNKNOWN_SCREEN_PASSIVE_RECHECKS;
+    }
+
+    private boolean recoverVerifiedResourceSearch(Runnable checkpoint) {
+        if (!isVerifiedResourceSearchVisible()) return false;
+        broadcastWarn("Verified World resource-search panel obscures anchors; "
+                + "closing it with a bounded, state-specific recovery");
+        var gatherConfig = TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
+                .withThreshold(86).withArea(AreaData.of(180, 545, 530, 700)).build();
+        // The resource result modal is dismissed by a map tap; do not tap
+        // Gather or Deploy here and do not assume that the modal disappeared.
+        if (searcher.locateAction(TemplatesEnum.GAME_HOME_SHORTCUTS_FARM_GATHER,
+                gatherConfig).isFound()) {
+            checkpoint.run();
+            taps.tapInside(AreaData.of(65, 405, 105, 445));
+            interruptibleWait(500);
+            if (searcher.locatePattern(TemplatesEnum.GAME_HOME_SHORTCUTS_FARM_GATHER,
+                    gatherConfig).isFound()) {
+                broadcastWarn("Resource result modal remained open; stopping safe recovery");
+                return false;
+            }
+        }
+        if (!isVerifiedResourceSearchVisible()) return false;
+        checkpoint.run();
+        emu.pressBack(device);
+        interruptibleWait(650);
+        return true;
+    }
+
+    private boolean isVerifiedResourceSearchVisible() {
+        var config = TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
+                .withThreshold(90).withArea(AreaData.of(0, 835, 720, 995)).build();
+        for (TemplatesEnum resource : new TemplatesEnum[] {
+                TemplatesEnum.GAME_HOME_SHORTCUTS_FARM_MEAT,
+                TemplatesEnum.GAME_HOME_SHORTCUTS_FARM_WOOD}) {
+            var first = searcher.locatePattern(resource, config);
+            if (!first.isFound()) continue;
+            interruptibleWait(170);
+            var second = searcher.locatePattern(resource, config);
+            if (RecognitionConsensus.agrees(first, second, 18)) return true;
+        }
+        return false;
+    }
+
+    private ImageSearchResultData findVerifiedBackArrow() {
+        // Alliance and Alliance > Tech use a high blue arrow. Require a
+        // matching page title AND arrow on two observations: an isolated
+        // arrow is not sufficient to authorize navigation away from a modal.
+        var allianceTitleConfig = TemplateSearchHelper.SearchConfig.builder()
+                .withMaxAttempts(1).withThreshold(91)
+                .withArea(AreaData.of(85, 10, 270, 75)).build();
+        var allianceBackConfig = TemplateSearchHelper.SearchConfig.builder()
+                .withMaxAttempts(1).withThreshold(91)
+                .withArea(AreaData.of(0, 0, 110, 105)).build();
+        for (TemplatesEnum allianceTitle : new TemplatesEnum[] {
+                TemplatesEnum.SERVE_EMU_ALLIANCE_HEADER_LIVE_2026,
+                TemplatesEnum.SERVE_EMU_ALLIANCE_TECH_HEADER_LIVE_2026}) {
+            var title = searcher.locatePattern(allianceTitle, allianceTitleConfig);
+            if (!title.isFound()) continue;
+            var arrow = searcher.locatePattern(TemplatesEnum.SERVE_EMU_ALLIANCE_BACK_LIVE_2026,
+                    allianceBackConfig);
+            if (!arrow.isFound()) continue;
+            interruptibleWait(150);
+            var titleAgain = searcher.locatePattern(allianceTitle, allianceTitleConfig);
+            var arrowAgain = searcher.locatePattern(TemplatesEnum.SERVE_EMU_ALLIANCE_BACK_LIVE_2026,
+                    allianceBackConfig);
+            if (RecognitionConsensus.agrees(title, titleAgain, 12)
+                    && RecognitionConsensus.agrees(arrow, arrowAgain, 12)) return arrowAgain;
+        }
+        var oldConfig = TemplateSearchHelper.SearchConfig.builder()
+                .withMaxAttempts(1).withThreshold(91)
+                .withArea(AreaData.of(0, 0, 110, 105)).build();
+        var currentConfig = TemplateSearchHelper.SearchConfig.builder()
+                .withMaxAttempts(1).withThreshold(90)
+                .withArea(AreaData.of(0, 65, 110, 155)).build();
+        var first = searcher.locatePattern(TemplatesEnum.GAME_HEADER_BACK_ARROW_CURRENT, oldConfig);
+        if (first.isFound()) {
+            interruptibleWait(120);
+            var next = searcher.locatePattern(TemplatesEnum.GAME_HEADER_BACK_ARROW_CURRENT, oldConfig);
+            if (RecognitionConsensus.agrees(first, next, 12)) return next;
+        }
+        // Live Intel and Event pages place their blue Back arrow at y=5..70,
+        // not y=65..155. The old ROI could never match that arrow, causing
+        // HomeNotFoundException despite a visible safe exit control.
+        var intelConfig = TemplateSearchHelper.SearchConfig.builder()
+                .withMaxAttempts(1).withThreshold(90)
+                .withArea(AreaData.of(0, 0, 110, 105)).build();
+        first = searcher.locatePattern(TemplatesEnum.SERVE_EMU_HEADER_BACK_INTEL_2026, intelConfig);
+        if (first.isFound()) {
+            interruptibleWait(130);
+            var next = searcher.locatePattern(TemplatesEnum.SERVE_EMU_HEADER_BACK_INTEL_2026, intelConfig);
+            if (RecognitionConsensus.agrees(first, next, 12)) return next;
+        }
+        first = searcher.locatePattern(TemplatesEnum.SERVE_EMU_HEADER_BACK_EVENTS_2026, intelConfig);
+        if (first.isFound()) {
+            interruptibleWait(130);
+            var next = searcher.locatePattern(TemplatesEnum.SERVE_EMU_HEADER_BACK_EVENTS_2026, intelConfig);
+            if (RecognitionConsensus.agrees(first, next, 12)) return next;
+        }
+        first = searcher.locatePattern(TemplatesEnum.SERVE_EMU_HEADER_BACK_HERO_2026, intelConfig);
+        if (first.isFound()) {
+            interruptibleWait(130);
+            var next = searcher.locatePattern(TemplatesEnum.SERVE_EMU_HEADER_BACK_HERO_2026, intelConfig);
+            if (RecognitionConsensus.agrees(first, next, 12)) return next;
+        }
+        first = searcher.locatePattern(TemplatesEnum.SERVE_EMU_HEADER_BACK, currentConfig);
+        if (first.isFound()) {
+            interruptibleWait(120);
+            var next = searcher.locatePattern(TemplatesEnum.SERVE_EMU_HEADER_BACK, currentConfig);
+            if (RecognitionConsensus.agrees(first, next, 12)) return next;
+        }
+        return ImageSearchResultData.miss();
+    }
+
+    private ImageSearchResultData findHomeAnchor() {
+        return findHomeAnchor(false);
+    }
+
+    private ImageSearchResultData findHomeAnchor(boolean fast) {
+        var config = TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
+                .withThreshold(90).withArea(AreaData.of(590, 1145, 715, 1275)).build();
+        var current = fast
+                ? searcher.locatePatternFast(TemplatesEnum.SERVE_EMU_CITY_ANCHOR, config)
+                : searcher.locatePattern(TemplatesEnum.SERVE_EMU_CITY_ANCHOR, config);
+        if (current.isFound()) return current;
+        return fast
+                ? searcher.locatePatternFast(TemplatesEnum.GAME_HOME_FURNACE, config)
+                : searcher.locatePattern(TemplatesEnum.GAME_HOME_FURNACE, config);
+    }
+
+    private ImageSearchResultData findWorldAnchor() {
+        return findWorldAnchor(false);
+    }
+
+    private ImageSearchResultData findWorldAnchor(boolean fast) {
+        var config = TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
+                .withThreshold(90).withArea(AreaData.of(590, 1145, 715, 1275)).build();
+        var current = fast
+                ? searcher.locatePatternFast(TemplatesEnum.SERVE_EMU_WORLD_ANCHOR_CURRENT, config)
+                : searcher.locatePattern(TemplatesEnum.SERVE_EMU_WORLD_ANCHOR_CURRENT, config);
+        if (current.isFound()) return current;
+        return fast
+                ? searcher.locatePatternFast(TemplatesEnum.GAME_HOME_WORLD, config)
+                : searcher.locatePattern(TemplatesEnum.GAME_HOME_WORLD, config);
+    }
+
+    private boolean stableHomeWorldAnchor(ImageSearchResultData before, boolean atHome) {
+        if (before == null || !before.isFound()) return false;
+        interruptibleWait(130);
+        var after = atHome ? findHomeAnchor() : findWorldAnchor();
+        return RecognitionConsensus.agrees(before, after, 14);
     }
 
     // ── logging shortcuts ────────────────────────────────────────────

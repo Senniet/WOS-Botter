@@ -12,6 +12,26 @@ public class TaskStateData {
     /** High-level execution classification. */
     public enum ExecutionPhase { IDLE, PENDING, EXECUTING, COMPLETED }
 
+    /** Outcome of the latest attempt; independent from queue/schedule state. */
+    public enum ExecutionOutcome { NOT_RUN, RUNNING, SUCCEEDED, DEFERRED, PREEMPTED, FAILED, UNKNOWN }
+    private ExecutionOutcome executionOutcome = ExecutionOutcome.NOT_RUN;
+    private String executionDetail;
+    private LocalDateTime lastAttemptAt;
+    private LocalDateTime lastSuccessfulAt;
+    public LocalDateTime getLastSuccessfulAt() { return lastSuccessfulAt; }
+    public void setLastSuccessfulAt(LocalDateTime time) { this.lastSuccessfulAt = time; }
+
+
+    public ExecutionOutcome getExecutionOutcome() { return executionOutcome; }
+    public void setExecutionOutcome(ExecutionOutcome outcome) {
+        this.executionOutcome = outcome == null ? ExecutionOutcome.UNKNOWN : outcome;
+    }
+    public String getExecutionDetail() { return executionDetail; }
+    public void setExecutionDetail(String detail) { this.executionDetail = detail; }
+    public LocalDateTime getLastAttemptAt() { return lastAttemptAt; }
+    public void setLastAttemptAt(LocalDateTime time) { this.lastAttemptAt = time; }
+
+
     private Long ownerProfileRef;
     private int taskCode;
     private String taskLabel;

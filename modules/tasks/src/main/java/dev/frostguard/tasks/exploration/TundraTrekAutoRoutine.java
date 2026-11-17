@@ -280,21 +280,23 @@ public class TundraTrekAutoRoutine extends DelayedTask {
 
         logInfo("Skip button found - using as Auto alternative");
 
-        // Double-tap skip for UI rebuild
+        // One detected Skip action is sufficient. The previous second tap
+        // reused stale coordinates after the screen could already have changed.
         tapInside(skipBtn);
         sleepTask(500);
-        tapInside(skipBtn);
-        sleepTask(3500);
 
-        // After skip, try Auto button
-        if (tryDirectAutoButton()) {
-            logInfo("Auto button activated successfully after Skip button");
+        // A Skip tap is not proof that the Auto menu opened. Require the
+        // checkbox evidence used by the direct Auto path before proceeding.
+        if (isCheckboxVisible()) {
+            logInfo("Auto checkbox visible after Skip");
             return true;
         }
-
-        // Skip worked but Auto still not active - may still be valid state
-        logInfo("Skip button clicked but Auto not verified. Proceeding anyway.");
-        return true;
+        if (tryDirectAutoButton()) {
+            logInfo("Auto checkbox verified after Skip and Auto");
+            return true;
+        }
+        logWarning("Skip dispatched but Auto checkbox not visible; not proceeding blindly");
+        return false;
     }
 
     /**

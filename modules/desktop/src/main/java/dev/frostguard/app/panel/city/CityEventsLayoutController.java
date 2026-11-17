@@ -31,7 +31,10 @@ public class CityEventsLayoutController extends AbstractProfileController {
 		offsetFields().forEach(binding -> textFieldMappings.put(binding.control(), binding.configKey()));
 		comboBoxMondayRefinements.getItems().setAll(WEEKLY_REFINEMENT_WINDOWS);
 		comboBoxMappings.put(comboBoxMondayRefinements, ConfigurationKeyEnum.INT_WEEKLY_RFC);
-		checkBoxExplorationQuickDeploy.disableProperty().bind(checkBoxDoExploration.selectedProperty().not());
+        checkBoxExplorationQuickDeploy.disableProperty().bind(checkBoxDoExploration.selectedProperty().not());
+        // Auto scheduling is an option for Claim daily missions, not an
+        // independent task. Keep its saved setting when the parent is off.
+        checkBoxAutoScheduleDailyMission.disableProperty().bind(checkBoxDailyMission.selectedProperty().not());
 		initializeChangeEvents();
 	}
 

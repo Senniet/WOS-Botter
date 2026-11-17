@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0b1325">
+  <title>SurvivalOps · QA Dashboard</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/live.css">
+  <link rel="stylesheet" href="/templates.css">
+  <link rel="stylesheet" href="/qa.css">
+  <link rel="stylesheet" href="/autoqa.css">
+  <link rel="stylesheet" href="/inspector.css">
+  <script defer src="/app.js?v=qa-save-20261115b"></script>
+  <script defer src="/live.js"></script>
+  <script defer src="/templates.js"></script>
+  <script defer src="/autoqa.js"></script>
+  <script defer src="/inspector.js"></script>
+</head>
+<body>
+<div id="login" class="login-overlay" hidden>
+ <form id="login-form" class="login-card">
+  <div class="brand-logo">S<span>O</span></div>
+  <div class="eyebrow">PRIVÉ · LAN DASHBOARD</div>
+  <h1>SurvivalOps kwaliteitscontrole</h1>
+  <p>Log in om de gezamenlijke takenlijst, meldingen en testresultaten te bekijken of bij te werken.</p>
+  <label for="password">Toegangswachtwoord</label>
+  <input id="password" name="password" type="password" autocomplete="current-password" required autofocus placeholder="Wachtwoord">
+  <div id="login-error" class="error-text" role="alert"></div>
+  <button class="primary" type="submit">Dashboard openen</button>
+ </form>
+</div>
+<div id="app" hidden>
+<header class="topbar">
+ <div class="topbar-inner">
+  <div class="brand"><div class="brand-logo small">S<span>O</span></div><div><strong>SurvivalOps</strong><div class="brand-sub">QA Control Center <span class="bullet">·</span> Gedeelde takenlijst</div></div></div>
+  <div class="top-actions"><span class="private"><span class="dot"></span> LAN · webserver</span><button id="autoqa-nav" class="ghost" type="button">▣ Autotest</button><button id="template-nav" class="ghost" type="button">▧ Templates</button><button id="live-nav" class="ghost" type="button">◉ Live diagnostiek</button><button id="refresh" class="ghost" type="button" title="Diagnostiek opnieuw inladen">↻ Vernieuwen</button><button id="logout" class="ghost" type="button">Uitloggen</button></div>
+ </div>
+</header>
+<main class="shell">
+ <div class="hero">
+  <div><div class="eyebrow">GEMEENSCHAPPELIJKE PROJECTSTATUS</div><h1>Alles testen. Niets vergeten.</h1><p>Dezelfde taakstatus voor jou en ChatGPT. Een vinkje is een handmatige bevestiging; fouten en screenshots uit de diagnostiek staan er apart bij.</p></div>
+  <div class="hero-side"><span id="updated" class="muted">Status laden…</span><a href="https://github.com/Senniet/WOS-Botter/issues/35" target="_blank" rel="noopener noreferrer">Project op GitHub ↗</a></div>
+ </div>
+ <section class="stats" id="stats" aria-label="Voortgang"></section>
+ <div id="workspace" class="workspace">
+  <section class="task-panel">
+   <div class="panel-heading">
+    <div><h2>Alle taken <span id="show-count" class="count"></span></h2><div class="muted">Kies een taak om de details en openstaande fouten te bekijken</div></div>
+    <button id="only-issues" type="button" class="outline">Alleen aandachtspunten</button>
+   </div>
+   <div class="filters">
+     <div class="search-wrap"><span>⌕</span><input id="search" type="search" placeholder="Zoek taak, ID of fout…" aria-label="Zoeken"></div>
+     <select id="category" aria-label="Categorie"><option value="">Alle categorieën</option></select>
+     <select id="status" aria-label="Status">
+      <option value="">Alle statussen</option><option value="not_tested">Nog niet getest</option><option value="testing">In onderzoek</option><option value="working">Lijkt te werken</option><option value="broken">Werkt niet</option><option value="blocked">Geblokkeerd</option><option value="verified">Afgevinkt</option>
+     </select>
+   </div>
+   <div class="column-title"><span>Taak</span><span>Status</span><span>Meldingen</span></div>
+   <div id="task-list" class="task-list" aria-live="polite"></div>
+   <div id="empty" class="empty" hidden>Geen taken gevonden met deze filters.</div>
+  </section>
+  <aside class="detail-panel" id="detail-panel">
+    <div id="detail" class="detail-inner"><div class="detail-placeholder">Selecteer een taak om verder te gaan.</div></div>
+  </aside>
+ </div>
+ <section id="autoqa-section" class="autoqa-panel" hidden>
+  <div class="autoqa-head">
+    <div><div class="eyebrow">SERVE-EMU · GEÏSOLEERDE TESTEMULATOR</div><h2>Autonome testcontroller</h2>
+    <p>Testwachtrij en screenshots per taak. De eerste fase is alleen observeren: geen klikken, uitgaven of automatische QA-goedkeuring.</p></div>
+    <button id="autoqa-back" type="button" class="ghost">Terug naar taken</button>
+  </div>
+  <div id="autoqa-device" class="autoqa-device"></div>
+  <div class="autoqa-actions"><label for="autoqa-task">Taak</label><select id="autoqa-task"></select>
+   <button id="autoqa-enqueue" type="button" class="primary">Observatietest starten</button>
+   <button id="autoqa-navigate" type="button" class="outline" hidden>Veilige Exploration-navigatie testen</button>
+   <button id="autoqa-claim" type="button" class="outline" hidden>Gratis Daily Claim All testen</button>
+   <button id="autoqa-refresh" type="button" class="outline">Vernieuwen</button>
+   <button id="autoqa-pause" type="button" class="outline">⏸ Testcontroller pauzeren</button></div>
+  <p id="autoqa-feedback" role="status" class="muted"></p>
+  <section class="autoqa-audit"><h3>Automatische controle van alle 62 taken</h3>
+   <p class="muted">Historische Task Coach-resultaten bepalen de onderzoekvolgorde, niet of een taak definitief werkt. Ook een scheduler-uitkomst SUCCEEDED is nog geen bewijs van een opgehaalde beloning.</p>
+   <div id="autoqa-audit-summary" class="muted">Audit laden…</div>
+   <div id="autoqa-audit-list" class="autoqa-audit-list"></div>
+  </section>
+  <div class="autoqa-grid"><div><h3>Testwachtrij en resultaten</h3><div id="autoqa-runs" class="autoqa-runs"></div></div>
+  <div><h3>Testbewijs</h3><div id="autoqa-detail" class="autoqa-detail">Selecteer een run om het bewijs te bekijken.</div></div></div>
+ </section>
+ <section id="live-section" class="live-dashboard" hidden>
+   <div class="live-header">
+     <div><div class="eyebrow">AUTOMATISCH UIT DE SURVIVALOPS DIAGNOSTIEK</div>
+       <h2>Live diagnostiek</h2>
+       <p>Inkomende gebeurtenissen, foutmeldingen, debugregels en screenshots. Alleen nieuwe uploads worden automatisch toegevoegd.</p>
+     </div>
+     <div class="live-header-actions">
+       <span id="live-indicator" class="live-indicator">Verbinding controleren…</span>
+       <button id="live-back" class="outline" type="button">← Terug naar taken</button>
+     </div>
+   </div>
+   <div id="live-overview" class="live-overview"></div>
+   <div id="live-connection" class="live-connection" role="status">Diagnostiek controleren…</div>
+   <div class="live-toolbar">
+     <div class="search-wrap"><span>⌕</span><input id="live-search" type="search" placeholder="Zoek in taak of soort melding…" aria-label="Zoek diagnostiek"></div>
+     <select id="live-task" aria-label="Filter op taak"><option value="all">Alle taken en systemen</option><option value="system">Algemene herkenning / systeem</option></select>
+     <select id="live-severity" aria-label="Ernst"><option value="all">Alle meldingen</option><option value="error">Fouten</option><option value="warning">Waarschuwingen</option><option value="notice">Overige / debug</option></select>
+     <select id="live-period" aria-label="Tijdsperiode"><option value="24">Afgelopen 24 uur</option><option value="72">Afgelopen 3 dagen</option><option value="168">Afgelopen 7 dagen</option><option value="336">Afgelopen 14 dagen</option><option value="0">Alle opgeslagen meldingen</option></select>
+     <button id="live-pause" class="outline" type="button" aria-pressed="false">⏸ Pauzeren</button>
+     <button id="live-refresh" class="outline" type="button">↻ Nu ophalen</button>
+   </div>
+   <div class="live-columns">
+     <div class="live-list-panel">
+       <div class="live-list-heading"><span>GEBEURTENISSEN</span><span id="live-results">—</span></div>
+       <div id="live-events" class="live-events" aria-live="polite"></div>
+       <div id="live-empty" class="empty" hidden>Geen meldingen voor deze filters.</div>
+       <button id="live-more" class="live-more" type="button" hidden>Oudere meldingen laden</button>
+     </div>
+     <aside class="live-detail-panel"><div id="live-detail" class="live-detail-inner"><div class="detail-placeholder">Selecteer een melding om de debuggegevens en screenshot te bekijken.</div></div></aside>
+   </div>
+ </section>
+ <section id="template-section" class="audit-dashboard" hidden>
+   <div class="audit-heading">
+     <div><div class="eyebrow">VOLLEDIGE INVENTARIS · ALLE MEEGELEVERDE TEMPLATES</div>
+       <h2>Templatecontrole</h2>
+       <p>Vergelijk originele Frostguard-afbeeldingen, ontbrekende bestanden, werkelijk waargenomen herkenning en codegebruik. Alleen-lezen: geen automatische klikken of templatevervanging.</p>
+     </div><button id="template-back" class="outline" type="button">← Terug naar taken</button>
+   </div>
+   <div id="template-summary" class="audit-summary"></div>
+   <details class="audit-method-profiles">
+     <summary>Herkenningsmethoden per taak — vergelijk kleur, schaal en grijswaarden</summary>
+     <p>Dit zijn de werkelijk uitgevoerde zoekmethoden in Task Coach; niet drie verschillende emulators. Vergelijk een nieuwe run met de bestaande metingen.</p>
+     <div id="template-task-profiles" class="audit-method-profile-list"></div>
+   </details>
+   <p class="audit-help">Geen match betekent niet dat een template kapot is. Een geslaagde match betekent niet dat de spelactie werkt. Controleer altijd het juiste scherm en de toestand ná de klik.</p>
+   <div class="audit-filters">
+     <input id="template-query" type="search" placeholder="Zoek naam, scherm of gebruikte taak…" aria-label="Zoek templates">
+     <select id="template-area" aria-label="Filter categorie"><option value="">Alle categorieën</option></select>
+     <select id="template-status" aria-label="Filter bewijsstatus">
+       <option value="">Alle bewijsstatussen</option><option value="missing_asset">Ontbrekend</option><option value="invalid_png">Ongeldig bestand</option>
+       <option value="retired">Uitgeschakeld (vervangen)</option><option value="protected_guard">Behouden veiligheidscontroles</option>
+       <option value="review_observed_misses">Alleen missers in steekproef</option>
+       <option value="observed_hit">Minstens één herkenning</option><option value="not_observed">Nog geen runbewijs</option>
+     </select><label class="inspect-small"><input type="checkbox" id="inspector-show-hidden"> Toon verborgen templates</label>
+       <button id="template-refresh" class="outline" type="button">↻ Ophalen</button>
+   </div>
+   <details class="inspect-tool" open><summary>OCR-status en fouten</summary>
+     <div id="inspector-ocr" class="inspect-help">OCR-diagnose laden…</div>
+     <button id="inspector-ocr-refresh" type="button" class="outline">OCR opnieuw controleren</button>
+   </details>
+   <section class="inspect-tool" id="inspector-flow-section"><h3>Taakflow en Task Coach-runviewer</h3>
+     <div class="inspect-controls"><label for="inspector-task">Taak</label><select id="inspector-task"></select>
+       <a id="inspector-flow-btn" class="outline" href="/taskflow?task=TRAINING_TROOPS" target="_blank" rel="noopener">Open codeflow op aparte pagina</a>
+       <label for="inspector-run">Task Coach-run</label><select id="inspector-run"></select>
+       <button id="inspector-run-btn" type="button" class="outline">Bekijk herkenningen en beelden</button></div>
+     <div class="inspect-cols"><div id="inspector-flow" class="inspect-detail">Selecteer een taak voor de stappen en voorwaarden.</div>
+       <div id="inspector-run-result" class="inspect-detail">Selecteer een Task Coach-run voor de scores.</div></div>
+   </section>
+   <p class="audit-help">Klik hieronder op een template om de originele PNG te zien en hem omkeerbaar te verbergen of als verwijderkandidaat te markeren. Dit verwijdert niets uit SurvivalOps of GitHub.</p>
+   <details class="inspect-tool"><summary>Extra PNG-bestanden die niet in het template-register staan</summary>
+     <p class="muted">Ook niet-geregistreerde afbeeldingen worden hier getoond. Verwijderen is niet beschikbaar zolang niet is gecontroleerd of ze dynamisch worden gebruikt.</p>
+     <div id="inspector-extras" class="inspect-gallery"></div>
+   </details>
+   <div id="template-count" class="muted"></div>
+   <div id="template-list" class="audit-list" aria-live="polite"></div>
+   <button id="template-more" class="outline" type="button" hidden>Meer templates tonen</button>
+ </section>
+ <div class="footer">
+  <span>Gegevens blijven op de eigen webserver. De broncode en automatisering staan op GitHub.</span>
+  <span id="diagnostics-count" class="muted"></span>
+ </div>
+</main>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</div>
+</body>
+</html>

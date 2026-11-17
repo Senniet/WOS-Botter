@@ -39,6 +39,20 @@ class StorehouseStaminaClaimFlowTest {
         assertEquals(1, actions.tooltipChecks);
         assertEquals(1, actions.waitsAfterBack);
         assertEquals(0, actions.regularWaits);
+        assertEquals(2, actions.observations);
+    }
+
+    @Test
+    void stopsEarlyWhenAlreadyBackOnCityScreenInsteadOfRepeatedlySeekingClaim() {
+        ScriptedActions actions = new ScriptedActions().city(true, true);
+        StorehouseStaminaClaimFlow.Result result = StorehouseStaminaClaimFlow.awaitClaimButton(
+                actions, ONE_SECOND, actions.clock::get);
+        assertNull(result.claimButton());
+        assertFalse(result.rewardDialogSeen());
+        assertEquals(2, actions.cityChecks);
+        assertEquals(0, actions.backPresses);
+        assertEquals(1, actions.regularWaits);
+        assertEquals(2, actions.observations);
     }
 
     @Test
@@ -59,6 +73,7 @@ class StorehouseStaminaClaimFlowTest {
         assertEquals(3, actions.tooltipChecks);
         assertEquals(0, actions.waitsAfterBack);
         assertEquals(3, actions.regularWaits);
+        assertEquals(3, actions.observations);
     }
 
     @Test
@@ -77,6 +92,7 @@ class StorehouseStaminaClaimFlowTest {
         assertEquals(1, actions.tooltipChecks);
         assertEquals(1, actions.waitsAfterBack);
         assertEquals(3, actions.regularWaits);
+        assertEquals(4, actions.observations);
     }
 
     private static ImageSearchResultData missed() {
@@ -88,12 +104,20 @@ class StorehouseStaminaClaimFlowTest {
         private final Deque<Boolean> rewardDialogVisible = new ArrayDeque<>();
         private final Deque<ImageSearchResultData> claimButtons = new ArrayDeque<>();
         private final Deque<Boolean> tooltipVisible = new ArrayDeque<>();
+        private final Deque<Boolean> cityVisible = new ArrayDeque<>();
+        private int cityChecks;
         private int rewardDialogChecks;
         private int claimButtonChecks;
         private int tooltipChecks;
         private int backPresses;
         private int waitsAfterBack;
         private int regularWaits;
+        private int observations;
+
+        @Override
+        public void beginObservation() {
+            observations++;
+        }
 
         ScriptedActions rewardDialog(boolean... visible) {
             for (boolean value : visible) {
@@ -114,6 +138,17 @@ class StorehouseStaminaClaimFlowTest {
                 tooltipVisible.add(value);
             }
             return this;
+        }
+
+        ScriptedActions city(boolean... visible) {
+            for (boolean value : visible) cityVisible.add(value);
+            return this;
+        }
+
+        @Override
+        public boolean isBackAtCity() {
+            cityChecks++;
+            return !cityVisible.isEmpty() && cityVisible.removeFirst();
         }
 
         @Override

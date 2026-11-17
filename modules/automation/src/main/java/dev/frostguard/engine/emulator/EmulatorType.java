@@ -13,6 +13,11 @@ public enum EmulatorType {
     MEMU("MEmu Player", ConfigurationKeyEnum.MEMU_PATH_STRING, "memuc.exe",
             "C:\\Program Files\\Microvirt\\MEmu"),
 
+    BLUESTACKS("BlueStacks 5", ConfigurationKeyEnum.BLUESTACKS_PATH_STRING, "HD-Player.exe",
+            "C:\\Program Files\\BlueStacks_nxt"),
+
+    SERVE_EMU("serve-emu (TrueNAS / remote ADB)", ConfigurationKeyEnum.SERVE_EMU_ADB_ENDPOINTS_STRING, "", ""),
+
     LDPLAYER("LDPlayer", ConfigurationKeyEnum.LDPLAYER_PATH_STRING, "ldconsole.exe",
             "C:\\LDPlayer\\LDPlayer9");
 
@@ -33,7 +38,7 @@ public enum EmulatorType {
     public ConfigurationKeyEnum getConfigEnum() { return cfgKey; }
     public String getExecutableName(){ return exe; }
 
-    public String getDefaultPath()   { return Paths.get(fallbackDir, exe).toString(); }
+    public String getDefaultPath()   { return this == SERVE_EMU ? "" : Paths.get(fallbackDir, exe).toString(); }
 
     public String resolvePath(String override) {
         return (override == null || override.isBlank())

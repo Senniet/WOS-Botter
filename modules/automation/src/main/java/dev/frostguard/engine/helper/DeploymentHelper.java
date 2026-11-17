@@ -2,6 +2,7 @@ package dev.frostguard.engine.helper;
 
 import dev.frostguard.api.configs.TemplatesEnum;
 import dev.frostguard.api.domain.AccountDescriptor;
+import dev.frostguard.api.domain.AreaData;
 import dev.frostguard.api.domain.ImageSearchResultData;
 import dev.frostguard.api.domain.RawImageData;
 import dev.frostguard.engine.emulator.EmulatorController;
@@ -71,19 +72,22 @@ public class DeploymentHelper {
 
         long travelSeconds = readTravelTimeSeconds();
 
-        Integer readCost = integerReader.attemptRecognition(
+        var costRead = integerReader.attemptRecognitionDetailed(
                 CommonGameAreas.SPENT_STAMINA_OCR_AREA,
                 3, 100L,
                 CommonOCRSettings.SPENT_STAMINA_SETTINGS,
                 txt -> RegexNumberParser.conformsTo(txt, CommonOCRSettings.NUMBER_PATTERN),
                 txt -> RegexNumberParser.extractByPattern(txt, CommonOCRSettings.NUMBER_PATTERN));
-        boolean fallback = readCost == null || readCost < 1 || readCost > maxPlausibleStaminaCost;
+        Integer readCost = costRead.value();
+        boolean fallback = !costRead.accepted() || readCost == null
+                || readCost < 1 || readCost > maxPlausibleStaminaCost;
         int staminaCost = fallback ? maxPlausibleStaminaCost : readCost;
 
         if (fallback) {
-            log.warn("Deployment stamina cost "
-                    + (readCost == null ? "unreadable" : readCost)
-                    + " is out of range [1.." + maxPlausibleStaminaCost + "]; assuming "
+            log.warn("Deployment stamina cost unavailable or implausible: status=" + costRead.status()
+                    + " value=" + readCost + " attempts=" + costRead.attempts()
+                    + (costRead.failure() == null ? "" : " failure=" + costRead.failure())
+                    + "; valid range [1.." + maxPlausibleStaminaCost + "], conservatively assuming "
                     + maxPlausibleStaminaCost);
         }
         log.info("Deployment screen: travelSeconds=" + travelSeconds
@@ -93,15 +97,19 @@ public class DeploymentHelper {
     }
 
     public long readTravelTimeSeconds() {
-        Duration travel = durationReader.attemptRecognition(
+        var travelRead = durationReader.attemptRecognitionDetailed(
                 CommonGameAreas.TRAVEL_TIME_OCR_AREA,
                 3, 100L,
                 CommonOCRSettings.TRAVEL_TIME_SETTINGS,
                 GameTimeUtils::isAcceptedFormat,
                 GameTimeUtils::parseDuration);
+        Duration travel = travelRead.value();
         long travelSeconds = travel == null ? 0 : travel.getSeconds();
-        if (travel == null) {
-            log.warn("Deployment travel-time OCR failed");
+        if (!travelRead.accepted() || travel == null) {
+            log.warn("Deployment travel-time OCR unavailable: status=" + travelRead.status()
+                    + " attempts=" + travelRead.attempts()
+                    + (travelRead.failure() == null ? "" : " failure=" + travelRead.failure())
+                    + "; callers must use their conservative travel-time fallback");
         }
         return travelSeconds;
     }
@@ -191,17 +199,39 @@ public class DeploymentHelper {
      * screen anchor is required before callers record stamina or a march.
      */
     public LaunchCheck verifyLaunchTransition() {
-        ImageSearchResultData deploy = templates.locatePattern(
-                TemplatesEnum.DEPLOY_BUTTON,
-                search(CommonGameAreas.RALLY_BOTTOM_BUTTON_BAR, 3, 85));
-        ImageSearchResultData world = templates.locatePattern(
-                TemplatesEnum.GAME_HOME_WORLD,
-                TemplateSearchHelper.SearchConfig.builder()
-                        .withMaxAttempts(3)
-                        .withDelay(200)
-                        .withThreshold(85)
-                        .build());
-        return classifyLaunchCheck(deploy.isFound(), world.isFound());
+        return verifyLaunchTransition(TemplatesEnum.DEPLOY_BUTTON);
+    }
+
+    /** Check the specific routine's Deploy button and both verified world
+     * anchor variants. A disappearing button alone is NOT success. */
+    public LaunchCheck verifyLaunchTransition(TemplatesEnum deploymentButton) {
+        var deployArea = launchButtonArea(deploymentButton);
+        ImageSearchResultData deploy = templates.locatePattern(deploymentButton,
+                search(deployArea, 2, 85));
+        AreaData anchor = AreaData.of(590, 1145, 715, 1275);
+        var worldConfig = TemplateSearchHelper.SearchConfig.builder()
+                .withMaxAttempts(2).withDelay(160).withThreshold(90)
+                .withArea(anchor).build();
+        boolean atWorld = templates.locatePattern(TemplatesEnum.SERVE_EMU_WORLD_ANCHOR_CURRENT,
+                worldConfig).isFound();
+        if (!atWorld) {
+            atWorld = templates.locatePattern(TemplatesEnum.GAME_HOME_WORLD,
+                    TemplateSearchHelper.SearchConfig.builder()
+                            .withMaxAttempts(2).withDelay(160).withThreshold(85)
+                            .build()).isFound();
+        }
+        return classifyLaunchCheck(deploy.isFound(), atWorld);
+    }
+
+    static AreaData launchButtonArea(TemplatesEnum deploymentButton) {
+        // Gather formation uses a right-hand blue Deploy footer. The rally
+        // bottom bar ends at x=460, so using it for SERVE_EMU_GATHER_DEPLOY
+        // missed the button entirely on the observed 720x1280 screen.
+        if (deploymentButton == TemplatesEnum.SERVE_EMU_GATHER_DEPLOY)
+            return AreaData.of(400, 1140, 705, 1279);
+        if (deploymentButton == TemplatesEnum.GATHER_DEPLOY_BUTTON)
+            return AreaData.of(75, 950, 720, 1279);
+        return CommonGameAreas.RALLY_BOTTOM_BUTTON_BAR;
     }
 
     static LaunchCheck classifyLaunchCheck(boolean deployStillVisible, boolean worldAnchorVisible) {

@@ -301,13 +301,8 @@ private PriceCheck validateItemPriceFlow(int cardIndex, AllianceShopItemEnum sho
 
 private Integer scanAvailableQuantity(int cardIndex, AllianceShopItemEnum shopItem) {
         AreaData quantityArea = resolveQuantityArea(cardIndex);
-
-        Integer availableQuantity = integerHelper.attemptRecognition(
-                quantityArea.topLeft(),
-                quantityArea.bottomRight(),
-                RETRIES_OCR_VALUE,
-                1000L,
-
+        var result = integerHelper.attemptRecognitionDetailed(
+                quantityArea.topLeft(), quantityArea.bottomRight(), RETRIES_OCR_VALUE, 1000L,
                 OcrSettingsData.assembler()
                         .charWhitelist("0123456789")
                         .setTextColor(Color.white)
@@ -315,13 +310,8 @@ private Integer scanAvailableQuantity(int cardIndex, AllianceShopItemEnum shopIt
                         .build(),
                 text -> RegexNumberParser.conformsTo(text, Pattern.compile(".*?(\\d+).*")),
                 text -> RegexNumberParser.extractByPattern(text, Pattern.compile(".*?(\\d+).*")));
-
-        if (availableQuantity == null) {
-            logWarning(routineLogAllianceShopLine("Could not read available quantity for item: "
-                    + shopItem.getDisplayName() + "."));
-        }
-
-        return availableQuantity;
+        logOcrReadOutcome("available quantity for " + shopItem.getDisplayName(), result);
+        return result.value();
     }
 
 private boolean reachShopAndReadCoins() {
@@ -500,18 +490,30 @@ private Integer readCoinsFromShopDetails() {
     }
 
 private Integer scanCurrentCoins() {
-        return integerHelper.attemptRecognition(
-                COINS_TOP_LEFT_VALUE,
-                COINS_BOTTOM_RIGHT_VALUE,
-                RETRIES_OCR_VALUE,
-                200L,
-
+        var result = integerHelper.attemptRecognitionDetailed(
+                COINS_TOP_LEFT_VALUE, COINS_BOTTOM_RIGHT_VALUE, RETRIES_OCR_VALUE, 200L,
                 OcrSettingsData.assembler()
                         .charWhitelist("0123456789")
                         .textLayout(OcrSettingsData.TextLayout.SINGLE_LINE)
                         .build(),
                 text -> RegexNumberParser.conformsTo(text, Pattern.compile(".*?(\\d+).*")),
                 text -> RegexNumberParser.extractByPattern(text, Pattern.compile(".*?(\\d+).*")));
+        logOcrReadOutcome("current alliance coins", result);
+        return result.value();
+    }
+
+private void logOcrReadOutcome(String field, dev.frostguard.vision.ocr.ResilientOcrExecutor.RecognitionResult<Integer> result) {
+        if (result.accepted()) {
+            logDebug(routineLogAllianceShopLine("OCR read " + field + " successfully after "
+                    + result.attempts() + " attempt(s)."));
+            return;
+        }
+        String reason = result.status() == dev.frostguard.vision.ocr.ResilientOcrExecutor.Status.FAILED
+                ? "OCR/capture failed" : "text did not match the expected number format";
+        logWarning(routineLogAllianceShopLine("OCR could not read " + field + " (" + reason
+                + ", status=" + result.status() + ", attempts=" + result.attempts()
+                + (result.failure() == null ? "" : ", failure=" + result.failure())
+                + "). Skipping this purchase path."));
     }
 
 private AreaData resolvePriceArea(int cardNumber) {
@@ -696,24 +698,13 @@ private void chooseQuantity(int qty) {
 
 private Integer scanItemPrice(int cardIndex, AllianceShopItemEnum shopItem) {
         AreaData priceArea = resolvePriceArea(cardIndex);
-
-        Integer itemPrice = integerHelper.attemptRecognition(
-                priceArea.topLeft(),
-                priceArea.bottomRight(),
-                RETRIES_OCR_VALUE,
-                1000L,
-
-                OcrSettingsData.assembler()
-                        .charWhitelist("0123456789")
-                        .build(),
+        var result = integerHelper.attemptRecognitionDetailed(
+                priceArea.topLeft(), priceArea.bottomRight(), RETRIES_OCR_VALUE, 1000L,
+                OcrSettingsData.assembler().charWhitelist("0123456789").build(),
                 text -> RegexNumberParser.conformsTo(text, Pattern.compile(".*?(\\d+).*")),
                 text -> RegexNumberParser.extractByPattern(text, Pattern.compile(".*?(\\d+).*")));
-
-        if (itemPrice == null) {
-            logWarning(routineLogAllianceShopLine("Could not read price for item: " + shopItem.getDisplayName()));
-        }
-
-        return itemPrice;
+        logOcrReadOutcome("price for " + shopItem.getDisplayName(), result);
+        return result.value();
     }
 
 private boolean hasSoldOut(AreaData cardCoords, AllianceShopItemEnum shopItem) {

@@ -263,8 +263,10 @@ public class NomadicMerchantRoutine extends DelayedTask {
 
     private ImageSearchResultData findVipOffer() {
         phase = NomadicMerchantPhase.SEARCHING_VIP;
-        boolean vipBuyEnabled = profile.getConfig(ConfigurationKeyEnum.BOOL_NOMADIC_MERCHANT_VIP_POINTS,
-                Boolean.class);
+        Boolean configuredVipPurchase = profile.getConfig(
+                ConfigurationKeyEnum.BOOL_NOMADIC_MERCHANT_VIP_POINTS, Boolean.class);
+        boolean vipBuyEnabled = vipSpendingAllowed(
+                emuManager.getSelectedEmulatorType(), configuredVipPurchase);
         if (!vipBuyEnabled) {
             return new ImageSearchResultData(false, null, 0);
         }
@@ -273,6 +275,14 @@ public class NomadicMerchantRoutine extends DelayedTask {
                 TemplatesEnum.NOMADIC_MERCHANT_VIP,
                 SearchConfigConstants.DEFAULT_SINGLE);
         return vipResult;
+    }
+
+    static boolean vipSpendingAllowed(dev.frostguard.engine.emulator.EmulatorType emulator,
+                                      Boolean purchaseEnabled) {
+        // Serve-EMU runs the free-claims-only bot profile. A retained legacy
+        // preference must never authorize gem purchases or blind confirms.
+        return emulator != dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU
+                && Boolean.TRUE.equals(purchaseEnabled);
     }
 
     /** @return 1 when a VIP purchase is confirmed, -1 when it is unconfirmed */

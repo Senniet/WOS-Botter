@@ -1,0 +1,16 @@
+[Unit]
+Description=SurvivalOps LAN Diagnostics HTTPS Inbox
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/michel/survivalops-diagnostics
+ExecStart=/usr/bin/python3 /home/michel/survivalops-diagnostics/server.py
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

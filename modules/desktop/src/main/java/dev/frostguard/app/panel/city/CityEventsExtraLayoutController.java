@@ -54,6 +54,16 @@ public class CityEventsExtraLayoutController extends AbstractProfileController {
     @FXML
     private CheckBox checkBoxHeroRecruitment;
     @FXML
+    private CheckBox checkBoxHeroAdvancedFree;
+    @FXML
+    private CheckBox checkBoxHeroEpicFree;
+    @FXML
+    private CheckBox checkBoxHeroAdvancedKeys;
+    @FXML
+    private CheckBox checkBoxHeroEpicKeys;
+    @FXML
+    private CheckBox checkBoxHeroPointsChest;
+    @FXML
     private CheckBox checkBoxTrekSupplies;
     @FXML
     private CheckBox checkBoxTrekAutomation;
@@ -93,6 +103,10 @@ public class CityEventsExtraLayoutController extends AbstractProfileController {
     @FXML
     private void initialize() {
         cityRoutineToggles().forEach(toggle -> checkBoxMappings.put(toggle.control(), toggle.configKey()));
+        List.of(checkBoxHeroAdvancedFree, checkBoxHeroEpicFree,
+                checkBoxHeroAdvancedKeys, checkBoxHeroEpicKeys,
+                checkBoxHeroPointsChest).forEach(control ->
+                control.disableProperty().bind(checkBoxHeroRecruitment.selectedProperty().not()));
         comboBoxArenaExtraAttempts.getItems().setAll(EXTRA_ATTEMPT_OPTIONS);
         comboBoxArenaAlliancePolicy.getItems().setAll(ALLIANCE_POLICY_OPTIONS);
         comboBoxArenaServerPolicy.getItems().setAll(SERVER_POLICY_OPTIONS);
@@ -112,6 +126,11 @@ public class CityEventsExtraLayoutController extends AbstractProfileController {
             new ToggleBinding(checkBoxStorehouseChest, ConfigurationKeyEnum.STOREHOUSE_CHEST_BOOL),
             new ToggleBinding(checkBoxDailyLabyrinth, ConfigurationKeyEnum.DAILY_LABYRINTH_BOOL),
             new ToggleBinding(checkBoxHeroRecruitment, ConfigurationKeyEnum.BOOL_HERO_RECRUITMENT),
+            new ToggleBinding(checkBoxHeroAdvancedFree, ConfigurationKeyEnum.HERO_RECRUIT_ADVANCED_FREE_BOOL),
+            new ToggleBinding(checkBoxHeroEpicFree, ConfigurationKeyEnum.HERO_RECRUIT_EPIC_FREE_BOOL),
+            new ToggleBinding(checkBoxHeroAdvancedKeys, ConfigurationKeyEnum.HERO_RECRUIT_ADVANCED_KEYS_BOOL),
+            new ToggleBinding(checkBoxHeroEpicKeys, ConfigurationKeyEnum.HERO_RECRUIT_EPIC_KEYS_BOOL),
+            new ToggleBinding(checkBoxHeroPointsChest, ConfigurationKeyEnum.HERO_RECRUIT_POINTS_CHEST_BOOL),
             new ToggleBinding(checkBoxTrekSupplies, ConfigurationKeyEnum.TUNDRA_TREK_SUPPLIES_BOOL),
             new ToggleBinding(checkBoxTrekAutomation, ConfigurationKeyEnum.TUNDRA_TREK_AUTOMATION_BOOL),
             new ToggleBinding(checkBoxArena, ConfigurationKeyEnum.ARENA_TASK_BOOL),

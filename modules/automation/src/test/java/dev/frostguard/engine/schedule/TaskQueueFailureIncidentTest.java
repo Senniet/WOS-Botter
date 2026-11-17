@@ -7,11 +7,14 @@ import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.api.domain.LogMessageData;
 import dev.frostguard.api.runtime.WorkspacePaths;
 import dev.frostguard.api.runtime.WorkspaceSession;
+import dev.frostguard.data.entity.DailyTask;
+import dev.frostguard.data.repository.DailyTaskRepository;
 import dev.frostguard.data.repository.TaskFailureStreakRepository;
 import dev.frostguard.engine.error.StartupCaptureException;
 import dev.frostguard.engine.service.ActionRequiredIncidentService;
 import dev.frostguard.engine.service.LoggingService;
 import dev.frostguard.engine.service.ProfileService;
+import dev.frostguard.engine.service.ScheduleService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -85,6 +88,35 @@ class TaskQueueFailureIncidentTest {
         assertEquals(1, nextSequence.executionCount);
         assertEquals(ActionRequiredIncidentState.RECOVERED, incidents(profile).getFirst().state(),
                 "a new sequence must not reopen history before reaching the threshold again");
+    }
+
+    @Test
+    void failedExecutionAdjustsTheNextRunWithoutAdvancingTheLastSuccessfulCompletion() {
+        AccountDescriptor profile = new AccountDescriptor(
+                null, "Schedule adjustment " + UUID.randomUUID(), "2", false, 100L, 30L);
+        assertTrue(ProfileService.obtain().createAccount(profile));
+
+        LocalDateTime previousSuccess = LocalDateTime.of(2026, 10, 1, 12, 0);
+        ScheduleService.obtain().persistNextSchedule(
+                profile, TpDailyTaskEnum.INITIALIZE, LocalDateTime.now().plusMinutes(30), null);
+        DailyTask initialRecord = DailyTaskRepository.getRepository()
+                .findRoutine(profile.getId(), TpDailyTaskEnum.INITIALIZE)
+                .orElseThrow();
+        initialRecord.setCompletedAt(previousSuccess);
+        assertTrue(DailyTaskRepository.getRepository().saveDailyTask(initialRecord));
+
+        AlternatingFailureTask task = new AlternatingFailureTask(profile);
+        RecordingQueue queue = new RecordingQueue(profile);
+        queue.enqueue(task);
+        queue.runSchedulerTick();
+
+        DailyTask afterFailure = DailyTaskRepository.getRepository()
+                .findRoutine(profile.getId(), TpDailyTaskEnum.INITIALIZE)
+                .orElseThrow();
+        assertEquals(previousSuccess, afterFailure.getCompletedAt(),
+                "a failed execution must not be persisted as the last successful completion");
+        assertTrue(afterFailure.getNextRunAt().isAfter(LocalDateTime.now().plusMinutes(4)),
+                "the bounded failure retry schedule must still be persisted");
     }
 
     @Test

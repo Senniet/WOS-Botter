@@ -17,15 +17,16 @@ import java.util.Base64;
 
 public final class ProjectManifestSigner {
     static final String PRIVATE_KEY_ENV = "FROSTGUARD_UPDATE_SIGNING_PRIVATE_KEY_BASE64";
+    static final String SURVIVALOPS_PRIVATE_KEY_ENV = "SURVIVALOPS_UPDATE_SIGNING_PRIVATE_KEY_BASE64";
 
     private ProjectManifestSigner() {
     }
 
     public static void main(String[] arguments) throws Exception {
         if (arguments.length == 3 && "sign".equals(arguments[0])) {
-            String privateKey = System.getenv(PRIVATE_KEY_ENV);
+            String privateKey = System.getenv(isSurvivalOps() ? SURVIVALOPS_PRIVATE_KEY_ENV : PRIVATE_KEY_ENV);
             if (privateKey == null || privateKey.isBlank()) {
-                throw new IllegalArgumentException(PRIVATE_KEY_ENV + " is not configured");
+                throw new IllegalArgumentException((isSurvivalOps() ? SURVIVALOPS_PRIVATE_KEY_ENV : PRIVATE_KEY_ENV) + " is not configured");
             }
             byte[] payload = Files.readAllBytes(Path.of(arguments[1]));
             byte[] envelope = sign(payload, ProjectUpdateKey.current().keyId(), privateKey);
@@ -45,6 +46,10 @@ public final class ProjectManifestSigner {
         }
         throw new IllegalArgumentException("Usage: sign <manifest-payload> <signed-envelope> "
                 + "or verify <signed-envelope> or generate <private-key-output> <public-key-output>");
+    }
+
+    private static boolean isSurvivalOps() {
+        return "SurvivalOps".equalsIgnoreCase(System.getProperty("frostguard.brand.name", "").trim());
     }
 
     static byte[] sign(byte[] payload, String keyId, String privateKeyBase64) throws GeneralSecurityException {

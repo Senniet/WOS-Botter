@@ -13,7 +13,7 @@ public final class CommonGameAreas {
     // column. Sign-in/Deals push the column slot down; keep the top edge under
     // the HUD bar and the bottom above the pet/mail buttons.
     public static final AreaData FISHING_HOME_ENTRY = AreaData.of(475, 115, 720, 580);
-    public static final AreaData FISHING_TOURNAMENT_TAB = AreaData.of(45, 105, 225, 175);
+    public static final AreaData FISHING_TOURNAMENT_TAB = AreaData.of(55, 185, 215, 264);
     public static final AreaData FISHING_ICE_CAST_BUTTON = AreaData.of(370, 1140, 670, 1240);
     public static final AreaData FISHING_FREE_BAIT = AreaData.of(497, 1095, 579, 1129);
     public static final AreaData FISHING_DEPTH = AreaData.of(20, 20, 140, 93);
@@ -44,8 +44,10 @@ public final class CommonGameAreas {
 
     public static final AreaData PROFILE_AVATAR        = region(24, 24, 61, 61);
     // The can and stamina value remain in this HUD band in both City and World.
-    public static final AreaData HUD_STAMINA_ENTRY     = region(8, 101, 105, 126);
+    public static final AreaData HUD_STAMINA_ENTRY     = region(8, 163, 86, 193);
     public static final AreaData STAMINA_OCR_AREA      = region(324, 255, 477, 289);
+    // Current 2026 UI moves the visible fraction down by ~35 px.
+    public static final AreaData STAMINA_OCR_AREA_CURRENT = region(315, 284, 477, 327);
     public static final AreaData SPENT_STAMINA_OCR_AREA = region(540, 1215, 590, 1245);
     // English "Tap anywhere to exit" hints are rendered in this lower strip on result overlays.
     public static final AreaData STARTUP_EXIT_HINT_OCR_AREA = region(0, 1160, 719, 1279);
@@ -78,6 +80,24 @@ public final class CommonGameAreas {
     private static final AreaData LEFT_MENU_CITY_TAB_SAMPLE       = region(20, 252, 135, 288);
     private static final AreaData LEFT_MENU_WILDERNESS_TAB_SAMPLE = region(165, 252, 286, 288);
     private static final AreaData LEFT_MENU_DAILY_TAB_SAMPLE      = region(310, 252, 430, 288);
+
+    // Updated 2026 sidebar tabs sit ~35 px below the earlier build.
+    public static AreaData sidebarTabSampleCurrent(SidebarSection section) {
+        return switch (section) {
+            case CITY -> region(20, 291, 135, 322);
+            case WILDERNESS -> region(165, 291, 286, 322);
+            case DAILY -> region(310, 291, 430, 322);
+        };
+    }
+
+    /** Hit zones for the vertically shifted sidebar introduced by the updated UI. */
+    public static AreaData sidebarTabCurrent(SidebarSection section) {
+        return switch (section) {
+            case CITY -> region(9, 285, 146, 331);
+            case WILDERNESS -> region(155, 285, 293, 331);
+            case DAILY -> region(302, 285, 438, 331);
+        };
+    }
 
     public static final AreaData SIDEBAR_CONTENT = region(10, 300, 440, 880);
     public static final AreaData SIDEBAR_ROW_ICON_COLUMN = region(15, 300, 80, 880);

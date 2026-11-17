@@ -72,6 +72,44 @@ class StartupCaptureRetryTest {
         assertTrue(failure.getMessage().contains("bounded task-failure reschedule after capture retry limit"));
     }
 
+    @Test
+    void offlineCaptureTriggersOneRepairThenSucceeds() {
+        AtomicInteger captures = new AtomicInteger();
+        AtomicInteger repairs = new AtomicInteger();
+        RawImageData frame = RawImageData.capture(new byte[] {0, 0, 0, 0}, 1, 1, 32);
+        RawImageData output = StartupCaptureRetry.capture(context("game foreground package verified"),
+                () -> {
+                    if (captures.incrementAndGet() == 1)
+                        throw new RuntimeException("ADB screencap failed", new IllegalStateException("Device is offline"));
+                    return frame;
+                }, ignored -> {}, ignored -> {}, (attempt, failure) -> repairs.incrementAndGet());
+        assertSame(frame, output);
+        assertEquals(1, repairs.get());
+        assertEquals(2, captures.get());
+    }
+
+    @Test
+    void repeatedOfflineFailuresDoNotRestartEndlessly() {
+        AtomicInteger repairs = new AtomicInteger();
+        assertThrows(StartupCaptureException.class, () ->
+                StartupCaptureRetry.capture(context("game foreground package verified"),
+                        () -> { throw new IllegalStateException("Device is offline"); },
+                        ignored -> {}, ignored -> {},
+                        (attempt, failure) -> repairs.incrementAndGet()));
+        assertEquals(1, repairs.get());
+    }
+
+    @Test
+    void otherCaptureErrorsDoNotRestartEmulator() {
+        AtomicInteger repairs = new AtomicInteger();
+        assertThrows(StartupCaptureException.class, () ->
+                StartupCaptureRetry.capture(context("game foreground package verified"),
+                        () -> { throw new IllegalStateException("Malformed screenshot payload"); },
+                        ignored -> {}, ignored -> {},
+                        (attempt, failure) -> repairs.incrementAndGet()));
+        assertEquals(0, repairs.get());
+    }
+
     private static StartupCaptureRetry.CaptureContext context(String lastVerifiedState) {
         return new StartupCaptureRetry.CaptureContext(
                 "1", "127.0.0.1:16416", "home/world pattern inspection", lastVerifiedState);

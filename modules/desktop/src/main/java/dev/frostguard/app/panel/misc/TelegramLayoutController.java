@@ -300,7 +300,7 @@ public class TelegramLayoutController {
                 "Set oLink = oWS.CreateShortcut(\"" + escapeVbsString(shortcut.toString()) + "\")\n" +
                 "oLink.TargetPath = \"" + escapeVbsString(workspaceLauncher.toString()) + "\"\n" +
                 "oLink.WorkingDirectory = \"" + escapeVbsString(workspaceLauncher.getParent().toString()) + "\"\n" +
-                "oLink.Description = \"Frostguard Telegram Watcher (auto-start)\"\n" +
+                "oLink.Description = \"SurvivalOps Telegram Watcher (auto-start)\"\n" +
                 "oLink.WindowStyle = 0\n" +
                 "oLink.Save\n";
             Path vbsFile = Files.createTempFile("frostguard_startup_", ".vbs");

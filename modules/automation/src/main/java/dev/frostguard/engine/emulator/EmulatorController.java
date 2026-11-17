@@ -6,9 +6,11 @@ import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import java.util.concurrent.locks.*;
 
 import dev.frostguard.vision.match.OpenCvPatternLocator;
+import dev.frostguard.engine.helper.EmulatorRecognitionPolicy;
 import dev.frostguard.api.configs.*;
 import dev.frostguard.engine.emulator.instance.*;
 import dev.frostguard.api.domain.*;
@@ -44,9 +46,14 @@ public class EmulatorController {
     private final Set<Thread>        slots        = new HashSet<>();
     private final Map<String,Thread> dev2thread   = new HashMap<>();
     private final Map<Thread,String> thread2dev   = new HashMap<>();
+    // Preserve the physical ADB identity even if an emulator is referred to as
+    // index "0" in one profile and host:port in another.
+    private final Map<Thread,String> thread2key   = new HashMap<>();
     private final Map<String,String> dev2profile  = new ConcurrentHashMap<>();
+    private final Map<String,Long> physicalOwnerProfileIds = new ConcurrentHashMap<>();
     private final Map<String,Long>   cooldowns    = new HashMap<>();
     private EmulatorInstance backend;
+    private volatile EmulatorType selectedType;
     private int maxSlots = 3;
 
     private EmulatorController() {}
@@ -78,13 +85,24 @@ public class EmulatorController {
             case MUMU     -> new MuMuEmulatorInstance(dir);
             case MEMU     -> new MEmuEmulatorInstance(dir);
             case LDPLAYER -> new LDPlayerEmulatorInstance(dir);
+            case BLUESTACKS -> new BlueStacksEmulatorInstance(dir);
+            case SERVE_EMU -> new ServeEmuEmulatorInstance(dir);
         };
-        LOG.info("Backend: {}", kind.getDisplayName());
+        selectedType = kind;
+        LOG.info("Backend: {}; recognition strategy selected per backend", kind.getDisplayName());
 
         // slot capacity
         maxSlots = Optional.ofNullable(cfg.get(ConfigurationKeyEnum.MAX_RUNNING_EMULATORS_INT.name()))
                 .map(Integer::parseInt)
                 .orElse(Integer.parseInt(ConfigurationKeyEnum.MAX_RUNNING_EMULATORS_INT.getDefaultValue()));
+    }
+
+    /** Only the initialized backend determines the recognition policy.
+     * Never infer emulator type from screenshots or profile labels.
+     * Pre-init scheduling tests and cold-start routines may construct their
+     * helpers before a backend exists; null uses the unchanged legacy policy. */
+    public EmulatorType getSelectedEmulatorType() {
+        return selectedType;
     }
 
     private void requireBackend() {
@@ -108,6 +126,7 @@ public class EmulatorController {
     private void dispatchTap(String idx, PointData pt) {
         requireBackend();
         LOG.info("{} tap ({},{}) dev {}", label(idx), pt.getX(), pt.getY(), idx);
+        dev.frostguard.engine.diagnostics.TaskTemplateCoach.tapped(idx, pt);
         backend.touchArea(idx, pt, pt);
     }
 
@@ -148,7 +167,7 @@ public class EmulatorController {
             LOG.info("{} acquired emulator launch lock (dev {})", label(i), i);
             backend.launchEmulator(i);
 
-            long delayMs = readLaunchDelayMs();
+            long delayMs = backend instanceof ServeEmuEmulatorInstance ? 0 : readLaunchDelayMs();
             if (delayMs > 0) {
                 LOG.info("Waiting {} ms before allowing another emulator launch...", delayMs);
                 Thread.sleep(delayMs);
@@ -189,22 +208,37 @@ public class EmulatorController {
         requireBackend(); return backend.readText(idx, a, b, c, reuseFrame);
     }
 
+    private boolean probeAllowed(TemplatesEnum template) {
+        requireBackend();
+        return EmulatorRecognitionPolicy.forEmulator(selectedType).shouldProbe(template);
+    }
+
     // --- template matching ---
 
     public ImageSearchResultData locatePattern(String idx, TemplatesEnum t,
             PointData tl, PointData br, double th) {
+        if (!probeAllowed(t)) return ImageSearchResultData.miss();
         return locatePattern(idx, captureScreen(idx), t, tl, br, th);
     }
 
     public ImageSearchResultData locatePattern(String idx, RawImageData frame,
             TemplatesEnum t, PointData tl, PointData br, double th) {
+        if (!probeAllowed(t)) return ImageSearchResultData.miss();
         requireBackend();
         try { OpenCvPatternLocator.setContextLabel(label(idx));
-              return OpenCvPatternLocator.locatePattern(frame, regionTpl(t.getTemplate()), tl, br, th);
+              ImageSearchResultData result = OpenCvPatternLocator.locatePattern(frame, regionTpl(t.getTemplate()), tl, br, th);
+              if (result == null || !result.isFound()) {
+                  ImageSearchResultData repaired = dev.frostguard.engine.diagnostics.VerifiedTemplateOverrides.tryMatch(
+                          frame, regionTpl(t.getTemplate()), th, tl, br);
+                  if (repaired != null) result = repaired;
+              }
+              dev.frostguard.engine.diagnostics.TaskTemplateCoach.observe(idx, t, "color", th, result, frame, tl, br);
+              return result;
         } finally { OpenCvPatternLocator.clearContextLabel(); }
     }
 
     public ImageSearchResultData locatePattern(String idx, TemplatesEnum t, double th) {
+        if (!probeAllowed(t)) return ImageSearchResultData.miss();
         return locatePattern(idx, captureScreen(idx), t, th);
     }
     public ImageSearchResultData locatePattern(String idx, RawImageData frame, TemplatesEnum t, double th) {
@@ -213,16 +247,26 @@ public class EmulatorController {
 
     public ImageSearchResultData locatePatternMultiScale(String idx, RawImageData frame,
             TemplatesEnum t, PointData tl, PointData br, double th) {
+        if (!probeAllowed(t)) return ImageSearchResultData.miss();
         requireBackend();
         try { OpenCvPatternLocator.setContextLabel(label(idx));
-              return OpenCvPatternLocator.locatePatternMultiScale(frame, regionTpl(t.getTemplate()), tl, br, th);
+              ImageSearchResultData result = OpenCvPatternLocator.locatePatternMultiScale(frame, regionTpl(t.getTemplate()), tl, br, th);
+              if (result == null || !result.isFound()) {
+                  ImageSearchResultData repaired = dev.frostguard.engine.diagnostics.VerifiedTemplateOverrides.tryMatch(
+                          frame, regionTpl(t.getTemplate()), th, tl, br);
+                  if (repaired != null) result = repaired;
+              }
+              dev.frostguard.engine.diagnostics.TaskTemplateCoach.observe(idx, t, "multiscale", th, result, frame, tl, br);
+              return result;
         } finally { OpenCvPatternLocator.clearContextLabel(); }
     }
     public ImageSearchResultData locatePatternMultiScale(String idx, TemplatesEnum t,
             PointData tl, PointData br, double th) {
+        if (!probeAllowed(t)) return ImageSearchResultData.miss();
         return locatePatternMultiScale(idx, captureScreen(idx), t, tl, br, th);
     }
     public ImageSearchResultData locatePatternMultiScale(String idx, TemplatesEnum t, double th) {
+        if (!probeAllowed(t)) return ImageSearchResultData.miss();
         return locatePatternMultiScale(idx, captureScreen(idx), t, ORIGIN, FULL, th);
     }
     public ImageSearchResultData locatePatternMultiScale(String idx, RawImageData frame, TemplatesEnum t, double th) {
@@ -231,9 +275,17 @@ public class EmulatorController {
 
     public ImageSearchResultData locatePatternMono(String idx, TemplatesEnum t,
             PointData tl, PointData br, double th) {
+        if (!probeAllowed(t)) return ImageSearchResultData.miss();
         requireBackend(); RawImageData frame = captureScreen(idx);
         try { OpenCvPatternLocator.setContextLabel(label(idx));
-              return OpenCvPatternLocator.locatePatternMono(frame, regionTpl(t.getTemplate()), tl, br, th);
+              ImageSearchResultData result = OpenCvPatternLocator.locatePatternMono(frame, regionTpl(t.getTemplate()), tl, br, th);
+              if (result == null || !result.isFound()) {
+                  ImageSearchResultData repaired = dev.frostguard.engine.diagnostics.VerifiedTemplateOverrides.tryMatch(
+                          frame, regionTpl(t.getTemplate()), th, tl, br);
+                  if (repaired != null) result = repaired;
+              }
+              dev.frostguard.engine.diagnostics.TaskTemplateCoach.observe(idx, t, "mono", th, result, frame, tl, br);
+              return result;
         } finally { OpenCvPatternLocator.clearContextLabel(); }
     }
     public ImageSearchResultData locatePatternMono(String idx, TemplatesEnum t, double th) {
@@ -242,9 +294,13 @@ public class EmulatorController {
 
     public List<ImageSearchResultData> locateAllPatternsMono(String idx, TemplatesEnum t,
             PointData tl, PointData br, double th, int max) {
+        if (!probeAllowed(t)) return List.of();
         requireBackend(); RawImageData frame = captureScreen(idx);
         try { OpenCvPatternLocator.setContextLabel(label(idx));
-              return OpenCvPatternLocator.locateAllPatternsMono(frame, regionTpl(t.getTemplate()), tl, br, th, max);
+              List<ImageSearchResultData> results = OpenCvPatternLocator.locateAllPatternsMono(
+                      frame, regionTpl(t.getTemplate()), tl, br, th, max);
+              observeMultiple(idx, t, "multi-mono", th, results, frame, tl, br);
+              return results;
         } finally { OpenCvPatternLocator.clearContextLabel(); }
     }
     public List<ImageSearchResultData> locateAllPatternsMono(String idx, TemplatesEnum t, double th, int max) {
@@ -253,20 +309,40 @@ public class EmulatorController {
 
     public List<ImageSearchResultData> locateAllPatterns(String idx, TemplatesEnum t,
             PointData tl, PointData br, double th, int max) {
+        if (!probeAllowed(t)) return List.of();
         requireBackend(); RawImageData frame = captureScreen(idx);
         try { OpenCvPatternLocator.setContextLabel(label(idx));
-              return OpenCvPatternLocator.locateAllPatterns(frame, regionTpl(t.getTemplate()), tl, br, th, max);
+              List<ImageSearchResultData> results = OpenCvPatternLocator.locateAllPatterns(
+                      frame, regionTpl(t.getTemplate()), tl, br, th, max);
+              observeMultiple(idx, t, "multi", th, results, frame, tl, br);
+              return results;
         } finally { OpenCvPatternLocator.clearContextLabel(); }
     }
     public List<ImageSearchResultData> locateAllPatterns(String idx, RawImageData frame,
             TemplatesEnum t, PointData tl, PointData br, double th, int max) {
+        if (!probeAllowed(t)) return List.of();
         requireBackend();
         try { OpenCvPatternLocator.setContextLabel(label(idx));
-              return OpenCvPatternLocator.locateAllPatterns(frame, regionTpl(t.getTemplate()), tl, br, th, max);
+              List<ImageSearchResultData> results = OpenCvPatternLocator.locateAllPatterns(
+                      frame, regionTpl(t.getTemplate()), tl, br, th, max);
+              observeMultiple(idx, t, "multi", th, results, frame, tl, br);
+              return results;
         } finally { OpenCvPatternLocator.clearContextLabel(); }
     }
     public List<ImageSearchResultData> locateAllPatterns(String idx, TemplatesEnum t, double th, int max) {
         return locateAllPatterns(idx, t, ORIGIN, FULL, th, max);
+    }
+
+    private void observeMultiple(String idx, TemplatesEnum template, String method, double threshold,
+                                 List<ImageSearchResultData> results, RawImageData frame,
+                                 PointData tl, PointData br) {
+        ImageSearchResultData strongest = results == null ? null : results.stream()
+                .filter(java.util.Objects::nonNull)
+                .filter(ImageSearchResultData::isFound)
+                .max(java.util.Comparator.comparingDouble(ImageSearchResultData::getMatchScore))
+                .orElse(null);
+        dev.frostguard.engine.diagnostics.TaskTemplateCoach.observe(idx, template, method,
+                threshold, strongest == null ? ImageSearchResultData.miss() : strongest, frame, tl, br);
     }
 
     // --- file-based template searches ---
@@ -320,45 +396,63 @@ public class EmulatorController {
         Thread self = Thread.currentThread();
         String devIdx = profile.getEmulatorNumber();
         if (devIdx == null || devIdx.isBlank()) throw new IllegalArgumentException("Missing emulator number");
+        String deviceKey = slotDeviceKey(devIdx);
 
         lock.lock();
         try {
             // try reuse existing slot
             if (slots.contains(self)) {
                 String mapped = thread2dev.get(self);
-                if (devIdx.equals(mapped) && !devConflict(devIdx, self) && backend.isRunning(devIdx)) {
+                String ownedKey = thread2key.get(self);
+                if (deviceKey.equals(ownedKey) && !devConflict(deviceKey, self)
+                        && backend != null && backend.isRunning(devIdx)) {
+                    if (!devIdx.equals(mapped)) dev2profile.remove(mapped);
+                    thread2dev.put(self, devIdx);
                     dev2profile.put(devIdx, profile.getName());
-                    LOG.info("{} reusing slot", profile.getName()); profile.setQueuePosition(0); return;
+                    if (profile.getId() != null) physicalOwnerProfileIds.put(deviceKey, profile.getId());
+                    else physicalOwnerProfileIds.remove(deviceKey);
+                    LOG.info("{} reusing physical device slot {}", profile.getName(), deviceKey);
+                    profile.setQueuePosition(0); return;
                 }
                 slots.remove(self);
-                if (mapped != null) {
-                    dev2thread.remove(mapped);
-                    dev2profile.remove(mapped);
+                if (mapped != null) dev2profile.remove(mapped);
+                if (ownedKey != null) {
+                    dev2thread.remove(ownedKey);
+                    physicalOwnerProfileIds.remove(ownedKey);
                 }
                 thread2dev.remove(self);
+                thread2key.remove(self);
             }
             // try immediate claim
-            if (slots.size() < maxSlots && !devConflict(devIdx, self) && !coolingDown(devIdx)) {
-                grant(self, devIdx, profile); return;
+            if (slots.size() < maxSlots && !devConflict(deviceKey, self) && !coolingDown(deviceKey)) {
+                grant(self, devIdx, deviceKey, profile); return;
             }
             // queue
             QueuedEmulatorTask ticket = new QueuedEmulatorTask(self, profile);
             queue.add(ticket);
             LOG.info("{} queued (slots {}/{})", profile.getName(), slots.size(), maxSlots);
-            while (true) {
-                boolean atHead = queue.peek() == ticket;
-                boolean room = slots.size() < maxSlots;
-                boolean free = !devConflict(devIdx, self) && !coolingDown(devIdx);
-                if (atHead && room && free) break;
-                if (!atHead && room && free) {
-                    QueuedEmulatorTask head = queue.peek();
-                    if (head != null && devConflict(head.getEmulatorNumber(), head.getThread())) break;
+            try {
+                while (true) {
+                    boolean atHead = queue.peek() == ticket;
+                    boolean room = slots.size() < maxSlots;
+                    boolean free = !devConflict(deviceKey, self) && !coolingDown(deviceKey);
+                    if (atHead && room && free) break;
+                    if (!atHead && room && free) {
+                        QueuedEmulatorTask head = queue.peek();
+                        if (head != null && devConflict(slotDeviceKey(head.getEmulatorNumber()),
+                                head.getThread())) break;
+                    }
+                    cond.await(1, TimeUnit.SECONDS);
+                    int pos = rankOf(ticket); profile.setQueuePosition(pos);
+                    listener.onQueuePositionChanged(self, pos);
                 }
-                cond.await(1, TimeUnit.SECONDS);
-                int pos = rankOf(ticket); profile.setQueuePosition(pos); listener.onQueuePositionChanged(self, pos);
+            } finally {
+                // A cancelled/preempted waiter must never poison the priority
+                // queue and indefinitely block unrelated emulator profiles.
+                queue.remove(ticket);
+                cond.signalAll();
             }
-            queue.remove(ticket);
-            grant(self, devIdx, profile);
+            grant(self, devIdx, deviceKey, profile);
         } finally { lock.unlock(); }
     }
 
@@ -367,13 +461,16 @@ public class EmulatorController {
         lock.lock();
         try {
             profile.setQueuePosition(Integer.MAX_VALUE);
-            String devIdx = thread2dev.get(self);
-            if (slots.remove(self) && devIdx != null) {
-                dev2thread.remove(devIdx); thread2dev.remove(self);
-                dev2profile.remove(devIdx);
+            String devIdx = thread2dev.remove(self);
+            String deviceKey = thread2key.remove(self);
+            if (slots.remove(self) && deviceKey != null) {
+                dev2thread.remove(deviceKey);
+                physicalOwnerProfileIds.remove(deviceKey);
+                if (devIdx != null) dev2profile.remove(devIdx);
                 long cd = readCooldownMs();
-                if (cd > 0) cooldowns.put(devIdx, System.currentTimeMillis() + cd);
-                LOG.info("{} released dev {}, {}/{}", profile.getName(), devIdx, slots.size(), maxSlots);
+                if (cd > 0) cooldowns.put(deviceKey, System.currentTimeMillis() + cd);
+                LOG.info("{} released physical dev {}, {}/{}", profile.getName(),
+                        deviceKey, slots.size(), maxSlots);
             }
             cond.signalAll();
         } finally { lock.unlock(); }
@@ -381,13 +478,42 @@ public class EmulatorController {
 
     public void resetSlots() {
         lock.lock();
-        try { queue.clear(); slots.clear(); dev2thread.clear(); thread2dev.clear(); dev2profile.clear(); cooldowns.clear(); cond.signalAll(); }
+        try { queue.clear(); slots.clear(); dev2thread.clear(); thread2dev.clear(); thread2key.clear(); dev2profile.clear(); physicalOwnerProfileIds.clear(); cooldowns.clear(); cond.signalAll(); }
         finally { lock.unlock(); }
     }
 
-    private void grant(Thread t, String d, AccountDescriptor p) {
-        slots.add(t); dev2thread.put(d, t); thread2dev.put(t, d); dev2profile.put(d, p.getName()); p.setQueuePosition(0); cond.signalAll();
-        LOG.info("{} got slot dev {}, {}/{}", p.getName(), d, slots.size(), maxSlots);
+    private void grant(Thread t, String d, String physicalKey, AccountDescriptor p) {
+        slots.add(t); dev2thread.put(physicalKey, t); thread2dev.put(t, d);
+        thread2key.put(t, physicalKey);
+        if (p.getId() != null) physicalOwnerProfileIds.put(physicalKey, p.getId());
+        else physicalOwnerProfileIds.remove(physicalKey);
+        dev2profile.put(d, p.getName()); p.setQueuePosition(0); cond.signalAll();
+        LOG.info("{} got slot physical dev {} (configured {}), {}/{}", p.getName(),
+                physicalKey, d, slots.size(), maxSlots);
+    }
+
+    /** Global monitoring may inspect/inject only for the profile whose queue
+     * currently owns this physical Android instance. Without this, a monitor
+     * scans the same game as several accounts and triggers unrelated tasks. */
+    public boolean isActiveProfileOwner(AccountDescriptor profile) {
+        if (profile == null || profile.getId() == null
+                || profile.getEmulatorNumber() == null) return false;
+        return Objects.equals(physicalOwnerProfileIds.get(
+                slotDeviceKey(profile.getEmulatorNumber())), profile.getId());
+    }
+
+    private String slotDeviceKey(String deviceId) {
+        if (backend == null) return deviceId;
+        return canonicalSlotKey(deviceId, backend::getPublicDeviceSerial);
+    }
+
+    static String canonicalSlotKey(String deviceId, Function<String, String> resolver) {
+        if (deviceId == null || deviceId.isBlank())
+            throw new IllegalArgumentException("Missing emulator identifier");
+        String serial = Objects.requireNonNull(resolver, "resolver").apply(deviceId);
+        if (serial == null || serial.isBlank())
+            throw new IllegalArgumentException("No physical ADB serial for " + deviceId);
+        return serial.trim();
     }
 
     private boolean devConflict(String d, Thread t) {

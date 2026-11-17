@@ -3,6 +3,13 @@ package dev.frostguard.app.panel.emulator;
 import java.io.File;
 import java.util.HashMap;
 import java.util.Map;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.io.IOException;
+import java.util.Comparator;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
+import dev.frostguard.api.runtime.WorkspacePaths;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,10 +34,13 @@ import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.RadioButton;
+import javafx.scene.control.PasswordField;
+import dev.frostguard.engine.diagnostics.LanDiagnosticReporter;
 import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
+import javafx.scene.control.TextInputDialog;
 import javafx.scene.control.ToggleGroup;
 import javafx.scene.control.cell.PropertyValueFactory;
 import javafx.stage.FileChooser;
@@ -110,11 +120,10 @@ public class EmuConfigLayoutController {
 	@FXML
 	private Label labelProfileMaxActiveTimeError;
 
-	@FXML
-	private CheckBox checkboxAnalyticsEnabled;
-
-	@FXML
-	private CheckBox checkboxHideAnalyticsLogs;
+	@FXML private CheckBox checkboxLanDiagnosticsEnabled;
+	@FXML private CheckBox checkboxLanDiagnosticsImages;
+	@FXML private PasswordField passwordLanDiagnosticsToken;
+	@FXML private Label labelLanDiagnosticsStatus;
 
 	@FXML
 	private CheckBox checkboxDesktopSnapshots;
@@ -141,8 +150,8 @@ public class EmuConfigLayoutController {
 		configureGameAndIdleDropdowns(globalConfig);
 		configureStopBehaviorDropdowns(globalConfig);
 		configureAutoStartSection(globalConfig);
-		configureAnalyticsToggles(globalConfig);
 		configureDiagnosticSnapshots(globalConfig);
+		configureAnalyticsToggles(globalConfig);
 	}
 
 	/* ────────────────────────────────────────────────
@@ -208,7 +217,27 @@ public class EmuConfigLayoutController {
 			{
 				browseBtn.setOnAction(evt -> {
 					EmulatorAux target = getTableView().getItems().get(getIndex());
-					File picked = promptForExecutable("Select" + target.getEmulatorType().getExecutableName());
+					if (target.getEmulatorType() == EmulatorType.SERVE_EMU) {
+                        TextInputDialog dialog = new TextInputDialog(target.getPath());
+                        dialog.setTitle("serve-emu ADB instellen");
+                        dialog.setHeaderText("ADB-adres van de TrueNAS-emulator");
+                        dialog.setContentText("host:poort (meerdere adressen gescheiden door komma's)");
+                        dialog.showAndWait().ifPresent(value -> {
+                            try {
+                                String cleaned = String.join(",",
+                                        dev.frostguard.engine.emulator.instance.ServeEmuEmulatorInstance
+                                                .validateEndpoints(value));
+                                target.setPath(cleaned);
+                                tableviewEmulators.refresh();
+                                ScheduleService.obtain().persistEmulatorPath(
+                                        target.getEmulatorType().getConfigKey(), cleaned);
+                            } catch (IllegalArgumentException invalid) {
+                                displayError(invalid.getMessage());
+                            }
+                        });
+                        return;
+                    }
+                    File picked = promptForExecutable("Select" + target.getEmulatorType().getExecutableName());
 
 					if (picked == null) {
 						return;
@@ -423,28 +452,103 @@ public class EmuConfigLayoutController {
 		}
 	}
 
+    /** User-initiated, local-only support bundle. Nothing is uploaded.
+     * Logs and screenshots may include visible player names; review ZIP before sharing.
+     */
+    @FXML
+    private void handleExportDiagnostics() {
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle("Export SurvivalOps diagnostics (review before sharing)");
+        chooser.setInitialFileName("survivalops-diagnostics.zip");
+        chooser.getExtensionFilters().add(
+                new FileChooser.ExtensionFilter("ZIP archive", "*.zip"));
+        File target = chooser.showSaveDialog(checkboxLanDiagnosticsEnabled.getScene().getWindow());
+        if (target == null) return;
+        Path root = WorkspacePaths.current().logs();
+        try {
+            exportDiagnostics(root, target.toPath());
+            new Alert(Alert.AlertType.INFORMATION,
+                    "Diagnostics ZIP created locally. Review logs/screenshots for player names or other personal data before sharing.")
+                    .showAndWait();
+        } catch (IOException failure) {
+            logger.warn("Diagnostic export failed", failure);
+            new Alert(Alert.AlertType.ERROR, "Could not export diagnostics: "
+                    + failure.getClass().getSimpleName()).showAndWait();
+        }
+    }
+
+    static void exportDiagnostics(Path logs, Path destination) throws IOException {
+        if (!Files.isDirectory(logs)) throw new IOException("No diagnostics folder available");
+        Path normalized = logs.toRealPath();
+        Path output = destination.toAbsolutePath().normalize();
+        // Windows temporary paths and junctions may differ between absolute and
+        // real forms. Resolve the existing parent of the ZIP before comparing.
+        Path outputParent = output.getParent();
+        if (outputParent == null || outputParent.toRealPath().startsWith(normalized)) {
+            throw new IOException("Choose a destination outside the log directory");
+        }
+        try (var candidates = Files.walk(normalized, 5)) {
+            var files = candidates.filter(Files::isRegularFile)
+                    .filter(file -> !Files.isSymbolicLink(file))
+                    .filter(file -> {
+                        String name = file.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
+                        return name.endsWith(".log") || (name.endsWith(".png")
+                                && file.toString().contains("snapshot"));
+                    })
+                    .sorted(Comparator.comparingLong((Path file) -> file.toFile().lastModified()).reversed())
+                    .limit(80).toList();
+            if (files.isEmpty()) throw new IOException("No log or snapshot files available");
+            long included = 0;
+            try (var archive = new ZipOutputStream(Files.newOutputStream(output))) {
+                for (Path file : files) {
+                    long length = Files.size(file);
+                    if (length > 5_000_000 || included + length > 30_000_000) continue;
+                    included += length;
+                    ZipEntry entry = new ZipEntry(normalized.relativize(file).toString().replace('\\', '/'));
+                    archive.putNextEntry(entry);
+                    Files.copy(file, archive);
+                    archive.closeEntry();
+                }
+            }
+        }
+    }
+
 	/* ────────────────────────────────────────────────
 	 *  Analytics toggles
 	 * ──────────────────────────────────────────────── */
 
 	private void configureAnalyticsToggles(Map<String, String> cfg) {
-		boolean analyticsOn = Boolean.parseBoolean(
-				cfg.getOrDefault(ConfigurationKeyEnum.ANALYTICS_ENABLED_BOOL.name(),
-						ConfigurationKeyEnum.ANALYTICS_ENABLED_BOOL.getDefaultValue()));
-		checkboxAnalyticsEnabled.setSelected(analyticsOn);
-
-		checkboxAnalyticsEnabled.selectedProperty().addListener((obs, prev, now) ->
+		boolean sharing = Boolean.parseBoolean(cfg.getOrDefault(
+				ConfigurationKeyEnum.LAN_DIAGNOSTICS_ENABLED_BOOL.name(), "false"));
+		boolean images = Boolean.parseBoolean(cfg.getOrDefault(
+				ConfigurationKeyEnum.LAN_DIAGNOSTICS_SCREENSHOTS_BOOL.name(), "false"));
+		checkboxLanDiagnosticsEnabled.setSelected(sharing);
+		checkboxLanDiagnosticsImages.setSelected(images);
+		checkboxLanDiagnosticsImages.setDisable(!sharing);
+		passwordLanDiagnosticsToken.setText(cfg.getOrDefault(
+				ConfigurationKeyEnum.LAN_DIAGNOSTICS_TOKEN_STRING.name(), ""));
+		passwordLanDiagnosticsToken.textProperty().addListener((obs, prev, value) ->
 			ConfigService.obtain().writeGlobalSetting(
-					ConfigurationKeyEnum.ANALYTICS_ENABLED_BOOL, String.valueOf(now)));
-
-		boolean hideLogs = Boolean.parseBoolean(
-				cfg.getOrDefault(ConfigurationKeyEnum.HIDE_ANALYTICS_LOGS_BOOL.name(),
-						ConfigurationKeyEnum.HIDE_ANALYTICS_LOGS_BOOL.getDefaultValue()));
-		checkboxHideAnalyticsLogs.setSelected(hideLogs);
-
-		checkboxHideAnalyticsLogs.selectedProperty().addListener((obs, prev, now) ->
+					ConfigurationKeyEnum.LAN_DIAGNOSTICS_TOKEN_STRING, value.trim()));
+		checkboxLanDiagnosticsEnabled.selectedProperty().addListener((obs, prev, value) -> {
 			ConfigService.obtain().writeGlobalSetting(
-					ConfigurationKeyEnum.HIDE_ANALYTICS_LOGS_BOOL, String.valueOf(now)));
+					ConfigurationKeyEnum.LAN_DIAGNOSTICS_ENABLED_BOOL, String.valueOf(value));
+			checkboxLanDiagnosticsImages.setDisable(!value);
+			if (value) {
+				// Captures must be enabled locally before the reporter can send them.
+				checkboxDiagnosticSnapshots.setSelected(true);
+			}
+		});
+		checkboxLanDiagnosticsImages.selectedProperty().addListener((obs, prev, value) ->
+			ConfigService.obtain().writeGlobalSetting(
+					ConfigurationKeyEnum.LAN_DIAGNOSTICS_SCREENSHOTS_BOOL, String.valueOf(value)));
+	}
+
+	@FXML
+	private void handleTestLanDiagnostics() {
+		labelLanDiagnosticsStatus.setText("LAN-verbinding controleren...");
+		LanDiagnosticReporter.testConnection(result ->
+			javafx.application.Platform.runLater(() -> labelLanDiagnosticsStatus.setText(result)));
 	}
 
 	private void configureDiagnosticSnapshots(Map<String, String> cfg) {

@@ -9,6 +9,7 @@ import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.schedule.LaunchPoint;
 import dev.frostguard.engine.nav.SearchConfigConstants;
+import dev.frostguard.tasks.diagnostics.TaskControlSignals;
 
 import java.time.LocalDateTime;
 
@@ -29,6 +30,8 @@ public class DailyLabyrinthRoutine extends DelayedTask {
     private static final int MENU_NAVIGATION_DELAY = 1000;
     private static final int BATTLE_COMPLETION_DELAY = 3000;
 
+    private boolean challengeAttempted;
+
     // =========================== CONSTRUCTOR ===========================
 
     public DailyLabyrinthRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
@@ -39,7 +42,11 @@ public class DailyLabyrinthRoutine extends DelayedTask {
 
     @Override
     public boolean provideDailyMissionProgress() {
-        return true;
+        return shouldReportDailyMissionProgress(challengeAttempted);
+    }
+
+    static boolean shouldReportDailyMissionProgress(boolean challengeAttempted) {
+        return challengeAttempted;
     }
 
     @Override
@@ -50,6 +57,7 @@ public class DailyLabyrinthRoutine extends DelayedTask {
     @Override
     protected void execute() {
 
+        challengeAttempted = false;
         try {
             // Step 1: Navigate to labyrinth menu
             if (!navigateToLabyrinthMenu()) {
@@ -58,11 +66,16 @@ public class DailyLabyrinthRoutine extends DelayedTask {
             }
 
             // The Daily sidebar opens the currently active Land of Heroes dungeon directly.
-            executeCurrentChallenge();
+            challengeAttempted = executeCurrentChallenge();
+            if (!challengeAttempted) {
+                rescheduleOneHourLater("No supported Land of Heroes challenge action completed");
+                return;
+            }
 
             reschedule(GameTimeUtils.dailyResetTime());
 
         } catch (Exception e) {
+            TaskControlSignals.rethrowControlSignal(e);
             logError("An error occurred during the Labyrinth task: " + e.getMessage());
             rescheduleOneHourLater("Unexpected error during execution: " + e.getMessage());
         }
@@ -127,11 +140,12 @@ public class DailyLabyrinthRoutine extends DelayedTask {
             sleepTask(MENU_NAVIGATION_DELAY);
 
             // Skip battle animation
-            tapNear(SKIP_BUTTON);
-            sleepTask(300);
-            tapInside(SKIP_BUTTON, SKIP_BUTTON, 10, 50);
-            pressBack();
-            return true;
+            // The old path tapped Skip twice and blindly pressed Back,
+            // reporting success without observing a completed challenge.
+            // Stop after the supported action until a result-screen template
+            // can confirm the battle and authorize a safe exit.
+            markWorkIncomplete("Labyrinth: quick challenge tapped, result not visually confirmed");
+            return false;
         }
         return false;
     }
@@ -147,11 +161,8 @@ public class DailyLabyrinthRoutine extends DelayedTask {
             logInfo("'Raid Challenge' is available in Land of Heroes.");
             tapInside(raidResult);
             sleepTask(400);
-            tapInside(SKIP_BUTTON, SKIP_BUTTON, 10, 50);
-            pressBack();
-            sleepTask(400);
-            pressBack();
-            return true;
+            markWorkIncomplete("Labyrinth: raid tapped, result not visually confirmed");
+            return false;
         }
         return false;
     }
@@ -191,9 +202,8 @@ public class DailyLabyrinthRoutine extends DelayedTask {
             sleepTask(BATTLE_COMPLETION_DELAY);
 
             // Skip battle results
-            tapInside(RESULT_SKIP_BUTTON, RESULT_SKIP_BUTTON, 10, 50);
-            pressBack();
-            return true;
+            markWorkIncomplete("Labyrinth: deploy tapped, result not visually confirmed");
+            return false;
         }
 
         logWarning("Could not find 'Deploy' button for Land of Heroes.");

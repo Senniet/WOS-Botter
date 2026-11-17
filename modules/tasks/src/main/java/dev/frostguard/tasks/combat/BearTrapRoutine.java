@@ -8,6 +8,7 @@ import dev.frostguard.api.domain.FormationSlots;
 import dev.frostguard.api.domain.ImageSearchResultData;
 import dev.frostguard.api.domain.PointData;
 import dev.frostguard.api.domain.OcrSettingsData;
+import dev.frostguard.engine.error.TaskPreemptedException;
 import dev.frostguard.engine.helper.BearTrapHelper;
 import dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig;
 import dev.frostguard.engine.schedule.DelayedTask;
@@ -187,6 +188,8 @@ public BearTrapRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
         }
 
 
+        BearTrapExecutionOutcome executionOutcome = BearTrapExecutionOutcome.FAILED;
+        Exception executionFailure = null;
         try {
             initializeOCRHelpersFlow();
 
@@ -226,13 +229,30 @@ public BearTrapRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
             } else {
                 logInfo(routineLogBearTrapLine("Trap already ended for this window"));
             }
+            executionOutcome = BearTrapExecutionOutcome.COMPLETED;
+        } catch (TaskPreemptedException e) {
+            executionOutcome = BearTrapExecutionOutcome.PREEMPTED;
+            executionFailure = e;
+            throw e;
         } catch (Exception e) {
+            executionOutcome = BearTrapExecutionOutcome.FAILED;
+            executionFailure = e;
             logError(routineLogBearTrapLine("Issue while Bear Trap execution: " + e.getMessage()), e);
+            throw e;
         } finally {
+            try {
+                cleanupFlow();
+            } catch (Exception cleanupFailure) {
+                if (executionFailure != null) {
+                    executionFailure.addSuppressed(cleanupFailure);
+                } else {
+                    throw cleanupFailure;
+                }
+            }
 
-
-            cleanupFlow();
-            deferToNextWindow();
+            if (BearTrapExecutionOutcomePolicy.shouldDeferToNextWindow(executionOutcome)) {
+                deferToNextWindow();
+            }
         }
     }
 

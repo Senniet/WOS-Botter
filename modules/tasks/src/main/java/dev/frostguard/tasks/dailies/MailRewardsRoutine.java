@@ -7,6 +7,9 @@ import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.api.domain.AreaData;
 import dev.frostguard.api.domain.ImageSearchResultData;
 import dev.frostguard.api.domain.PointData;
+import dev.frostguard.api.domain.OcrSettingsData;
+import dev.frostguard.api.domain.RawImageData;
+import dev.frostguard.vision.match.OpenCvPatternLocator;
 import dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig;
 import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.schedule.LaunchPoint;
@@ -24,13 +27,11 @@ private static final int MAX_MAIL_CLAIM_PASSES = 3;
 
 private static final int MAX_UNREAD_REPORT_OPENS = 3;
 
-private static final int MAIL_MENU_SEARCH_RETRIES_VALUE = 5;
+private static final int MAIL_MENU_SEARCH_RETRIES_VALUE = 2;
 
-private static final int MAIL_MENU_OPEN_VERIFICATION_RETRIES_VALUE = 5;
+private static final int MAIL_MENU_OPEN_VERIFICATION_RETRIES_VALUE = 2;
 
 private static final int UNCLAIMED_REWARDS_SEARCH_RETRIES_VALUE = 3;
-
-private static final int MAIL_TAB_COUNT_VALUE = 3;
 
 private static final int ERROR_RETRY_MINUTES_VALUE = 10;
 
@@ -63,17 +64,22 @@ private static final int CLAIM_BUTTON_TAP_DELAY_MS = 500;
 
 private static final int UNREAD_REPORT_OPEN_DELAY_MS = 500;
 
-private static final PointData TAB_ALLIANCE_VALUE = new PointData(230, 120);
+record MailTab(String name, PointData tabPosition, boolean systemReports) { }
 
-private static final PointData TAB_SYSTEM_VALUE = new PointData(360, 120);
-
-private static final PointData TAB_REPORTS_VALUE = new PointData(500, 120);
-
-private static final PointData[] MAIL_TAB_BUTTONS = { TAB_ALLIANCE_VALUE, TAB_SYSTEM_VALUE, TAB_REPORTS_VALUE };
-
-private static final String[] MAIL_TAB_NAMES = { "Alliance", "System", "Reports" };
-
-private static final int SYSTEM_TAB_INDEX = 1;
+static List<MailTab> tabPlan(boolean currentUi) {
+    if (currentUi) {
+        return List.of(
+            new MailTab("Wars", new PointData(85,120), false),
+            new MailTab("Alliance", new PointData(230,120), false),
+            new MailTab("System", new PointData(360,120), true),
+            new MailTab("Reports", new PointData(500,120), false),
+            new MailTab("Starred", new PointData(630,120), false));
+    }
+    return List.of(
+        new MailTab("Alliance", new PointData(230,120), false),
+        new MailTab("System", new PointData(360,120), true),
+        new MailTab("Reports", new PointData(500,120), false));
+}
 
 private int scheduleOffsetMinutes;
 
@@ -90,9 +96,48 @@ public MailRewardsRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
             return;
         }
 
-        handleAllMailTabs();
-        dismissMailMenu();
+        boolean allTabsVerified = handleAllMailTabs();
+        // dismissMailMenu() already confirms that its visible page disappeared.
+        // Re-checking the Mail title here cost an unnecessary ADB capture.
+        boolean mailClosed = dismissMailMenu();
+        boolean homeVerified = false;
+        if (mailClosed) {
+            try {
+                // Closing current Mail returns straight to the City HUD.
+                // Avoid an expensive general navigation sweep if it already
+                // exposes the exact validated home anchor.
+                homeVerified = cityHomeVisible();
+                if (!homeVerified) {
+                    navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME, this::checkPreemption);
+                    homeVerified = cityHomeVisible();
+                }
+            } catch (dev.frostguard.engine.error.HomeNotFoundException missing) {
+                logWarning(routineLogMailRewardsLine("Mail closed, Home not verified: "
+                        + missing.getMessage()));
+            }
+        }
+        if (!mailRunVerified(allTabsVerified, mailClosed, homeVerified)) {
+            LocalDateTime retryAt = LocalDateTime.now().plusMinutes(ERROR_RETRY_MINUTES_VALUE);
+            logWarning(routineLogMailRewardsLine("One or more mail tabs remained unverified; "
+                    + "retrying at " + retryAt.format(DATETIME_FORMATTER)));
+            markWorkIncomplete("Mail: tab processing, close, or return Home not verified");
+            reschedule(retryAt);
+            return;
+        }
         queueNextRun();
+    }
+
+private boolean cityHomeVisible() {
+        RawImageData frame=emuManager.captureScreen(EMULATOR_NUMBER);
+        return frame != null && frame.isValid()
+                && frame.getWidth()==720 && frame.getHeight()==1280
+                && OpenCvPatternLocator.locatePattern(frame,
+                        TemplatesEnum.SERVE_EMU_CITY_ANCHOR.getTemplate(),
+                        new PointData(590,1145),new PointData(715,1275),90).isFound();
+    }
+
+static boolean mailRunVerified(boolean allTabsVerified, boolean mailClosed, boolean homeVerified) {
+        return allTabsVerified && mailClosed && homeVerified;
     }
 
 @Override
@@ -111,6 +156,7 @@ private String routineLogMailRewardsLine(String note) {
 
 private void manageMailMenuOpenFailure() {
         logError(routineLogMailRewardsLine("Could not open mail menu. Retrying in " + ERROR_RETRY_MINUTES_VALUE + " minutes."));
+        markWorkIncomplete("Mail: menu could not be opened");
         reschedule(LocalDateTime.now().plusMinutes(ERROR_RETRY_MINUTES_VALUE));
     }
 
@@ -122,35 +168,118 @@ private LocalDateTime computeNextExecutionTime() {
         return proposedTime.isAfter(gameResetTime) ? gameResetTime : proposedTime;
     }
 
-private void redeemAllVisibleRewards() {
-        logInfo(routineLogMailRewardsLine("Collecting rewards in current tab."));
-        tapInside(
-                CLAIM_BUTTON_TOP_LEFT_VALUE,
-                CLAIM_BUTTON_BOTTOM_RIGHT_VALUE,
-                CLAIM_BUTTON_TAP_COUNT_VALUE,
-                CLAIM_BUTTON_TAP_DELAY_MS);
-        sleepTask(500);
+private boolean redeemAllVisibleRewards() {
+        if (!confirmMailMenuOpened()) {
+            logWarning(routineLogMailRewardsLine("Mail title absent; refusing unverified footer action"));
+            return false;
+        }
+        var claimRegion = SearchConfig.builder().withMaxAttempts(1).withThreshold(92)
+                .withArea(new AreaData(new PointData(390, 1180), new PointData(720, 1279))).build();
+        ImageSearchResultData before = templateSearchHelper.locateAction(
+                TemplatesEnum.SERVE_EMU_MAIL_READ_CLAIM, claimRegion,
+                TemplatesEnum.SERVE_EMU_MAIL_READ_CLAIM_LEGACY);
+        if (!before.isFound()) {
+            logWarning(routineLogMailRewardsLine("Read & Claim All control unverified; no blind footer taps"));
+            return false;
+        }
+        // locateAction already confirms on a second independent screenshot.
+        // The previous code repeated that entire two-frame fallback twice
+        // (at least four ADB captures) before pressing a visibly ready button.
+        logInfo(routineLogMailRewardsLine("Read & Claim All confirmed on two frames; tapping once"));
+        tapInside(before);
+        sleepTask(350);
+        boolean rewardsVisible = false;
+        for (int attempt = 0; attempt < 3; attempt++) {
+            if (mailRewardsOverlayVisible()) {
+                rewardsVisible = true;
+                break;
+            }
+            if (attempt < 2) sleepTask(200);
+        }
+        if (rewardsVisible) {
+            logInfo(routineLogMailRewardsLine("Rewards overlay verified; dismissing via its exit footer once"));
+            tapInside(AreaData.of(292, 1145, 430, 1203));
+            sleepTask(550);
+            if (mailRewardsOverlayVisible()) {
+                logWarning(routineLogMailRewardsLine("Rewards overlay remained open; refusing further mail actions"));
+                return false;
+            }
+        }
+        if (!confirmMailMenuOpened()) {
+            logWarning(routineLogMailRewardsLine("Mail menu not confirmed after reward claim; "
+                    + "not interpreting obscured unread markers as success"));
+            return false;
+        }
+        return true;
+    }
+
+private boolean mailRewardsOverlayVisible() {
+        if (emuManager.getSelectedEmulatorType()
+                == dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU) {
+            RawImageData frame=emuManager.captureScreen(EMULATOR_NUMBER);
+            if(frame==null || !frame.isValid() || frame.getWidth()!=720 || frame.getHeight()!=1280)
+                return false;
+            PointData start=new PointData(40,245),end=new PointData(680,425);
+            return OpenCvPatternLocator.locatePattern(frame,
+                    TemplatesEnum.SERVE_EMU_REWARDS_BANNER.getTemplate(),start,end,90).isFound()
+                    || OpenCvPatternLocator.locatePattern(frame,
+                    TemplatesEnum.SHARED_REWARDS_BANNER_CURRENT.getTemplate(),start,end,90).isFound();
+        }
+        SearchConfig titleRegion = SearchConfig.builder().withMaxAttempts(1)
+                .withThreshold(90).withArea(AreaData.of(40, 245, 680, 425)).build();
+        return templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_REWARDS_BANNER,
+                titleRegion).isFound()
+                || templateSearchHelper.locatePattern(TemplatesEnum.SHARED_REWARDS_BANNER_CURRENT,
+                        titleRegion).isFound();
+    }
+
+static int unreadMarkerSearchAttempts(dev.frostguard.engine.emulator.EmulatorType emulator) {
+        // The current Mail list is stationary by the time a tab is selected.
+        // On live Serve-EMU, three repeated empty-list scans on five tabs
+        // generated 15 misses without improving detection or verification.
+        return emulator == dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU
+                ? 1 : UNCLAIMED_REWARDS_SEARCH_RETRIES_VALUE;
     }
 
 private Evidence findUnreadMailEvidence() {
+        if (emuManager.getSelectedEmulatorType()
+                == dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU) {
+            // The 2026 Mail marker has proven full-size colour artwork.
+            // Multi-scale matching generated several 5-7s empty scans in
+            // Task Coach 20261117-211027. Search one current frame instead.
+            RawImageData frame=emuManager.captureScreen(EMULATOR_NUMBER);
+            if (frame != null && frame.isValid()
+                    && frame.getWidth()==720 && frame.getHeight()==1280) {
+                return Evidence.fromMatches(OpenCvPatternLocator.locateAllPatterns(
+                        frame, TemplatesEnum.MAIL_UNCLAIMED_REWARDS.getTemplate(),
+                        MAIL_LIST_INDICATORS_TOP_LEFT_VALUE,
+                        MAIL_LIST_INDICATORS_BOTTOM_RIGHT_VALUE, 90, 20));
+            }
+            return new Evidence(List.of());
+        }
         List<ImageSearchResultData> unreadMarkers = templateSearchHelper.locateAllPatterns(
                 TemplatesEnum.MAIL_UNCLAIMED_REWARDS,
                 SearchConfig.builder()
                         .withArea(new AreaData(
                                 MAIL_LIST_INDICATORS_TOP_LEFT_VALUE,
                                 MAIL_LIST_INDICATORS_BOTTOM_RIGHT_VALUE))
-                        .withMaxAttempts(UNCLAIMED_REWARDS_SEARCH_RETRIES_VALUE)
+                        .withMaxAttempts(unreadMarkerSearchAttempts(emuManager.getSelectedEmulatorType()))
                         .withDelay(100L)
                         .withMaxResults(20)
                         .build());
-
         return Evidence.fromMatches(unreadMarkers);
     }
 
 private MailClaimResult claimMailRewards(String tabName) {
         Evidence before = findUnreadMailEvidence();
+        if (before.isEmpty()) {
+            logDebug(routineLogMailRewardsLine(tabName + ": no unclaimed mail markers; no footer tap needed"));
+            return new MailClaimResult(before, Decision.COMPLETE);
+        }
         for (int completedPasses = 1; completedPasses <= MAX_MAIL_CLAIM_PASSES; completedPasses++) {
-            redeemAllVisibleRewards();
+            if (!redeemAllVisibleRewards()) {
+                return new MailClaimResult(before, Decision.STOP_NO_PROGRESS);
+            }
             Evidence after = findUnreadMailEvidence();
             Decision decision = MailClaimPassPolicy.decide(
                     before, after, completedPasses, MAX_MAIL_CLAIM_PASSES);
@@ -242,6 +371,10 @@ private void openUnreadSystemReports(Evidence initialEvidence) {
     }
 
 private boolean confirmMailMenuOpened() {
+        // Current 720x1280 Mail label is centered at (128,41). The old
+        // SERVE_EMU_MAIL_TITLE ROI y75..150 always missed (~44%), causing
+        // repeated fallback checks. First verify this exact, correct header.
+        if (isCurrentMailMenuVisible()) return true;
         ImageSearchResultData inMailMenu = templateSearchHelper.locatePattern(
                 TemplatesEnum.MAIL_MENU_OPEN,
                 SearchConfig.builder()
@@ -251,8 +384,14 @@ private boolean confirmMailMenuOpened() {
                         .build());
 
         if (!inMailMenu.isFound()) {
-            logError(routineLogMailRewardsLine("Mail menu did not open successfully."));
-            return false;
+            inMailMenu = templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_MAIL_TITLE,
+                    SearchConfig.builder().withMaxAttempts(2).withDelay(120).withThreshold(90)
+                            .withArea(new AreaData(new PointData(65, 0),
+                                    new PointData(245, 100))).build());
+            if (!inMailMenu.isFound()) {
+                logError(routineLogMailRewardsLine("Mail menu title unrecognized; refusing actions"));
+                return false;
+            }
         }
 
         logDebug(routineLogMailRewardsLine("Mail menu opened finished cleanly."));
@@ -269,14 +408,19 @@ private void hydrateConfiguration() {
         logDebug(routineLogMailRewardsLine("Configuration loaded - Schedule offset: " + scheduleOffsetMinutes + " minutes"));
     }
 
-private void handleAllMailTabs() {
-        for (int i = 0; i < MAIL_TAB_COUNT_VALUE; i++) {
-            PointData tabButton = MAIL_TAB_BUTTONS[i];
-            String tabName = MAIL_TAB_NAMES[i];
-
-            logInfo(routineLogMailRewardsLine("Processing " + tabName + " tab."));
-            handleMailTab(tabButton, tabName, i == SYSTEM_TAB_INDEX);
+private boolean handleAllMailTabs() {
+        boolean completed = true;
+        boolean currentUi = isCurrentMailMenuVisible();
+        for (MailTab tab : tabPlan(currentUi)) {
+            if (!confirmMailMenuOpened()) {
+                logWarning(routineLogMailRewardsLine("Mail tab loop lost the Mail page; "
+                        + "stopping before any further tab taps"));
+                return false;
+            }
+            logInfo(routineLogMailRewardsLine("Processing " + tab.name() + " tab"));
+            if (!handleMailTab(tab.tabPosition(), tab.name(), tab.systemReports())) completed = false;
         }
+        return completed;
     }
 
 private void switchToTabFlow(PointData tabButton) {
@@ -285,15 +429,55 @@ private void switchToTabFlow(PointData tabButton) {
 
     }
 
-private void dismissMailMenu() {
+private boolean dismissMailMenu() {
         logDebug(routineLogMailRewardsLine("Closing mail menu."));
-        pressBack();
-        sleepTask(500);
+        if (isCurrentMailMenuVisible()) {
+            // The 2026 UI exposes an explicit X. Android Back is unsafe on
+            // a World map (it can open the Quit game confirmation).
+            // Live 720x1280 Mail UI: X is at (680, 40), not (680, 110).
+            // The old coordinate was inside the tab bar and could leave Mail open.
+            tapInside(AreaData.of(656, 24, 705, 64));
+            sleepTask(350);
+            if (isCurrentMailMenuVisible()) {
+                logWarning(routineLogMailRewardsLine("Mail close X did not dismiss the page; "
+                        + "stopping rather than tapping the tab bar again"));
+                markWorkIncomplete("Mail: close action did not return to Home");
+                return false;
+            }
+            return true;
+        }
+        // Preserve legacy close behaviour only when its old mail header is present.
+        if (templateSearchHelper.locatePattern(TemplatesEnum.MAIL_MENU_OPEN,
+                SearchConfig.builder().withMaxAttempts(1)
+                        .withArea(new AreaData(MAIL_MENU_OPEN_TOP_LEFT_VALUE,
+                                MAIL_MENU_OPEN_BOTTOM_RIGHT_VALUE)).build()).isFound()) {
+            pressBack();
+            sleepTask(300);
+            return !templateSearchHelper.locatePattern(TemplatesEnum.MAIL_MENU_OPEN,
+                    SearchConfig.builder().withMaxAttempts(1)
+                            .withArea(new AreaData(MAIL_MENU_OPEN_TOP_LEFT_VALUE,
+                                    MAIL_MENU_OPEN_BOTTOM_RIGHT_VALUE)).build()).isFound();
+        }
+        return false;
+    }
 
+private boolean isCurrentMailMenuVisible() {
+        if (emuManager.getSelectedEmulatorType()
+                == dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU) {
+            RawImageData frame=emuManager.captureScreen(EMULATOR_NUMBER);
+            return frame!=null && frame.isValid() && frame.getWidth()==720 && frame.getHeight()==1280
+                    && OpenCvPatternLocator.locatePattern(frame,
+                    TemplatesEnum.SERVE_EMU_MAIL_TITLE.getTemplate(),
+                    new PointData(65,0),new PointData(245,100),90).isFound();
+        }
+        return templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_MAIL_TITLE,
+                SearchConfig.builder().withMaxAttempts(1).withThreshold(90)
+                        .withArea(AreaData.of(65, 0, 245, 100)).build()).isFound();
     }
 
 private boolean openUpMailMenu() {
         logInfo(routineLogMailRewardsLine("Entering mail menu."));
+        if (isCurrentMailMenuVisible()) return true;
 
         ImageSearchResultData mailMenu = templateSearchHelper.locatePattern(
                 TemplatesEnum.MAIL_MENU,
@@ -315,13 +499,47 @@ private boolean openUpMailMenu() {
         return confirmMailMenuOpened();
     }
 
-private void handleMailTab(PointData tabButton, String tabName, boolean openUnreadReports) {
+private boolean handleMailTab(PointData tabButton, String tabName, boolean openUnreadReports) {
         switchToTabFlow(tabButton);
+        if (!confirmMailMenuOpened()) {
+            logWarning(routineLogMailRewardsLine(tabName + " tab navigation left the Mail screen"));
+            return false;
+        }
         MailClaimResult result = claimMailRewards(tabName);
         if (openUnreadReports
                 && result.decision() == Decision.STOP_NO_PROGRESS
                 && !result.remainingEvidence().isEmpty()) {
+            // A single, non-reward [Survey] invitation can leave a red
+            // System unread badge indefinitely. Do not repeatedly open it
+            // or schedule ten-minute reward retries after Read & Claim All.
+            if (singleSurveyNonRewardMail(result.remainingEvidence())) {
+                logInfo(routineLogMailRewardsLine("One [Survey] System invitation has no "
+                        + "claimable reward; leaving it unread and continuing the normal cycle"));
+                return true;
+            }
             openUnreadSystemReports(result.remainingEvidence());
+            return confirmMailMenuOpened() && findUnreadMailEvidence().isEmpty();
+        }
+        return result.decision() == Decision.COMPLETE;
+    }
+
+private boolean singleSurveyNonRewardMail(Evidence evidence) {
+        if (!isCurrentMailMenuVisible() || evidence.count() != 1) return false;
+        try {
+            OcrSettingsData settings = OcrSettingsData.configurator()
+                    .textLayout(OcrSettingsData.TextLayout.SPARSE).build();
+            PointData topLeft = new PointData(125, 155);
+            PointData bottomRight = new PointData(675, 285);
+            String first = emuManager.readText(EMULATOR_NUMBER, topLeft, bottomRight, settings, false);
+            sleepTask(180);
+            String second = emuManager.readText(EMULATOR_NUMBER, topLeft, bottomRight, settings, false);
+            return MailNonRewardSurveyPolicy.canLeaveSurveyUnread(evidence.count(), first, second);
+        } catch (RuntimeException | java.io.IOException | dev.frostguard.vision.ocr.OcrException error) {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new java.util.concurrent.CancellationException("Survey mail OCR interrupted");
+            }
+            logDebug("Mail survey text cannot be verified; retaining normal mail checks");
+            return false;
         }
     }
 

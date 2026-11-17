@@ -13,9 +13,18 @@ import org.junit.jupiter.api.Test;
 class LifeEssenceScrollOutcomeTest {
 
     @Test
-    void doesNotCountAnUnresolvedWeeklyScrollAsACompletedRun() {
-        assertFalse(LifeEssenceRoutine.countsAsCompletedRun(true));
-        assertTrue(LifeEssenceRoutine.countsAsCompletedRun(false));
+    void optionalWeeklyScrollFailureNeverCancelsConfirmedEssenceCollection() {
+        assertTrue(LifeEssenceRoutine.countsAsCompletedRun(true, true));
+        assertTrue(LifeEssenceRoutine.countsAsCompletedRun(true, false));
+        assertFalse(LifeEssenceRoutine.countsAsCompletedRun(false, true));
+        assertFalse(LifeEssenceRoutine.countsAsCompletedRun(false, false));
+    }
+
+    @Test
+    void missingWeeklyScrollSettingNeverCrashesOrEnablesAnOptionalPurchase() {
+        assertFalse(LifeEssenceRoutine.isWeeklyFreeScrollConfigured(null));
+        assertFalse(LifeEssenceRoutine.isWeeklyFreeScrollConfigured(Boolean.FALSE));
+        assertTrue(LifeEssenceRoutine.isWeeklyFreeScrollConfigured(Boolean.TRUE));
     }
 
     @Test

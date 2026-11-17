@@ -1,0 +1,29 @@
+.inspect-tool{margin:12px 0 18px;padding:12px;border:1px solid #3a4b63;border-radius:12px}
+.inspect-tool>summary{font-weight:650;cursor:pointer}
+.inspect-controls{display:flex;align-items:center;flex-wrap:wrap;gap:9px;margin:12px 0}
+.inspect-controls select{max-width:290px;padding:7px}
+.inspect-cols{display:grid;grid-template-columns:1fr 1.4fr;gap:16px;max-height:750px;overflow:auto}
+.inspect-detail{border:1px solid #42516a;border-radius:10px;padding:12px;min-width:0;max-height:740px;overflow:auto}
+.inspect-steps{padding-left:20px}.inspect-steps li{padding:4px 0;font-family:ui-monospace,monospace;font-size:.85em}
+.inspect-template-img{display:block;object-fit:contain;max-width:100%;max-height:190px;background:#2b3342;border-radius:7px;margin:12px 0;padding:10px;image-rendering:auto}
+.inspect-actions{display:flex;flex-wrap:wrap;align-items:center;gap:7px;margin:9px 0}.inspect-actions button{padding:7px 10px;font-size:.8em}
+.inspect-sub{margin:12px 0;padding:8px;border:1px solid #46536b;border-radius:9px}.inspect-sub>summary{cursor:pointer}
+.inspect-template-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0;padding-bottom:7px;border-bottom:1px solid #36445c;font-size:.83em}
+.inspect-template-row button{font-size:.85em;overflow-wrap:anywhere;max-width:100%}
+.inspect-gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(135px,1fr));gap:10px}
+.inspect-gallery figure{margin:0;min-width:0}.inspect-gallery img{display:block;width:100%;max-height:270px;object-fit:contain;object-position:top;border-radius:7px}
+.inspect-gallery figcaption{font-size:.7em;overflow-wrap:anywhere;margin-top:4px}
+.inspect-records{max-height:500px;overflow:auto;font-size:.76em;font-family:ui-monospace,monospace;line-height:1.5}
+.inspect-records>div{border-bottom:1px solid #354259;padding:3px}.inspect-hit{color:#97ecc1}.inspect-miss{color:#dcc1ad}
+.inspect-template-tags{display:flex;gap:6px;flex-wrap:wrap;max-height:160px;overflow:auto}.inspect-template-tags button{font-size:.75em}
+.inspect-small{font-size:.78em;color:#b6c7dc;margin:6px 0}
+@media(max-width:850px){.inspect-cols{grid-template-columns:1fr;max-height:none}.inspect-detail{max-height:540px}}
+
+.inspect-stage-view{position:relative;max-width:345px;margin:8px 0;overflow:hidden}.inspect-stage-view img{display:block;width:100%;height:auto}.inspect-stage-dot{position:absolute;display:block;width:18px;height:18px;background:#6cf2a7;border:3px solid #133422;outline:2px solid #eefaf2;border-radius:50%;transform:translate(-50%,-50%);pointer-events:none}.inspect-stage-view[hidden],.inspect-stage-dot[hidden]{display:none}
+.inspect-record{display:block;width:100%;text-align:left;padding:5px;background:transparent;border:0;border-bottom:1px solid #354259;cursor:pointer;font-size:inherit;font-family:inherit}.inspect-record:hover{background:#243d54}
+
+/* The full task flow must remain visible; it is not a collapsible <details>. */
+#inspector-flow-section{display:block;overflow:visible}
+#inspector-flow-section h3{margin:0 0 12px;font-size:1.02rem}
+#inspector-flow{max-height:70vh;min-height:240px;overflow-y:auto;overscroll-behavior:contain}
+#inspector-flow-btn{white-space:normal}

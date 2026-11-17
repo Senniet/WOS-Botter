@@ -47,19 +47,25 @@ public class LifeEssenceCaringRoutine extends DelayedTask {
 
 		// Navigate to Life Essence menu
 		if (!navigateToLifeEssenceMenu()) {
+            markWorkIncomplete("Life Essence Caring: sidebar/page not verified; no care action");
 			logWarning("Failed to navigate to Life Essence menu. Retrying in " + retryOffsetMinutes + " minutes.");
 			reschedule(LocalDateTime.now().plusMinutes(retryOffsetMinutes));
 			return;
 		}
 
-		int islandsCared = 0;
-		for (int i = 0; i < 4; i++) {
+        int islandsCared = 0;
+        // Only three confirmed care actions are needed per daily cycle.
+        // A fourth scan cannot add a daily reward and wastes navigation.
+        for (int i = 0; i < 3; i++) {
 			// Check if daily attempts are available
-			if (!checkDailyAttemptsAvailable()) {
-				closeAllMenus();
-				reschedule(GameTimeUtils.dailyResetTime());
-				return;
-			}
+            if (!checkDailyAttemptsAvailable()) {
+                // A missing "available" marker is NOT evidence of exhaustion:
+                // the menu may be loading, displaced or misrecognized.
+                markWorkIncomplete("Life Essence Caring: attempt count not positively verified");
+                closeAllMenus();
+                reschedule(LocalDateTime.now().plusMinutes(retryOffsetMinutes));
+                return;
+            }
 
 			// Attempt to find and care for an island
 			if (findAndCareForIsland()) {
@@ -74,6 +80,11 @@ public class LifeEssenceCaringRoutine extends DelayedTask {
 			}
 		}
 
+        // A skipped/unreachable Caring task must not be marked completed.
+        // The positive claim remains separate from a "no attempts left" run.
+        if (islandsCared == 0) {
+            markWorkIncomplete("Life Essence Caring: no caring action was confirmed");
+        }
 		// No island found - retry later
 
 		closeAllMenus();
@@ -136,7 +147,7 @@ public class LifeEssenceCaringRoutine extends DelayedTask {
 			return true;
 		}
 
-		logInfo("No daily caring attempts remaining. Rescheduling for next game reset.");
+        logWarning("Daily caring available marker absent; remaining attempts unknown, retry later");
 		return false;
 	}
 
@@ -217,16 +228,27 @@ public class LifeEssenceCaringRoutine extends DelayedTask {
 			if (caringButton.isFound()) {
 				logInfo("Caring button found. Performing caring action.");
 
-				// Click the caring button
-				tapInside(caringButton);
-				sleepTask(5000);
-
-				// Go back to our island view we're back on main map
-				tapNear(BACK_TO_MAP_BUTTON);
-				sleepTask(3000);
-
-				logInfo("Caring action completed successfully");
-				return true;
+                // Click once. A dispatched tap alone is not proof of caring.
+                tapInside(caringButton);
+                sleepTask(1000);
+                ImageSearchResultData stillAvailable = templateSearchHelper.locatePattern(
+                        TemplatesEnum.LIFE_ESSENCE_DAILY_CARING_BUTTON_CURRENT,
+                        SearchConfig.builder().build());
+                if (!stillAvailable.isFound()) {
+                    stillAvailable = templateSearchHelper.locatePattern(
+                            TemplatesEnum.LIFE_ESSENCE_DAILY_CARING_BUTTON,
+                            SearchConfig.builder().build());
+                }
+                if (stillAvailable.isFound()) {
+                    markWorkIncomplete("Life Essence Caring: Caring button remains after tap");
+                    logWarning("Caring button still visible; do not report success or tap again");
+                    tapNear(BACK_TO_MAP_BUTTON);
+                    return false;
+                }
+                tapNear(BACK_TO_MAP_BUTTON);
+                sleepTask(500);
+                logInfo("Life Essence Caring button cleared after tap");
+                return true;
 			}
 
 			// Not found yet - wait a bit longer for UI to load

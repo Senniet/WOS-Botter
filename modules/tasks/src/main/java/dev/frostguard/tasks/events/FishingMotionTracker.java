@@ -21,6 +21,18 @@ final class FishingMotionTracker {
         tracks.removeIf(track -> now - track.observed > 450);
         List<Track> matched = new ArrayList<>();
         for (AreaData area : areas) {
+            // Vision may emit overlapping detections of the same fish in one frame.
+            // Merge only near-identical boxes; distinct hazards remain independent.
+            double cx = (area.topLeft().getX() + area.bottomRight().getX()) / 2.0;
+            double cy = (area.topLeft().getY() + area.bottomRight().getY()) / 2.0;
+            double aw = area.bottomRight().getX() - area.topLeft().getX();
+            double ah = area.bottomRight().getY() - area.topLeft().getY();
+            boolean duplicate = matched.stream().anyMatch(t ->
+                    Math.abs(t.x - cx) <= Math.max(3, Math.min(aw, t.w) * 0.15)
+                    && Math.abs(t.y - cy) <= Math.max(3, Math.min(ah, t.h) * 0.15)
+                    && Math.abs(t.w - aw) <= Math.max(3, aw * 0.15)
+                    && Math.abs(t.h - ah) <= Math.max(3, ah * 0.15));
+            if (duplicate) continue;
             double x = (area.topLeft().getX() + area.bottomRight().getX()) / 2.0;
             double y = (area.topLeft().getY() + area.bottomRight().getY()) / 2.0;
             double width = area.bottomRight().getX() - area.topLeft().getX();
@@ -38,7 +50,20 @@ final class FishingMotionTracker {
                 }
             }
             if (best == null) {
-                if (tracks.size() >= MAX_TRACKS) throw new IllegalStateException("Fishing object tracking overloaded");
+                if (tracks.size() >= MAX_TRACKS) {
+                    // A current detection must take precedence over a prediction from an
+                    // earlier frame. Evict only tracks not observed in this frame.
+                    Track oldestUnmatched = null;
+                    for (Track previous : tracks) {
+                        if (matched.contains(previous)) continue;
+                        if (oldestUnmatched == null || previous.observed < oldestUnmatched.observed)
+                            oldestUnmatched = previous;
+                    }
+                    if (oldestUnmatched == null) {
+                        throw new IllegalStateException("Fishing foreground detection overloaded");
+                    }
+                    tracks.remove(oldestUnmatched);
+                }
                 best = new Track();
                 tracks.add(best);
             } else {

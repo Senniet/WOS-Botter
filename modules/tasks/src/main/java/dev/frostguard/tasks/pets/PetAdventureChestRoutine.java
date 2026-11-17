@@ -60,6 +60,8 @@ public class PetAdventureChestRoutine extends DelayedTask {
 	private static final int TARGET_STAMINA_FOR_REFRESH = 40;
 	private static final int MAX_CHEST_START_ITERATIONS = 12;
 
+	private boolean confirmedDailyMissionProgress;
+
 	private static final SearchConfig CHEST_CANDIDATES = SearchConfig.builder()
 			.withMaxAttempts(3)
 			.withThreshold(90)
@@ -127,7 +129,7 @@ public class PetAdventureChestRoutine extends DelayedTask {
 
 	@Override
 	public boolean provideDailyMissionProgress() {
-		return true;
+		return confirmedDailyMissionProgress;
 	}
 
 	// ========================================================================
@@ -149,14 +151,10 @@ public class PetAdventureChestRoutine extends DelayedTask {
 	@Override
 	protected void execute() {
 
-		// Validate stamina before proceeding
-		if (!staminaHelper.checkStaminaOrReschedule(
-				MIN_STAMINA_REQUIRED,
-				TARGET_STAMINA_FOR_REFRESH,
-				this)) {
-			return; // Task will be rescheduled by helper
-		}
+		confirmedDailyMissionProgress = false;
 
+		// Collecting finished adventures is free. Never skip available
+        // claims just because stamina is too low to START a new adventure.
 		if (!navigateToPetAdventures()) {
 			rescheduleForNavigationRetry();
 			return;
@@ -169,6 +167,12 @@ public class PetAdventureChestRoutine extends DelayedTask {
 			rescheduleForChestCompletion();
 			return;
 		}
+        // Only new adventures consume stamina; check after free claims and
+        // the observe-only guard, avoiding a redundant initial check.
+        if (!staminaHelper.checkStaminaOrReschedule(
+                MIN_STAMINA_REQUIRED, TARGET_STAMINA_FOR_REFRESH, this)) {
+            return;
+        }
 		startAvailableChests();
 	}
 
@@ -219,59 +223,55 @@ public class PetAdventureChestRoutine extends DelayedTask {
 	 * <li>Return to adventure map</li>
 	 * </ol>
 	 */
-	private void claimCompletedChests() {
-		logDebug("Searching for completed chests to claim");
+    private void claimCompletedChests() {
+        // The 2026 map repositions treasure spots after a claim. Never
+        // iterate over a stale list of chest coordinates.
+        for (int i = 0; i < 6; i++) {
+            List<ImageSearchResultData> completed = templateSearchHelper.locateAllPatterns(
+                    TemplatesEnum.PETS_CHEST_COMPLETED,
+                    SearchConfigConstants.MULTIPLE_RESULTS);
+            if (completed == null || completed.isEmpty()) return;
+            ImageSearchResultData next = completed.stream()
+                    .filter(ImageSearchResultData::isFound).findFirst().orElse(null);
+            if (next == null) return;
+            if (!claimSingleChest(next)) {
+                markWorkIncomplete("Pet Adventure: completed chest did not disappear after claim");
+                return;
+            }
+        }
+    }
 
-		for (int i = 0; i < 2; i++) {
-			logDebug("Searching for completed chests. Attempt " + (i + 1) + ".");
-			List<ImageSearchResultData> completedChests = templateSearchHelper.locateAllPatterns(
-					TemplatesEnum.PETS_CHEST_COMPLETED,
-					SearchConfigConstants.MULTIPLE_RESULTS);
+    static boolean sameChestLocation(PointData a, PointData b) {
+        return Math.abs(a.getX() - b.getX()) <= 45
+                && Math.abs(a.getY() - b.getY()) <= 45;
+    }
 
-			if (completedChests == null || completedChests.isEmpty()) {
-				logInfo("No completed chests found on attempt " + (i + 1) + ".");
-				continue;
-			}
-
-			logInfo("Found " + completedChests.size() + " completed chest(s). Claiming them now.");
-
-			for (ImageSearchResultData chest : completedChests) {
-				claimSingleChest(chest);
-			}
-		}
-	}
-
-	/**
-	 * Claims a single completed chest.
-	 * 
-	 * @param chest The search result pointing to the completed chest
-	 */
-	private void claimSingleChest(ImageSearchResultData chest) {
-		logDebug("Claiming completed chest");
-
-		tapInside(chest.getPoint(), chest.getPoint());
-		sleepTask(1000); // Wait for chest detail screen
-
-		// Claim chest
-		tapNear(CHEST_CLAIM_POINT);
-		sleepTask(2000);
-		pressBack();
-		sleepTask(2000);
-
-		// Check if share button is available
-		ImageSearchResultData shareButton = templateSearchHelper.locatePattern(
-				TemplatesEnum.PETS_CHEST_SHARE,
-				SearchConfigConstants.DEFAULT_SINGLE);
-
-		if (shareButton.isFound()) {
-			logDebug("Sharing completed chest with alliance");
-			tapInside(shareButton.getPoint(), shareButton.getPoint());
-			sleepTask(1000); // Wait for share action
-		}
-
-		pressBack(); // Return to adventure map
-		sleepTask(1000); // Wait for screen transition
-	}
+    private boolean claimSingleChest(ImageSearchResultData chest) {
+        tapInside(chest.getPoint(), chest.getPoint());
+        sleepTask(550);
+        // Live ADB: tapping a completed chest opens Treasure Spot; tapping
+        // the chest opens Rewards; dismissing Rewards leaves Treasure Spot.
+        tapNear(CHEST_CLAIM_POINT);
+        sleepTask(1200);
+        if (emuManager.getSelectedEmulatorType()
+                == dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU) {
+            tapNear(new PointData(350, 1175)); // Dismiss Rewards overlay
+            sleepTask(450);
+            tapNear(new PointData(643, 241)); // Close Treasure Spot dialog
+            sleepTask(450);
+        } else {
+            pressBack();
+            sleepTask(500);
+            pressBack();
+            sleepTask(500);
+        }
+        List<ImageSearchResultData> remaining = templateSearchHelper.locateAllPatterns(
+                TemplatesEnum.PETS_CHEST_COMPLETED,
+                SearchConfigConstants.MULTIPLE_RESULTS);
+        if (remaining == null) return false;
+        return remaining.stream().filter(ImageSearchResultData::isFound)
+                .noneMatch(r -> sameChestLocation(chest.getPoint(), r.getPoint()));
+    }
 
 	// ========================================================================
 	// CHEST STARTING METHODS
@@ -319,7 +319,8 @@ public class PetAdventureChestRoutine extends DelayedTask {
 			for (TemplatesEnum chestTemplate : CHEST_PRIORITY) {
 				ChestStartResult result = attemptToStartChest(chestTemplate);
 
-				if (result == ChestStartResult.STARTED) {
+				if (countsAsProgress(result)) {
+					confirmedDailyMissionProgress = true;
 					foundAnyChest = true;
 					break;
 				} else if (result == ChestStartResult.NO_ATTEMPTS) {
@@ -533,10 +534,14 @@ public class PetAdventureChestRoutine extends DelayedTask {
 	// HELPER ENUMS
 	// ========================================================================
 
+	static boolean countsAsProgress(ChestStartResult outcome) {
+		return outcome == ChestStartResult.STARTED;
+	}
+
 	/**
 	 * Result of attempting to start a chest adventure.
 	 */
-	private enum ChestStartResult {
+	enum ChestStartResult {
 		/** Chest was idle and In Adventure confirmed the start. */
 		STARTED,
 

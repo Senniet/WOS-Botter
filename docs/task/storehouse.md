@@ -15,6 +15,12 @@ white, with whitelist `0123456789:d`. Compact `001558` is 00:15:58. These are
 visual/OCR assumptions; do not infer the timer's game meaning from its text
 alone.
 
+The claim dialog is evaluated on one fresh screenshot per poll. Do not capture
+separate frames for its title, Claim button, tooltip, and city: four remote ADB
+reads can exhaust the claim timeout even while Claim is visibly available.
+The 15 November 2026 live dialog positively matches both reward templates on
+the encoded and raw 720x1280 screenshot paths; do not lower the thresholds.
+
 The Storehouse stamina reward uses its own `A Warm Welcome` title and Claim-text
 templates. Search the Claim text in the full lower button area (x=200..520,
 y=900..1020 on 720x1280 frames); the Daily Mission Claim crop is too small for
@@ -68,3 +74,28 @@ stamina copper. Six captures over about 1.5 s cover one bob. Overlay and
 preprocess scores: `./tools/storehouse-detection/detect.sh`. Template `chest3`
 BGR at 75 remains the OpenCV comparison winner; grey and dropped-blue do not
 recover the wood crops. See the tool README.
+
+## Daily mission progress
+
+Daily-mission progress is reported only when the Storehouse visit flow confirms
+at least one chest or stamina collection. If the visit ends in RETRY_ON_ERROR
+without any confirmed collection, the bounded retry is persisted and an
+unknown-outcome failure is propagated to the scheduler. A confirmed collection
+is retained as partial progress if a later action in the same visit is unknown.
+
+## Known full-stamina capacity state
+
+A confirmed live `A Warm Welcome` Claim tap can display the toast
+`Chief Stamina is maxed at 500` without dismissing the reward dialog. This is a
+game capacity block, not a missing Claim button. A saved, redacted 2026-11-15
+post-tap frame now anchors a specific capacity-notice template. After positively
+identifying this toast, close the reward dialog through its verified close icon
+and verify the dialog title disappears. Defer another capacity-dependent claim
+for 30 minutes without crediting stamina or daily-mission progress. If the
+notice or close action is uncertain, retain the five-minute unknown retry;
+never silently record a successful claim.
+
+The numeric stamina cap varies by account and Furnace progression, so future
+independent live captures must extend the detector when different values are
+seen. Avoid relying on a single generic `Chief Stamina` string, since an
+unrelated tooltip can contain that title.

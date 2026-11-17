@@ -232,10 +232,20 @@ public class MarchHelper {
 
     private Duration readCountdown(int index) {
         AreaData timer = CommonGameAreas.MARCH_QUEUE_TIMER[index];
-        String text = ocrStrings.attemptRecognition(timer.topLeft(), timer.bottomRight(),
+        var result = ocrStrings.attemptRecognitionDetailed(timer.topLeft(), timer.bottomRight(),
                 2, 150L, CommonOCRSettings.MARCH_QUEUE_TIMER_SETTINGS,
                 GameTimeUtils::isAcceptedFormat, value -> value);
-        return text == null ? null : GameTimeUtils.parseDuration(text);
+        if (!result.accepted()) {
+            log.warn("March queue countdown OCR unavailable for slot " + (index + 1)
+                    + ": status=" + result.status() + " attempts=" + result.attempts()
+                    + (result.failure() == null ? "" : " failure=" + result.failure()));
+            return null;
+        }
+        Duration parsed = GameTimeUtils.parseDuration(result.value());
+        if (parsed == null) {
+            log.warn("March queue countdown text could not be parsed for slot " + (index + 1));
+        }
+        return parsed;
     }
 
     // A slot is inspected before it is tapped: padlock evidence rejects locked slots, while the

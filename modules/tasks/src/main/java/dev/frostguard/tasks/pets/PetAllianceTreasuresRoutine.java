@@ -9,6 +9,10 @@ import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.schedule.LaunchPoint;
 import dev.frostguard.engine.nav.SidebarDestination;
 import dev.frostguard.engine.nav.SearchConfigConstants;
+import dev.frostguard.engine.helper.GreenLabelActionDetector;
+import dev.frostguard.engine.helper.RecognitionConsensus;
+import dev.frostguard.vision.convert.ImageConverter;
+import dev.frostguard.api.domain.PointData;
 
 import java.time.LocalDateTime;
 
@@ -169,20 +173,83 @@ public class PetAllianceTreasuresRoutine extends DelayedTask {
 	 * Always navigates back to previous screen after checking, regardless of
 	 * outcome.
 	 */
-	private void claimTreasureIfAvailable() {
-		ImageSearchResultData claimButton = templateSearchHelper.locatePattern(
+    static boolean remainingClaimsExhausted(String text) {
+        return text != null && text.replaceAll("\\s+", " ")
+                .matches("(?is).*remaining\\s*claims\\s*today\\s*:\\s*0\\b.*");
+    }
+
+    private ImageSearchResultData detectClaimAll() {
+        // Serve-EMU 720x1280: Claim All is at the bottom of the Ally Treasure
+        // modal, separate from the individual Claim rows. Verify both the
+        // button colour and its label before dispatching a single tap.
+        String label = readStringValue(new PointData(205, 1010), new PointData(520, 1140), null);
+        if (label == null || !label.toLowerCase(java.util.Locale.ROOT)
+                .replaceAll("[^a-z]", "").contains("claimall")) {
+            return ImageSearchResultData.miss();
+        }
+        var region = new GreenLabelActionDetector.Region(210, 1010, 515, 1145);
+        var first = GreenLabelActionDetector.detect(
+                ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER)), region);
+        if (!first.isFound()) return ImageSearchResultData.miss();
+        sleepTask(150);
+        var second = GreenLabelActionDetector.detect(
+                ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER)), region);
+        return RecognitionConsensus.agrees(first, second, 15) ? second : ImageSearchResultData.miss();
+    }
+
+    private void claimTreasureIfAvailable() {
+        // The game keeps green individual Claim buttons visible even after
+        // Remaining claims today reaches zero. Never click them in that state.
+        String quota = readStringValue(new PointData(180, 265), new PointData(530, 335), null);
+        if (remainingClaimsExhausted(quota)) {
+            logInfo("Ally Treasure daily claim quota exhausted; skipping still-visible Claim rows");
+            rescheduleToGameReset("Ally Treasure remaining claims today 0");
+            return;
+        }
+        ImageSearchResultData claimAll = detectClaimAll();
+        if (claimAll.isFound()) {
+            logInfo("Verified Ally Treasure Claim All label and green button; tapping once");
+            tapInside(claimAll);
+            sleepTask(550);
+            // The game opens a Rewards overlay. Dismiss it once, then
+            // confirm that daily claims were consumed before daily reset.
+            tapNear(new PointData(355, 1175));
+            sleepTask(350);
+            String remaining = readStringValue(new PointData(180, 265), new PointData(530, 335), null);
+            if (remaining != null && remainingClaimsExhausted(remaining)) {
+                rescheduleToGameReset("Ally Treasure Claim All confirmed: remaining claims today 0");
+            } else {
+                markWorkIncomplete("Ally Treasure Claim All: remaining claims not verified after Rewards overlay");
+                rescheduleForRetry();
+            }
+            return;
+        }
+        ImageSearchResultData claimButton = templateSearchHelper.locatePattern(
 				TemplatesEnum.PETS_BEAST_ALLIANCE_CLAIM,
 				SearchConfigConstants.DEFAULT_SINGLE);
 
 		if (claimButton.isFound()) {
 			logInfo("Claim button found - claiming alliance treasure");
-			tapInside(claimButton.getPoint(), claimButton.getPoint());
-			sleepTask(500); // Wait for claim animation
-			rescheduleToGameReset("Alliance treasure claimed successfully");
-		} else {
-			logInfo("No claimable treasure found - already claimed today");
-			rescheduleToGameReset("Treasure already claimed");
-		}
+            tapInside(claimButton);
+            sleepTask(500);
+            // A dispatched click is not a successful claim. If the exact
+            // Claim button remains, retry later rather than hiding the miss
+            // until tomorrow's reset.
+            if (templateSearchHelper.locatePattern(
+                    TemplatesEnum.PETS_BEAST_ALLIANCE_CLAIM,
+                    SearchConfigConstants.DEFAULT_SINGLE).isFound()) {
+                markWorkIncomplete("Pet Alliance Treasure: Claim button remained after tap");
+                rescheduleForRetry();
+                return;
+            }
+            rescheduleToGameReset("Alliance treasure Claim disappeared after tap");
+        } else {
+            // A missing Claim template is not evidence of exhausted daily
+            // quota. Only an OCR-confirmed zero may defer until reset.
+            markWorkIncomplete("Ally Treasure: no claim control and daily quota not confirmed exhausted");
+            logWarning("No claim control visible and quota is not confirmed zero; retrying safely");
+            rescheduleForRetry();
+        }
 	}
 
 	// ========================================================================

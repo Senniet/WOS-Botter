@@ -40,6 +40,7 @@ import dev.frostguard.api.runtime.WorkspacePaths;
 import dev.frostguard.engine.helper.MarchSlotAvailabilityEstimator;
 import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.schedule.GatherQueuePolicy;
+import dev.frostguard.engine.error.TaskOutcomeUnknownException;
 import dev.frostguard.engine.schedule.LaunchPoint;
 import dev.frostguard.engine.schedule.TaskQueue;
 import dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig;
@@ -127,6 +128,7 @@ public class GatherRoutine extends DelayedTask {
     private List<GatherType> rotationPool;
     private LocalDateTime earliestReschedule;
     private ResilientOcrExecutor<LocalDateTime> textHelper;
+    private boolean confirmedDailyMissionProgress;
     // pernerch/2026-07-02: stored per-profile task instance (one GatherRoutine per profile).
     // Records when gather troops were recalled by Intel or Bear Trap so we can wait for them
     // to return before re-deploying. Also persisted to profile config for crash recovery.
@@ -140,6 +142,7 @@ public class GatherRoutine extends DelayedTask {
 
     @Override
     protected void execute() {
+        confirmedDailyMissionProgress = false;
         loadConfig();
 
         if (enabledTypes.isEmpty()) {
@@ -249,6 +252,28 @@ public class GatherRoutine extends DelayedTask {
 
         // 2. Fill Queues (Persistent Rotation)
         GatherFillResult fillResult = fillQueues(activeGatherCount, idleSlotCount, activeMarches);
+
+        // A dispatch is not proof that a march actually left. Compare the March Queue before and after.
+        if (fillResult.deployed() > 0) {
+            GatherMarchSnapshot verifiedSnapshot = readGatherMarchSnapshot();
+            int confirmedDeployments = countConfirmedNewGatherMarches(
+                    marchSnapshot.slots(), verifiedSnapshot.slots());
+            confirmedDailyMissionProgress = confirmedDeployments > 0;
+            if (confirmedDeployments < fillResult.deployed()) {
+                LocalDateTime retryAt = LocalDateTime.now().plusMinutes(UNKNOWN_MARCH_RETRY_MINUTES);
+                logWarning(String.format(
+                        "Gather dispatch verification incomplete: dispatched=%d confirmed=%d. "
+                                + "No repeat tap; rechecking March Queue at %s.",
+                        fillResult.deployed(), confirmedDeployments, GameTimeUtils.formatCountdown(retryAt)));
+                reschedule(retryAt);
+                if (confirmedDeployments == 0) {
+                    throw new TaskOutcomeUnknownException(
+                            "Gather deployment could not be confirmed; bounded March Queue retry scheduled without recording completion.");
+                }
+                return;
+            }
+            logInfo("Confirmed " + confirmedDeployments + " new gather march deployment(s) in March Queue.");
+        }
 
         // 3. Save & Finalize
         finalizeReschedule(fillResult);
@@ -491,9 +516,11 @@ public class GatherRoutine extends DelayedTask {
     // slots are blocked, recall already-recallable marches before falling back to a fixed wait.
     private int recallBlockedMarchesWhenAutojoinOffFlow() {
         navigationHelper.ensureCorrectScreenLocation(LaunchPoint.WORLD);
+        List<MarchSlotState> beforeRecall = marchHelper.readMarchQueueSinglePass();
         sleepTask(250);
         marchHelper.openLeftMenuCitySection(false);
 
+        int dispatched = 0;
         try {
             PointData limit = new PointData(415,
                     MARCH_QUEUES[MARCH_QUEUES.length - 1].bottomRight.getY());
@@ -512,8 +539,6 @@ public class GatherRoutine extends DelayedTask {
             }
 
             recallButtons.sort(Comparator.comparingInt(button -> button.getPoint().getY()));
-            int recalled = 0;
-
             for (ImageSearchResultData recallButton : recallButtons) {
                 if (recallButton == null || !recallButton.isFound()) {
                     continue;
@@ -522,13 +547,19 @@ public class GatherRoutine extends DelayedTask {
                 tapInside(recallButton.getPoint(), recallButton.getPoint(), 1, 200);
                 tapInside(RECALL_CONFIRM_TL, RECALL_CONFIRM_BR, 1, 200);
                 sleepTask(400);
-                recalled++;
+                dispatched++;
             }
-
-            return recalled;
         } finally {
             marchHelper.closeLeftMenu();
         }
+
+        if (dispatched == 0) {
+            return 0;
+        }
+        List<MarchSlotState> afterRecall = marchHelper.readMarchQueueSinglePass();
+        int confirmed = countConfirmedRecallTransitions(beforeRecall, afterRecall);
+        logInfo(String.format("Autojoin-off recall verification: dispatched=%d confirmed=%d", dispatched, confirmed));
+        return confirmed;
     }
 
     static RecallBatchResult executeRecallBatch(List<ActiveGatherMarchCandidate> candidates,
@@ -537,23 +568,73 @@ public class GatherRoutine extends DelayedTask {
         for (ActiveGatherMarchCandidate candidate : candidates) {
             RecallAttempt attempt = recall.apply(candidate);
             if (attempt == RecallAttempt.CONTROLS_NOT_FOUND) {
-                return new RecallBatchResult(recalled, true);
+                return new RecallBatchResult(recalled, true, false);
+            }
+            if (attempt == RecallAttempt.UNKNOWN_OUTCOME) {
+                return new RecallBatchResult(recalled, false, true);
             }
             if (attempt == RecallAttempt.RECALLED) recalled++;
         }
-        return new RecallBatchResult(recalled, false);
+        return new RecallBatchResult(recalled, false, false);
     }
 
-    // Builds a typed snapshot of active gather marches for explicit high-priority event recalls.
-    private List<ActiveGatherMarchCandidate> collectActiveGatherMarchCandidatesFlow() {
-        return collectActiveGatherMarchCandidates(marchHelper.readMarchQueueSinglePass());
+    static List<MarchSlotState> collectActiveGatherMarchSlots(List<MarchSlotState> slots) {
+        return slots.stream().filter(MarchSlotState::isGather).toList();
     }
 
-    private List<ActiveGatherMarchCandidate> collectActiveGatherMarchCandidates(List<MarchSlotState> slots) {
+    static boolean hasUnknownMarchQueueState(List<MarchSlotState> slots) {
+        return slots.isEmpty() || slots.stream().anyMatch(slot ->
+                slot.availability() == MarchSlotAvailability.UNKNOWN
+                        || (slot.availability() == MarchSlotAvailability.OCCUPIED
+                        && (slot.activityType() == MarchActivityType.UNKNOWN
+                        || slot.movementPhase() == MarchMovementPhase.UNKNOWN)));
+    }
+
+    static boolean isRecallCandidate(MarchSlotState slot) {
+        return slot != null
+                && slot.availability() == MarchSlotAvailability.OCCUPIED
+                && slot.activityType() == MarchActivityType.GATHER
+                && (slot.movementPhase() == MarchMovementPhase.OUTBOUND
+                || slot.movementPhase() == MarchMovementPhase.WORKING);
+    }
+
+    static boolean isRecallConfirmed(MarchSlotState before, MarchSlotState after) {
+        if (before == null || after == null
+                || before.availability() != MarchSlotAvailability.OCCUPIED
+                || before.activityType() == MarchActivityType.NONE
+                || before.activityType() == MarchActivityType.UNKNOWN
+                || before.movementPhase() == MarchMovementPhase.RETURNING
+                || before.movementPhase() == MarchMovementPhase.UNKNOWN) {
+            return false;
+        }
+        return after.availability() == MarchSlotAvailability.IDLE
+                || after.movementPhase() == MarchMovementPhase.RETURNING;
+    }
+
+    static int countConfirmedRecallTransitions(List<MarchSlotState> before, List<MarchSlotState> after) {
+        int confirmed = 0;
+        for (MarchSlotState previous : before) {
+            MarchSlotState current = after.stream()
+                    .filter(slot -> slot.slot() == previous.slot())
+                    .findFirst()
+                    .orElse(null);
+            if (isRecallConfirmed(previous, current)) {
+                confirmed++;
+            }
+        }
+        return confirmed;
+    }
+
+    // Builds candidates only for marches that can still be recalled (not already returning or unknown).
+    private List<ActiveGatherMarchCandidate> collectRecallEligibleGatherMarchCandidatesFlow() {
+        return collectRecallEligibleGatherMarchCandidates(marchHelper.readMarchQueueSinglePass());
+    }
+
+    private List<ActiveGatherMarchCandidate> collectRecallEligibleGatherMarchCandidates(List<MarchSlotState> slots) {
         List<ActiveGatherMarchCandidate> candidates = new ArrayList<>();
         LocalDateTime now = LocalDateTime.now();
         for (MarchSlotState slot : slots) {
-            if (slot.activityType() != MarchActivityType.GATHER) {
+            if (!isRecallCandidate(slot)) {
                 continue;
             }
 
@@ -568,7 +649,7 @@ public class GatherRoutine extends DelayedTask {
                     .estimateNextCheck(slot, MARCH_SLOT_ESTIMATE_SETTINGS)
                     .map(now::plus)
                     .orElse(now.plusMinutes(UNKNOWN_MARCH_RETRY_MINUTES));
-            candidates.add(new ActiveGatherMarchCandidate(type, slot.slot() - 1, returnTime));
+            candidates.add(new ActiveGatherMarchCandidate(type, slot.slot() - 1, returnTime, slot));
         }
         return candidates;
     }
@@ -578,15 +659,30 @@ public class GatherRoutine extends DelayedTask {
         navigationHelper.ensureCorrectScreenLocation(LaunchPoint.WORLD);
         sleepTask(250);
         marchHelper.openLeftMenuSection(false);
+        RecallAttempt dispatched;
         try {
-            RecallAttempt attempt = recallGatherMarchFromOpenPanelFlow(candidate, reason);
-            if (attempt == RecallAttempt.CONTROLS_NOT_FOUND) {
+            dispatched = recallGatherMarchFromOpenPanelFlow(candidate, reason);
+            if (dispatched == RecallAttempt.CONTROLS_NOT_FOUND) {
                 saveMissingRecallControlsScreenshot();
             }
-            return attempt;
         } finally {
             marchHelper.closeLeftMenu();
         }
+        if (dispatched != RecallAttempt.RECALLED) {
+            return dispatched;
+        }
+        List<MarchSlotState> afterRecall = marchHelper.readMarchQueueSinglePass();
+        MarchSlotState after = afterRecall.stream()
+                .filter(slot -> slot.slot() == candidate.queueIndex() + 1)
+                .findFirst()
+                .orElse(null);
+        if (isRecallConfirmed(candidate.initialState(), after)) {
+            logInfo("Gather recall confirmed by March Queue state: queue=#" + (candidate.queueIndex() + 1));
+            return RecallAttempt.RECALLED;
+        }
+        logWarning("Gather recall outcome is unknown after the confirmation tap: queue=#"
+                + (candidate.queueIndex() + 1) + "; no second recall tap will be sent.");
+        return RecallAttempt.UNKNOWN_OUTCOME;
     }
 
     private RecallAttempt recallGatherMarchFromOpenPanelFlow(
@@ -620,8 +716,9 @@ public class GatherRoutine extends DelayedTask {
 
         tapInside(targetButton.getPoint(), targetButton.getPoint(), 1, 200);
         tapInside(RECALL_CONFIRM_TL, RECALL_CONFIRM_BR, 1, 200);
+        sleepTask(500);
         logInfo(String.format(
-                "Gather march recall | reason=%s | queue=#%d | type=%s | return=%s",
+                "Gather march recall dispatched | reason=%s | queue=#%d | type=%s | return=%s",
                 reason.logValue,
                 queueIndex + 1,
                 candidate.type(),
@@ -675,7 +772,10 @@ public class GatherRoutine extends DelayedTask {
                 }
                 setOnlyFullResourcesSearch(onlyFullResources);
                 if (!executeSearch()) {
-                    return retryLater(GatherDeployResult.BLOCKED);
+                    // A search with no confirmed Gather target is a missing node,
+                    // not proof that a march was launched or the UI was navigated.
+                    result = GatherDeployResult.NO_NODE_FOUND;
+                    break;
                 }
 
                 result = deployMarchAction(type, level);
@@ -714,10 +814,27 @@ public class GatherRoutine extends DelayedTask {
 
     private boolean openSearchMenu() {
         tapInside(SEARCH_BTN_TL, SEARCH_BTN_BR);
-        sleepTask(2000);
+        // A previous gather leaves the search panel positioned at its
+        // resource tabs; do not swipe away when Meat/Wood is already visible.
+        sleepTask(450);
+        if (isResourceSearchPanelVisible()) return true;
         swipe(RES_TAB_SWIPE_START, RES_TAB_SWIPE_END);
-        sleepTask(500);
-        return true;
+        sleepTask(300);
+        boolean opened = isResourceSearchPanelVisible();
+        if (!opened) {
+            logWarning("Gather resource search did not open or show Meat/Wood after swipe; "
+                    + "not attempting resource selection or blind search taps.");
+        }
+        return opened;
+    }
+
+    private boolean isResourceSearchPanelVisible() {
+        SearchConfig config = SearchConfig.builder().withArea(AreaData.of(0, 835, 720, 995))
+                .withThreshold(90).withMaxAttempts(2).withDelay(200).build();
+        return templateSearchHelper.locatePattern(TemplatesEnum.GAME_HOME_SHORTCUTS_FARM_MEAT,
+                config).isFound()
+                || templateSearchHelper.locatePattern(TemplatesEnum.GAME_HOME_SHORTCUTS_FARM_WOOD,
+                        config).isFound();
     }
 
     private boolean selectTile(GatherType type) {
@@ -771,15 +888,27 @@ public class GatherRoutine extends DelayedTask {
 
     private boolean executeSearch() {
         tapInside(SEARCH_EXEC_TL, SEARCH_EXEC_BR);
-        sleepTask(3000);
-        return true;
+        sleepTask(550);
+        // Do not treat the Search tap alone as a located resource. The actual
+        // Lv.1 Meat panel keeps the resource-search sidebar open, but adds a
+        // visible Gather action in the node modal. Absence is a bounded
+        // no-node result and can use the existing lower-level fallback.
+        for (int attempt = 0; attempt < 2; attempt++) {
+            if (locateGatherButton().isFound()) return true;
+            if (attempt == 0) sleepTask(350);
+        }
+        logWarning("Gather search did not produce a verified Gather action; "
+                + "not proceeding to formation or deployment");
+        return false;
     }
 
     private GatherDeployResult deployMarchAction(GatherType type, int level) {
-        ImageSearchResultData btn = templateSearchHelper.locatePattern(TemplatesEnum.GAME_HOME_SHORTCUTS_FARM_GATHER,
-                SearchConfig.builder().build());
+        ImageSearchResultData btn = locateGatherButton();
         if (!btn.isFound()) {
-            logInfo(String.format("No gather node found: type=%s level=%d onlyFull=%s",
+            saveMissingGatherButtonScreenshot(type, level);
+            logWarning(String.format(
+                    "Gather button not recognized after resource search: type=%s level=%d onlyFull=%s. "
+                    + "The resource may exist but its button may differ from the saved template.",
                     type, level, onlyFullResources));
             return GatherDeployResult.NO_NODE_FOUND;
         }
@@ -795,7 +924,11 @@ public class GatherRoutine extends DelayedTask {
         }
         GatherHeroSelectionPolicy.Action heroAction = GatherHeroSelectionPolicy.select(
                 hero.isFound(), removeHeroes, noHeroFallback);
+        logInfo("Gather formation hero selection: action=" + heroAction
+                + " preferredHeroFound=" + hero.isFound());
         if (!applyHeroSelection(type, heroAction)) {
+            logWarning("Gather hero selection could not be verified; deployment stopped.");
+            saveGatherFormationScreenshot("hero-selection", type, level);
             return GatherDeployResult.BLOCKED;
         }
 
@@ -804,16 +937,22 @@ public class GatherRoutine extends DelayedTask {
             return GatherDeployResult.NO_TROOPS_AVAILABLE;
         }
 
-        ImageSearchResultData deploy = templateSearchHelper.locatePattern(TemplatesEnum.GATHER_DEPLOY_BUTTON,
-                SearchConfig.builder().build());
+        ImageSearchResultData deploy = locateConfirmedGatherDeployButton();
         if (!deploy.isFound()) {
             if (deploymentHelper.hasNoDeployableTroops()) {
-                logInfo("Gather deploy button is absent because no deployable troops are available.");
+                logInfo("Gather deploy button absent: no deployable troops available.");
+                saveGatherFormationScreenshot("no-troops", type, level);
                 return GatherDeployResult.NO_TROOPS_AVAILABLE;
             }
+            logWarning("Gather formation reached, but Deploy button was not recognized; "
+                    + "not treating this as a completed march.");
+            saveGatherFormationScreenshot("deploy-button", type, level);
             return GatherDeployResult.BLOCKED;
         }
 
+        logInfo(String.format(java.util.Locale.ROOT,
+                "Gather Deploy button verified at %s (score %.1f), tapping once.",
+                deploy.getPoint(), deploy.getMatchScore()));
         tapInside(deploy);
         sleepTask(1000);
 
@@ -826,7 +965,109 @@ public class GatherRoutine extends DelayedTask {
             pressBack();
             return GatherDeployResult.SAME_TARGET;
         }
+        // A disappearing button does not prove that the march departed. Only
+        // the verified World screen after one Deploy tap authorizes completion.
+        var launched = deploymentHelper.verifyLaunchTransition(TemplatesEnum.SERVE_EMU_GATHER_DEPLOY);
+        if (launched != dev.frostguard.engine.helper.DeploymentHelper.LaunchCheck.WORLD_VERIFIED) {
+            logWarning("Gather Deploy tap not confirmed by return to World: " + launched
+                    + "; not counting a dispatched march or sending another tap");
+            saveGatherFormationScreenshot("launch-world-unverified", type, level);
+            return GatherDeployResult.BLOCKED;
+        }
         return GatherDeployResult.DEPLOYED;
+    }
+
+    private ImageSearchResultData locateConfirmedGatherDeployButton() {
+        // The current Serve-EMU formation has an exact Deploy template.
+        // Task Coach observed 8 positive hits; the remaining eight misses
+        // were on transitions or other screens. Never scan the full image
+        // through several expensive legacy multiscale fallbacks on Serve-EMU.
+        SearchConfig liveArea=SearchConfig.builder().withMaxAttempts(1)
+                .withThreshold(90).withArea(AreaData.of(400,1140,705,1270)).build();
+        if (emuManager.getSelectedEmulatorType()
+                == dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU) {
+            RawImageData first=emuManager.captureScreen(EMULATOR_NUMBER);
+            ImageSearchResultData candidate=emuManager.locatePattern(EMULATOR_NUMBER,
+                    first,TemplatesEnum.SERVE_EMU_GATHER_DEPLOY,
+                    new PointData(400,1140),new PointData(705,1270),90);
+            if (candidate==null || !candidate.isFound()) return ImageSearchResultData.miss();
+            sleepTask(120);
+            RawImageData second=emuManager.captureScreen(EMULATOR_NUMBER);
+            ImageSearchResultData confirmed=emuManager.locatePattern(EMULATOR_NUMBER,
+                    second,TemplatesEnum.SERVE_EMU_GATHER_DEPLOY,
+                    new PointData(400,1140),new PointData(705,1270),90);
+            if (confirmed!=null && confirmed.isFound()
+                    && candidate.getPoint().manhattanDistanceTo(confirmed.getPoint())<=12)
+                return confirmed;
+            return ImageSearchResultData.miss();
+        }
+        ImageSearchResultData current=templateSearchHelper.locateAction(
+                TemplatesEnum.SERVE_EMU_GATHER_DEPLOY,liveArea);
+        if (current.isFound()) return current;
+        // Retain compatibility for non-Serve-EMU emulators only.
+        ImageSearchResultData exact=templateSearchHelper.locatePattern(
+                TemplatesEnum.GATHER_DEPLOY_BUTTON,
+                SearchConfig.builder().withMaxAttempts(2).build());
+        if (exact.isFound()) return exact;
+        ImageSearchResultData first=templateSearchHelper.locatePatternMultiScale(
+                TemplatesEnum.GATHER_DEPLOY_BUTTON,
+                SearchConfig.builder().withThreshold(86).withMaxAttempts(1).build());
+        if (!first.isFound()) return ImageSearchResultData.miss();
+        sleepTask(180);
+        ImageSearchResultData second=templateSearchHelper.locatePatternMultiScale(
+                TemplatesEnum.GATHER_DEPLOY_BUTTON,
+                SearchConfig.builder().withThreshold(86).withMaxAttempts(1).build());
+        return second.isFound() && first.getPoint().manhattanDistanceTo(second.getPoint())<=20
+                ? second : ImageSearchResultData.miss();
+    }
+
+    private void saveGatherFormationScreenshot(String reason, GatherType type, int level) {
+        try {
+            Path folder = WorkspacePaths.current().root().resolve("temp");
+            Files.createDirectories(folder);
+            String profileName = profile.getName() == null ? "profile" : profile.getName();
+            String safeName = profileName.replaceAll("[^A-Za-z0-9._-]", "_");
+            Path output = folder.resolve("gather-formation-" + reason + "-"
+                    + safeName + "-latest.png");
+            RawImageData frame = emuManager.captureScreen(EMULATOR_NUMBER);
+            if (ImageIO.write(dev.frostguard.vision.convert.ImageConverter.toBufferedImage(frame),
+                    "png", output.toFile())) {
+                logWarning("Gather formation diagnostic saved: " + output
+                        + " (type=" + type + ", level=" + level + ")");
+            }
+        } catch (Exception e) {
+            logWarning("Could not capture Gather formation diagnostic: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Prefer the existing exact Gather template. BlueStacks rendering may alter
+     * button scaling slightly, so attempt multi-scale recognition before declaring
+     * a node missing. A lower-confidence match must repeat at the same location.
+     */
+    private ImageSearchResultData locateGatherButton() {
+        // Confirm in two distinct frames so an incidental Gather label cannot
+        // cause a blind tap. The result remains screen-scoped to the searched
+        // resource's card and is followed by a verified formation state.
+        return templateSearchHelper.locateAction(TemplatesEnum.GAME_HOME_SHORTCUTS_FARM_GATHER,
+                SearchConfig.builder().withMaxAttempts(2).withDelay(150)
+                        .withThreshold(89).build());
+    }
+
+    private void saveMissingGatherButtonScreenshot(GatherType type, int level) {
+        try {
+            Path folder = WorkspacePaths.current().root().resolve("temp");
+            Files.createDirectories(folder);
+            String safeName = profile.getName().replaceAll("[^A-Za-z0-9._-]", "_");
+            Path output = folder.resolve("gather-button-missing-" + safeName + "-latest.png");
+            RawImageData frame = emuManager.captureScreen(EMULATOR_NUMBER);
+            BufferedImage image = dev.frostguard.vision.convert.ImageConverter.toBufferedImage(frame);
+            ImageIO.write(image, "png", output.toFile());
+            logWarning("Gather detection screenshot saved: " + output
+                    + " (type=" + type + ", level=" + level + ")");
+        } catch (Exception e) {
+            logWarning("Could not save Gather detection screenshot: " + e.getMessage());
+        }
     }
 
     // ================= HELPERS (UI/OCR) =================
@@ -1060,14 +1301,9 @@ public class GatherRoutine extends DelayedTask {
     // pernerch/2026-07-02: recalls all active gather marches and records the recall timestamp.
     // Timestamp is stored both as instance field (fast) and in profile config (survives restart).
     private void recallAllGatherMarchesAndTrack() {
-        // Record BEFORE recalling so the return margin counts from now
-        this.lastRecallTime = LocalDateTime.now();
-        writeProfileSetting(ConfigurationKeyEnum.GATHER_LAST_RECALL_TIME_STRING, lastRecallTime.toString());
-        logInfo("Gather march recall for high-priority event. Recall time recorded: "
-            + lastRecallTime.format(DATETIME_FORMATTER));
-        List<ActiveGatherMarchCandidate> candidates = collectActiveGatherMarchCandidatesFlow();
+        List<ActiveGatherMarchCandidate> candidates = collectRecallEligibleGatherMarchCandidatesFlow();
         if (candidates.isEmpty()) {
-            logInfo("No active gather marches found to recall.");
+            logInfo("No recall-eligible gather marches found.");
             return;
         }
         RecallBatchResult result = executeRecallBatch(candidates, candidate -> {
@@ -1075,12 +1311,23 @@ public class GatherRoutine extends DelayedTask {
             if (attempt == RecallAttempt.RECALLED) sleepTask(300);
             return attempt;
         });
+        if (result.recalled() > 0) {
+            lastRecallTime = LocalDateTime.now();
+            writeProfileSetting(ConfigurationKeyEnum.GATHER_LAST_RECALL_TIME_STRING, lastRecallTime.toString());
+            logInfo("Confirmed gather recall time recorded: " + lastRecallTime.format(DATETIME_FORMATTER));
+        }
         if (result.controlsMissing()) {
             logWarning(String.format(
                     "High-priority gather recall stopped: recall controls not detected; remaining marches=%d",
                     candidates.size() - result.recalled()));
         }
-        logInfo("Recalled " + result.recalled() + " gather march(es) for high-priority event.");
+        if (result.unknownOutcome()) {
+            logWarning(String.format(
+                    "High-priority gather recall stopped on an unknown outcome; no repeated tap sent; "
+                            + "remaining marches=%d",
+                    candidates.size() - result.recalled()));
+        }
+        logInfo("Confirmed " + result.recalled() + " gather march recall(s) for high-priority event.");
     }
 
     // pernerch/2026-07-02: calculates when to resume gather after all pending high-priority events end.
@@ -1111,7 +1358,7 @@ public class GatherRoutine extends DelayedTask {
 
     // pernerch/2026-07-02: after an Intel or Bear recall, waits for troops to return home before
     // re-deploying. Uses option B: start with TROOP_RETURN_MARGIN_MINUTES, then +1 min per check
-    // until collectActiveGatherMarchCandidatesFlow() reports zero active gather marches.
+    // until the March Queue reports zero gather marches (including those already returning).
     private boolean checkTroopReturnPending() {
         if (lastRecallTime == null) return false;
         // Expire recall state after 2 hours to prevent permanent blocking from stale data
@@ -1119,15 +1366,20 @@ public class GatherRoutine extends DelayedTask {
             clearRecallState();
             return false;
         }
-        List<ActiveGatherMarchCandidate> active = collectActiveGatherMarchCandidatesFlow();
-        if (active.isEmpty()) {
+        List<MarchSlotState> queueState = marchHelper.readMarchQueueSinglePass();
+        List<MarchSlotState> active = collectActiveGatherMarchSlots(queueState);
+        boolean queueStateUnknown = hasUnknownMarchQueueState(queueState);
+        if (active.isEmpty() && !queueStateUnknown) {
             logInfo("All recalled gather troops have returned home. Clearing recall state and proceeding with fresh deployment.");
             clearRecallState();
             return false; // troops home, proceed with normal execute
         }
         LocalDateTime retryAt = LocalDateTime.now().plusMinutes(TROOP_RETURN_RETRY_MINUTES);
+        if (queueStateUnknown) {
+            logWarning("March Queue state is incomplete; keeping the recall wait active instead of assuming troops are home.");
+        }
         logInfo(String.format(
-            "Recalled gather troops still returning (%d march(es) active). Rechecking in %d min at %s.",
+            "Recalled gather troops still outside or unverified (%d gather march(es) active). Rechecking in %d min at %s.",
             active.size(), TROOP_RETURN_RETRY_MINUTES, GameTimeUtils.formatCountdown(retryAt)));
         reschedule(retryAt);
         return true;
@@ -1176,7 +1428,36 @@ public class GatherRoutine extends DelayedTask {
 
     @Override
     public boolean provideDailyMissionProgress() {
-        return true;
+        return confirmedDailyMissionProgress;
+    }
+
+    static int countConfirmedNewGatherMarches(List<MarchSlotState> before, List<MarchSlotState> after) {
+        if (before.isEmpty() || after.isEmpty()) {
+            return 0;
+        }
+        int confirmed = 0;
+        for (MarchSlotState current : after) {
+            if (!isActiveGatherMarch(current)) {
+                continue;
+            }
+            MarchSlotState previous = before.stream()
+                    .filter(slot -> slot.slot() == current.slot())
+                    .findFirst()
+                    .orElse(null);
+            if (previous != null
+                    && (previous.availability() == MarchSlotAvailability.IDLE
+                    || previous.movementPhase() == MarchMovementPhase.RETURNING)) {
+                confirmed++;
+            }
+        }
+        return confirmed;
+    }
+
+    private static boolean isActiveGatherMarch(MarchSlotState slot) {
+        return slot.activityType() == MarchActivityType.GATHER
+                && slot.availability() == MarchSlotAvailability.OCCUPIED
+                && (slot.movementPhase() == MarchMovementPhase.OUTBOUND
+                || slot.movementPhase() == MarchMovementPhase.WORKING);
     }
 
     // ================= INNER CLASSES =================
@@ -1221,10 +1502,17 @@ public class GatherRoutine extends DelayedTask {
                                        LocalDateTime nextCheckAt, LocalDateTime earliestGatherCheckAt) {
     }
 
-    record ActiveGatherMarchCandidate(GatherType type, int queueIndex, LocalDateTime returnTime) {
+    record ActiveGatherMarchCandidate(GatherType type, int queueIndex, LocalDateTime returnTime,
+                                      MarchSlotState initialState) {
+        ActiveGatherMarchCandidate(GatherType type, int queueIndex, LocalDateTime returnTime) {
+            this(type, queueIndex, returnTime, null);
+        }
     }
 
-    record RecallBatchResult(int recalled, boolean controlsMissing) {
+    record RecallBatchResult(int recalled, boolean controlsMissing, boolean unknownOutcome) {
+        RecallBatchResult(int recalled, boolean controlsMissing) {
+            this(recalled, controlsMissing, false);
+        }
     }
 
     private record GatherFillResult(int deployed, int noNode, int blocked, int sameTargetBlocked,
@@ -1241,7 +1529,8 @@ public class GatherRoutine extends DelayedTask {
 
     enum RecallAttempt {
         RECALLED,
-        CONTROLS_NOT_FOUND
+        CONTROLS_NOT_FOUND,
+        UNKNOWN_OUTCOME
     }
 
     enum RecallReason {

@@ -15,6 +15,8 @@ class UpdateEndpointResolverTest {
     void clearProperties() {
         System.clearProperty(UpdateEndpointResolver.STABLE_PROPERTY);
         System.clearProperty(UpdateEndpointResolver.NIGHTLY_PROPERTY);
+        System.clearProperty("survivalops.update.manifest.stable");
+        System.clearProperty("frostguard.brand.name");
     }
 
     @Test
@@ -26,6 +28,35 @@ class UpdateEndpointResolverTest {
     void resolvesChannelSpecificHttpsEndpoint() throws Exception {
         System.setProperty(UpdateEndpointResolver.STABLE_PROPERTY, "https://updates.example.com/stable.json");
         assertEquals("https://updates.example.com/stable.json",
+                resolver.resolve(RuntimeChannel.STABLE).orElseThrow().toString());
+    }
+
+    @Test
+    void survivalOpsUsesDedicatedStableReleaseFeedAndHasNoNightlyFallback() throws Exception {
+        // A packaged test-feed URL may be supplied to the whole Maven process.
+        // This test verifies the production fallback, so isolate it explicitly.
+        System.clearProperty(UpdateEndpointResolver.STABLE_PROPERTY);
+        System.clearProperty("survivalops.update.manifest.stable");
+        System.setProperty("frostguard.brand.name", "SurvivalOps");
+        assertEquals("https://github.com/Senniet/WOS-Botter/releases/download/survivalops-stable/survivalops-stable-manifest.json",
+                resolver.resolve(RuntimeChannel.STABLE).orElseThrow().toString());
+        assertFalse(resolver.resolve(RuntimeChannel.NIGHTLY).isPresent());
+    }
+
+    @Test
+    void survivalOpsCanUsePackagedStablePropertyForIsolatedTestFeed() throws Exception {
+        System.setProperty("frostguard.brand.name", "SurvivalOps");
+        System.setProperty(UpdateEndpointResolver.STABLE_PROPERTY,
+                "https://github.com/Senniet/WOS-Botter/releases/download/survivalops-test/survivalops-test-manifest.json");
+        assertEquals("https://github.com/Senniet/WOS-Botter/releases/download/survivalops-test/survivalops-test-manifest.json",
+                resolver.resolve(RuntimeChannel.STABLE).orElseThrow().toString());
+    }
+
+    @Test
+    void blankPackagedPropertyFallsBackToProductionStableFeed() throws Exception {
+        System.setProperty("frostguard.brand.name", "SurvivalOps");
+        System.setProperty(UpdateEndpointResolver.STABLE_PROPERTY, "");
+        assertEquals("https://github.com/Senniet/WOS-Botter/releases/download/survivalops-stable/survivalops-stable-manifest.json",
                 resolver.resolve(RuntimeChannel.STABLE).orElseThrow().toString());
     }
 

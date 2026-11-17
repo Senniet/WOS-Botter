@@ -2,6 +2,8 @@ package dev.frostguard.engine.emulator;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.net.InetAddress;
+import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -66,9 +68,7 @@ public final class AndroidTouchSession implements AutoCloseable {
             uploaded = true;
             run("push", localBinary.toString(), remote + ".jar");
             run("push", localScript.toString(), remote + ".sh");
-            String forwarded = run("forward", "tcp:0", remoteSocket).trim();
-            try { port = Integer.parseInt(forwarded); }
-            catch (NumberFormatException error) { throw new IOException("ADB returned an invalid control port", error); }
+            port = establishForward();
             if (port < 1 || port > 65535) throw new IOException("ADB control port out of range");
             checkCancellation();
             server = command("exec-out", "sh", remote + ".sh")
@@ -79,6 +79,50 @@ public final class AndroidTouchSession implements AutoCloseable {
             deleteLocal(localBinary);
             if (localScript != null) deleteLocal(localScript);
         }
+    }
+
+    /**
+     * Android's bundled ADB may accept tcp:0 without allocating a forward.
+     * An explicitly chosen local port is a bounded fallback. --no-rebind
+     * prevents hijacking another process's forwarding; verify ownership
+     * against the returned forward listing before opening the control socket.
+     */
+    private int establishForward() throws IOException, InterruptedException {
+        IOException autoFailure;
+        try {
+            String response = run("forward", "tcp:0", remoteSocket);
+            return resolveOwnedForwardPort(response, serial, remoteSocket,
+                    () -> run("forward", "--list"));
+        } catch (IOException failure) {
+            autoFailure = failure;
+        }
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            checkCancellation();
+            int candidate;
+            try (ServerSocket reservation = new ServerSocket(0, 1,
+                    InetAddress.getLoopbackAddress())) {
+                candidate = reservation.getLocalPort();
+            }
+            try {
+                run("forward", "--no-rebind", "tcp:" + candidate, remoteSocket);
+                List<Integer> verified = ownedForwardPorts(
+                        run("forward", "--list"), serial, remoteSocket);
+                if (verified.contains(candidate)) return candidate;
+                // A successful exit status with no listed port is not proof of
+                // forwarding. Don't interact with an unverified endpoint.
+            } catch (IOException error) {
+                autoFailure.addSuppressed(error);
+            }
+            // Remove only a port whose mapping is confirmed as ours.
+            try {
+                if (ownedForwardPorts(run("forward", "--list"), serial, remoteSocket)
+                        .contains(candidate)) {
+                    run("forward", "--remove", "tcp:" + candidate);
+                }
+            } catch (IOException ignored) { }
+        }
+        throw new IOException("ADB failed to establish a verified owned control forward "
+                + "(tcp:0 and 3 explicit ports)", autoFailure);
     }
 
     private void connect() throws IOException, InterruptedException {
@@ -161,6 +205,31 @@ public final class AndroidTouchSession implements AutoCloseable {
         }
     }
 
+    @FunctionalInterface
+    interface ForwardListing {
+        String list() throws IOException, InterruptedException;
+    }
+
+    /**
+     * Some ADB builds return an empty / nonnumeric response for tcp:0 even
+     * though the forward was installed. Resolve only a unique exact owned
+     * socket and serial. Never select a random unrelated forward.
+     */
+    static int resolveOwnedForwardPort(String response, String serial, String remoteSocket,
+                                       ForwardListing listing) throws IOException, InterruptedException {
+        String trimmed = response == null ? "" : response.trim();
+        if (trimmed.matches("(?:tcp:)?[0-9]{1,5}")) {
+            int value = Integer.parseInt(trimmed.replace("tcp:", ""));
+            if (value > 0 && value <= 65535) return value;
+        }
+        List<Integer> matches = ownedForwardPorts(listing.list(), serial, remoteSocket);
+        if (matches.size() == 1) return matches.getFirst();
+        String clean = trimmed.replaceAll("[\r\n]+", " ").replaceAll("[^a-zA-Z0-9 :._-]", "");
+        throw new IOException("ADB did not provide a unique control port for owned socket; response="
+                + clean.substring(0, Math.min(100, clean.length()))
+                + " matchingOwnedForwards=" + matches.size());
+    }
+
     static List<Integer> ownedForwardPorts(String listing, String serial, String remoteSocket) {
         var ports = new ArrayList<Integer>();
         for (String line : listing.split("\\R")) {
@@ -212,8 +281,11 @@ public final class AndroidTouchSession implements AutoCloseable {
                 }
             } catch (IOException ignored) { }
             catch (InterruptedException error) { interrupted = true; Thread.interrupted(); }
-            if (port > 0 && port <= 65535) try { run("forward", "--remove", "tcp:" + port); }
-            catch (IOException ignored) { } catch (InterruptedException error) { interrupted = true; Thread.interrupted(); }
+            if (port > 0 && port <= 65535) try {
+                if (ownedForwardPorts(run("forward", "--list"), serial, remoteSocket).contains(port)) {
+                    run("forward", "--remove", "tcp:" + port);
+                }
+            } catch (IOException ignored) { } catch (InterruptedException error) { interrupted = true; Thread.interrupted(); }
         } finally {
             if (server != null && server.isAlive()) server.destroyForcibly();
             if (interrupted) Thread.currentThread().interrupt();

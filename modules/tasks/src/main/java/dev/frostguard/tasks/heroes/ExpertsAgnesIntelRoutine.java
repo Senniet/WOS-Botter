@@ -10,6 +10,8 @@ import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.schedule.LaunchPoint;
 import dev.frostguard.engine.helper.TemplateSearchHelper;
+import dev.frostguard.tasks.diagnostics.TaskDiagnosticSnapshots;
+import dev.frostguard.engine.error.HomeNotFoundException;
 
 import java.time.LocalDateTime;
 
@@ -155,10 +157,25 @@ public class ExpertsAgnesIntelRoutine extends DelayedTask {
         intelScreenHelper.ensureOnIntelScreen();
 
         boolean claimed = attemptToClaimAgnesIntel();
-
-        if (!claimed) {
-            logInfo("Agnes icon not found after " + MAX_AGNES_SEARCH_ATTEMPTS +
-                    " attempts. Assuming already claimed today");
+        boolean homeVerified = false;
+        try {
+            navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME, this::checkPreemption);
+            homeVerified = true;
+        } catch (HomeNotFoundException missing) {
+            logWarning("Agnes Intel: Home was not verified after visiting Intel: "
+                    + missing.getMessage());
+        }
+        if (!confirmedClaimAndHome(claimed, homeVerified)) {
+            // A missing icon can be a spent claim, changed artwork or a failed
+            // capture. None of those proves successful action AND navigation.
+            String evidence = TaskDiagnosticSnapshots.capture(
+                    emuManager, EMULATOR_NUMBER, "agnes-intel", "claim-or-home-unconfirmed");
+            markWorkIncomplete("Agnes Intel: reward claim or return Home not verified");
+            LocalDateTime retryAt = LocalDateTime.now().plusHours(1);
+            reschedule(retryAt);
+            logWarning("Agnes Intel unconfirmed; safe hourly retry at "
+                    + retryAt.format(DATETIME_FORMATTER) + "; " + evidence);
+            return;
         }
 
         rescheduleToGameReset();
@@ -198,11 +215,30 @@ public class ExpertsAgnesIntelRoutine extends DelayedTask {
             return false;
         }
 
-        logInfo("Agnes icon found - claiming intel");
+        logInfo("Agnes icon found - tapping once and verifying its disappearance");
         tapInside(agnesIcon);
-        sleepTask(1000); // Wait for claim animation to complete
+        sleepTask(700);
+        var afterConfig = TemplateSearchHelper.SearchConfig.builder()
+                .withArea(AGNES_ICON_AREA).withThreshold(AGNES_ICON_THRESHOLD)
+                .withMaxAttempts(1).build();
+        boolean stillVisibleFirst = templateSearchHelper.locatePattern(
+                TemplatesEnum.AGNES_CLAIM_INTEL, afterConfig).isFound();
+        sleepTask(180);
+        boolean stillVisibleSecond = templateSearchHelper.locatePattern(
+                TemplatesEnum.AGNES_CLAIM_INTEL, afterConfig).isFound();
+        boolean confirmed = claimDisappeared(true, stillVisibleFirst, stillVisibleSecond);
+        if (!confirmed)
+            logWarning("Agnes icon did not disappear on two independent post-tap frames");
+        return confirmed;
+    }
 
-        return true;
+    static boolean confirmedClaimAndHome(boolean claimed, boolean homeVerified) {
+        return claimed && homeVerified;
+    }
+
+    static boolean claimDisappeared(boolean existedBefore, boolean presentAfterFirst,
+                                    boolean presentAfterSecond) {
+        return existedBefore && !presentAfterFirst && !presentAfterSecond;
     }
 
     // ========================================================================

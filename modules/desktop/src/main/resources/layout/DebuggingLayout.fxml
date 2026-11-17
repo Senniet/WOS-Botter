@@ -30,7 +30,9 @@
             </StackPane>
         </VBox>
 
-        <!-- Right Side: Developer Controls / Action Panel -->
+        <!-- Right Side: scrollable diagnostics controls and reports -->
+        <ScrollPane fitToWidth="true" hbarPolicy="NEVER" styleClass="controls-scroll">
+          <content>
         <VBox spacing="16.0" styleClass="controls-card" alignment="TOP_CENTER" VBox.vgrow="ALWAYS">
             
             <!-- ADB Extraction Tools -->
@@ -48,6 +50,23 @@
                 </GridPane>
             </VBox>
                         
+            <!-- Guided diagnostics: run one real task while capturing its template decisions -->
+            <VBox spacing="8.0" styleClass="module-card">
+                <Label text="Task Coach — follow a running task" styleClass="module-title"/>
+                <ComboBox fx:id="coachTaskComboBox" maxWidth="Infinity" promptText="Select task to diagnose"/>
+                <CheckBox fx:id="coachAutoRepairCheckBox" text="Automatically activate strictly verified repairs" selected="true"/>
+                <HBox spacing="8" alignment="CENTER_LEFT">
+                    <Button text="Run task + diagnose" onAction="#handleStartTaskCoach" styleClass="compact-button"/>
+                    <Button text="Stop diagnostics" onAction="#handleStopTaskCoach" styleClass="compact-button"/>
+                    <Button text="Show report" onAction="#handleShowTaskCoach" styleClass="compact-button"/>
+                    <Button text="Upload evidence" onAction="#handleUploadTaskCoachEvidence" styleClass="compact-button"/>
+                </HBox>
+                <Label fx:id="coachStatusLabel" text="Idle — select a task and profile" wrapText="true" styleClass="field-label"/>
+                <Label text="Evidence upload uses LAN Diagnostics settings. Images require the existing screenshot-sharing option." wrapText="true" styleClass="field-label"/>
+                <Button text="Rollback selected template repair" onAction="#handleRollbackCoachTemplate" styleClass="compact-button" maxWidth="Infinity"/>
+                <Label text="Original templates are preserved. Unverified proposals remain inactive." wrapText="true" styleClass="field-label"/>
+            </VBox>
+
             <!-- Image Recognition Tools -->
             <!-- pernerch/2026-07-02: Fixed debugging UI - templates list now visible only when "Template Search" is selected -->
             <VBox spacing="12.0" styleClass="module-card" VBox.vgrow="ALWAYS">
@@ -56,6 +75,13 @@
                 <TextField fx:id="searchTextField" promptText="Search template..." styleClass="text-field" visible="false" managed="false"/>
                 <!-- pernerch/2026-07-02: Template list grows to fill available space and is visible only for Template Search mode -->
                 <ListView fx:id="templateListView" VBox.vgrow="ALWAYS" styleClass="list-view" visible="false" managed="false"/>
+                <Label text="Screen Library — label reference images for context checks" styleClass="field-label"/>
+                <HBox spacing="6" alignment="CENTER_LEFT">
+                    <ComboBox fx:id="auditGroupComboBox" promptText="Screen group" prefWidth="135" HBox.hgrow="ALWAYS"/>
+                    <Button text="Save screen" onAction="#handleSaveAuditScreen" styleClass="compact-button"/>
+                    <Button fx:id="btnAuditLibrary" text="Audit group" onAction="#handleAuditLibrary" styleClass="compact-button"/>
+                </HBox>
+                <Button text="Assign selected template to screen group" onAction="#handleAssignAuditTemplate" styleClass="compact-button" maxWidth="Infinity"/>
                 <HBox spacing="10" alignment="CENTER_LEFT">
                     <ComboBox fx:id="actionComboBox" maxWidth="Infinity" promptText="Choose Action" styleClass="combo-box" HBox.hgrow="ALWAYS"/>
                     <Button fx:id="btnRunAction" mnemonicParsing="false" text="Run" onAction="#handleRunAction" styleClass="compact-button"/>
@@ -68,5 +94,7 @@
                 <TextArea fx:id="logTextArea" editable="false" promptText="Logs will appear here..." styleClass="terminal-text-area" wrapText="true" VBox.vgrow="ALWAYS" />
             </VBox>
         </VBox>
+          </content>
+        </ScrollPane>
     </items>
 </SplitPane>
