@@ -12,6 +12,8 @@ class MailTabPlanTest {
         assertEquals(List.of("Wars", "Alliance", "System", "Reports", "Starred"),
                 plan.stream().map(MailRewardsRoutine.MailTab::name).toList());
         assertEquals(5, plan.size());
+        // Verified against live emulator-5554 Mail tabs at y=86..152 on 2026-11-17.
+        assertTrue(plan.stream().allMatch(tab -> tab.tabPosition().getY() == 120));
         assertEquals(360, plan.get(2).tabPosition().getX());
         assertTrue(plan.get(2).systemReports());
         assertFalse(plan.get(4).systemReports());

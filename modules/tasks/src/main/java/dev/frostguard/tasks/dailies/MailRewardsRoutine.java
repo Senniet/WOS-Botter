@@ -67,11 +67,11 @@ record MailTab(String name, PointData tabPosition, boolean systemReports) { }
 static List<MailTab> tabPlan(boolean currentUi) {
     if (currentUi) {
         return List.of(
-            new MailTab("Wars", new PointData(85,185), false),
-            new MailTab("Alliance", new PointData(230,185), false),
-            new MailTab("System", new PointData(360,185), true),
-            new MailTab("Reports", new PointData(500,185), false),
-            new MailTab("Starred", new PointData(630,185), false));
+            new MailTab("Wars", new PointData(85,120), false),
+            new MailTab("Alliance", new PointData(230,120), false),
+            new MailTab("System", new PointData(360,120), true),
+            new MailTab("Reports", new PointData(500,120), false),
+            new MailTab("Starred", new PointData(630,120), false));
     }
     return List.of(
         new MailTab("Alliance", new PointData(230,120), false),
