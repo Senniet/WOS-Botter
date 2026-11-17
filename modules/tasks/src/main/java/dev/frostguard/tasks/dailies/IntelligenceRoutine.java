@@ -332,8 +332,12 @@ public IntelligenceRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
 			}
 		}
 
-		if (!useSmartProcessing || recallGatherTroopsFlow) {
-			navigationHelper.ensureCorrectScreenLocation(LaunchPoint.WORLD);
+        // Recall is a destructive, expensive operation. Turning off smart
+        // processing must NEVER implicitly recall all gathering marches.
+        // Intel mission processing and deployment capacity checks work without
+        // opening the march queue unless recall was explicitly enabled.
+        if (shouldRecallGatherTroops(recallGatherTroopsFlow)) {
+            navigationHelper.ensureCorrectScreenLocation(LaunchPoint.WORLD);
 			logInfo(routineLogIntelligenceLine("Intel gather-priority mode active (smart=" + useSmartProcessing
 					+ ", recall=" + recallGatherTroopsFlow + "). Recalling all gather troops..."));
             if (!recallGatherTroopsFlow()) {
@@ -424,6 +428,10 @@ public IntelligenceRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
 		}
 
 	}
+
+static boolean shouldRecallGatherTroops(boolean explicitlyEnabled) {
+        return explicitlyEnabled;
+    }
 
 private boolean hasEnabledIntelMissionType() {
 		return beastsEnabled || fireBeastsEnabled || survivorCampsEnabled || explorationsEnabled;
@@ -760,7 +768,7 @@ private boolean recallGatherTroopsFlow() {
         // 120 legacy attempts caused >1-hour repeated template probes on a
         // World screen where two marches were busy and no recall buttons
         // were present. A bounded retry is safer for a serial task queue.
-        final int maxRetries = 12;
+        final int maxRetries = 3;
         int unchangedMissingEvidence = 0;
         int lastUnresolvedIdleCount = -1;
 
@@ -769,8 +777,8 @@ private boolean recallGatherTroopsFlow() {
 		logInfo(routineLogIntelligenceLine("Recalling all gather troops to the city..."));
 		SearchConfig marchStatusSearchConfig = SearchConfig.builder()
 				.withThreshold(90)
-				.withMaxAttempts(5)
-				.withDelay(200L)
+                .withMaxAttempts(1)
+                .withDelay(0L)
 				.build();
 
 		while (attempt < maxRetries) {

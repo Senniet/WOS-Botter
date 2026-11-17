@@ -5,6 +5,8 @@ import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.api.domain.AreaData;
 import dev.frostguard.api.domain.ImageSearchResultData;
 import dev.frostguard.api.domain.PointData;
+import dev.frostguard.api.domain.RawImageData;
+import dev.frostguard.vision.match.OpenCvPatternLocator;
 import dev.frostguard.engine.emulator.EmulatorController;
 import dev.frostguard.engine.error.HomeNotFoundException;
 import dev.frostguard.engine.nav.SearchConfigConstants;
@@ -175,17 +177,25 @@ public class IntelScreenHelper {
     }
 
     public boolean isIntelScreenActive() {
-        for (int i = 0; i < 2; i++) {
-            if (tpl.locatePattern(TemplatesEnum.INTEL_SCREEN_1,
-                    SearchConfigConstants.DEFAULT_SINGLE).isFound()
-                    || tpl.locatePattern(TemplatesEnum.INTEL_SCREEN_2,
-                            SearchConfigConstants.DEFAULT_SINGLE).isFound()) {
-                log.debug("Intel confirmed, probe " + (i + 1));
-                return true;
+        // Two screen-title variants on ONE screenshot. Previous implementation
+        // did up to four independent ADB captures per status check, including
+        // a fixed delay even when the first frame was an animation.
+        for (int attempt=0; attempt<2; attempt++) {
+            RawImageData frame=emu.captureScreen(dev);
+            if (frame != null && frame.isValid()) {
+                if (OpenCvPatternLocator.locatePattern(frame,
+                        TemplatesEnum.INTEL_SCREEN_1.getTemplate(),
+                        new PointData(0,0),
+                        new PointData(frame.getWidth(),frame.getHeight()),90).isFound()
+                    || OpenCvPatternLocator.locatePattern(frame,
+                        TemplatesEnum.INTEL_SCREEN_2.getTemplate(),
+                        new PointData(0,0),
+                        new PointData(frame.getWidth(),frame.getHeight()),90).isFound()) {
+                    log.debug("Intel title confirmed in current frame");
+                    return true;
+                }
             }
-            if (i == 0) {
-                pause(300);
-            }
+            if(attempt==0) pause(180);
         }
         return false;
     }
