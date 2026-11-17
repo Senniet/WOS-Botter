@@ -9,6 +9,10 @@ import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.schedule.LaunchPoint;
 import dev.frostguard.engine.nav.SidebarDestination;
 import dev.frostguard.engine.nav.SearchConfigConstants;
+import dev.frostguard.engine.helper.GreenLabelActionDetector;
+import dev.frostguard.engine.helper.RecognitionConsensus;
+import dev.frostguard.vision.convert.ImageConverter;
+import dev.frostguard.api.domain.PointData;
 
 import java.time.LocalDateTime;
 
@@ -169,8 +173,45 @@ public class PetAllianceTreasuresRoutine extends DelayedTask {
 	 * Always navigates back to previous screen after checking, regardless of
 	 * outcome.
 	 */
-	private void claimTreasureIfAvailable() {
-		ImageSearchResultData claimButton = templateSearchHelper.locatePattern(
+    private ImageSearchResultData detectClaimAll() {
+        // Serve-EMU 720x1280: Claim All is at the bottom of the Ally Treasure
+        // modal, separate from the individual Claim rows. Verify both the
+        // button colour and its label before dispatching a single tap.
+        String label = readStringValue(new PointData(205, 1010), new PointData(520, 1140), null);
+        if (label == null || !label.toLowerCase(java.util.Locale.ROOT)
+                .replaceAll("[^a-z]", "").contains("claimall")) {
+            return ImageSearchResultData.miss();
+        }
+        var region = new GreenLabelActionDetector.Region(210, 1010, 515, 1145);
+        var first = GreenLabelActionDetector.detect(
+                ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER)), region);
+        if (!first.isFound()) return ImageSearchResultData.miss();
+        sleepTask(150);
+        var second = GreenLabelActionDetector.detect(
+                ImageConverter.toBufferedImage(emuManager.captureScreen(EMULATOR_NUMBER)), region);
+        return RecognitionConsensus.agrees(first, second, 15) ? second : ImageSearchResultData.miss();
+    }
+
+    private void claimTreasureIfAvailable() {
+        ImageSearchResultData claimAll = detectClaimAll();
+        if (claimAll.isFound()) {
+            logInfo("Verified Ally Treasure Claim All label and green button; tapping once");
+            tapInside(claimAll);
+            sleepTask(550);
+            // The game opens a Rewards overlay. Dismiss it once, then
+            // confirm that daily claims were consumed before daily reset.
+            tapNear(new PointData(355, 1175));
+            sleepTask(350);
+            String remaining = readStringValue(new PointData(180, 265), new PointData(530, 335), null);
+            if (remaining != null && remaining.replaceAll("\\s+", " ").matches("(?is).*remaining\\s*claims\\s*today\\s*:\s*0\\b.*")) {
+                rescheduleToGameReset("Ally Treasure Claim All confirmed: remaining claims today 0");
+            } else {
+                markWorkIncomplete("Ally Treasure Claim All: remaining claims not verified after Rewards overlay");
+                rescheduleForRetry();
+            }
+            return;
+        }
+        ImageSearchResultData claimButton = templateSearchHelper.locatePattern(
 				TemplatesEnum.PETS_BEAST_ALLIANCE_CLAIM,
 				SearchConfigConstants.DEFAULT_SINGLE);
 
