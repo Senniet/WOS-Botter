@@ -82,7 +82,11 @@ public AllianceAutojoinRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask
 		setAutoJoinQueuesFlow(queueCount);
 		enableAutoJoinFlow();
 
-		queueNextRun();
+        // The current 2026 UI path only sends a coordinate tap; it does not
+        // confirm that auto-join is enabled. Never record a successful
+        // activation or defer for nearly eight hours on that evidence alone.
+        markWorkIncomplete("Alliance Autojoin: activation tap sent but enabled state not verified");
+        manageTaskFailure("Auto-join activation requires live enabled-state confirmation");
 	}
 
 private boolean deferForUpcomingAutoJoinReset() {
