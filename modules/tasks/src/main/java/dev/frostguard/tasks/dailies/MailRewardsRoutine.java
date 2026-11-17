@@ -103,8 +103,14 @@ public MailRewardsRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
         boolean homeVerified = false;
         if (mailClosed) {
             try {
-                navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME, this::checkPreemption);
-                homeVerified = true;
+                // Closing current Mail returns straight to the City HUD.
+                // Avoid an expensive general navigation sweep if it already
+                // exposes the exact validated home anchor.
+                homeVerified = cityHomeVisible();
+                if (!homeVerified) {
+                    navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME, this::checkPreemption);
+                    homeVerified = cityHomeVisible();
+                }
             } catch (dev.frostguard.engine.error.HomeNotFoundException missing) {
                 logWarning(routineLogMailRewardsLine("Mail closed, Home not verified: "
                         + missing.getMessage()));
@@ -119,6 +125,15 @@ public MailRewardsRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
             return;
         }
         queueNextRun();
+    }
+
+private boolean cityHomeVisible() {
+        RawImageData frame=emuManager.captureScreen(EMULATOR_NUMBER);
+        return frame != null && frame.isValid()
+                && frame.getWidth()==720 && frame.getHeight()==1280
+                && OpenCvPatternLocator.locatePattern(frame,
+                        TemplatesEnum.SERVE_EMU_CITY_ANCHOR.getTemplate(),
+                        new PointData(590,1145),new PointData(715,1275),90).isFound();
     }
 
 static boolean mailRunVerified(boolean allTabsVerified, boolean mailClosed, boolean homeVerified) {
@@ -227,6 +242,21 @@ static int unreadMarkerSearchAttempts(dev.frostguard.engine.emulator.EmulatorTyp
     }
 
 private Evidence findUnreadMailEvidence() {
+        if (emuManager.getSelectedEmulatorType()
+                == dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU) {
+            // The 2026 Mail marker has proven full-size colour artwork.
+            // Multi-scale matching generated several 5-7s empty scans in
+            // Task Coach 20261117-211027. Search one current frame instead.
+            RawImageData frame=emuManager.captureScreen(EMULATOR_NUMBER);
+            if (frame != null && frame.isValid()
+                    && frame.getWidth()==720 && frame.getHeight()==1280) {
+                return Evidence.fromMatches(OpenCvPatternLocator.locateAllPatterns(
+                        frame, TemplatesEnum.MAIL_UNCLAIMED_REWARDS.getTemplate(),
+                        MAIL_LIST_INDICATORS_TOP_LEFT_VALUE,
+                        MAIL_LIST_INDICATORS_BOTTOM_RIGHT_VALUE, 90, 20));
+            }
+            return new Evidence(List.of());
+        }
         List<ImageSearchResultData> unreadMarkers = templateSearchHelper.locateAllPatterns(
                 TemplatesEnum.MAIL_UNCLAIMED_REWARDS,
                 SearchConfig.builder()
@@ -237,7 +267,6 @@ private Evidence findUnreadMailEvidence() {
                         .withDelay(100L)
                         .withMaxResults(20)
                         .build());
-
         return Evidence.fromMatches(unreadMarkers);
     }
 

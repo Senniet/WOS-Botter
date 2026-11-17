@@ -78,6 +78,22 @@ class ServeEmuTitleRecognitionTest {
         assertFalse(match("daily", TemplatesEnum.SERVE_EMU_HEADER_BACK, 0, 65, 110, 155));
     }
 
+    @Test void currentMailUnreadMarkersHaveFastSingleFrameColourMatches() throws Exception {
+        BufferedImage img=ImageIO.read(Objects.requireNonNull(
+                getClass().getResource("/serveemu/mail-markers-title-only.png")));
+        byte[] rgba=new byte[img.getWidth()*img.getHeight()*4];
+        for(int y=0;y<img.getHeight();y++)for(int x=0;x<img.getWidth();x++){
+            int rgb=img.getRGB(x,y),i=(y*img.getWidth()+x)*4;
+            rgba[i]=(byte)(rgb>>16);rgba[i+1]=(byte)(rgb>>8);
+            rgba[i+2]=(byte)rgb;rgba[i+3]=(byte)255;
+        }
+        var hits=OpenCvPatternLocator.locateAllPatterns(
+                RawImageData.capture(rgba,img.getWidth(),img.getHeight(),32),
+                TemplatesEnum.MAIL_UNCLAIMED_REWARDS.getTemplate(),
+                new PointData(625,175),new PointData(715,1160),90,20);
+        assertFalse(hits.isEmpty(), "Fast colour path must preserve known unread markers");
+    }
+
     @Test void currentMailUnreadMarkersCanBeFoundInRightColumn() throws Exception {
         assertTrue(match("mail-markers", TemplatesEnum.MAIL_UNCLAIMED_REWARDS,
                 625, 175, 715, 1160));
