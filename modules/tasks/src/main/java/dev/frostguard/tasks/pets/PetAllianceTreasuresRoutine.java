@@ -173,6 +173,11 @@ public class PetAllianceTreasuresRoutine extends DelayedTask {
 	 * Always navigates back to previous screen after checking, regardless of
 	 * outcome.
 	 */
+    static boolean remainingClaimsExhausted(String text) {
+        return text != null && text.replaceAll("\\s+", " ")
+                .matches("(?is).*remaining\\s*claims\\s*today\\s*:\\s*0\\b.*");
+    }
+
     private ImageSearchResultData detectClaimAll() {
         // Serve-EMU 720x1280: Claim All is at the bottom of the Ally Treasure
         // modal, separate from the individual Claim rows. Verify both the
@@ -203,7 +208,7 @@ public class PetAllianceTreasuresRoutine extends DelayedTask {
             tapNear(new PointData(355, 1175));
             sleepTask(350);
             String remaining = readStringValue(new PointData(180, 265), new PointData(530, 335), null);
-            if (remaining != null && remaining.replaceAll("\\s+", " ").matches("(?is).*remaining\\s*claims\\s*today\\s*:\s*0\\b.*")) {
+            if (remaining != null && remainingClaimsExhausted(remaining)) {
                 rescheduleToGameReset("Ally Treasure Claim All confirmed: remaining claims today 0");
             } else {
                 markWorkIncomplete("Ally Treasure Claim All: remaining claims not verified after Rewards overlay");
