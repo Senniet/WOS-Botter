@@ -240,19 +240,43 @@ public class HeroRecruitmentRoutine extends DelayedTask {
         boolean advancedKeys = configEnabled(ConfigurationKeyEnum.HERO_RECRUIT_ADVANCED_KEYS_BOOL, false);
         boolean epicKeys = configEnabled(ConfigurationKeyEnum.HERO_RECRUIT_EPIC_KEYS_BOOL, false);
         boolean points = configEnabled(ConfigurationKeyEnum.HERO_RECRUIT_POINTS_CHEST_BOOL, true);
-        boolean complete = runModernStages(advancedFree || advancedKeys, epicFree || epicKeys, points,
-                () -> recruitModernCategory("Advanced", AreaData.of(40, 801, 350, 904),
-                        TemplatesEnum.SERVE_EMU_HERO_ADVANCED_KEY_ONCE,
-                        AreaData.of(45, 792, 350, 903),
-                        new PointData(224, 89), new PointData(267, 127), advancedFree, advancedKeys),
-                () -> recruitModernCategory("Epic", AreaData.of(40, 1150, 350, 1262),
-                        TemplatesEnum.SERVE_EMU_HERO_EPIC_KEY_ONCE,
-                        AreaData.of(45, 1147, 350, 1270),
-                        new PointData(418, 89), new PointData(461, 127), epicFree, epicKeys),
-                () -> {
-                    claimReadyPointsChest();
-                    return true;
-                });
+        // Each category has a separate Free, owned-key Recruit Once and
+        // cooldown state. A failed stage can only block later actions when
+        // the recruitment screen itself is no longer confirmed.
+        boolean complete = true;
+        if (advancedFree || advancedKeys) {
+            boolean advancedOk = recruitModernCategory("Advanced",
+                    AreaData.of(40, 801, 350, 904),
+                    TemplatesEnum.SERVE_EMU_HERO_ADVANCED_KEY_ONCE,
+                    AreaData.of(45, 792, 350, 903),
+                    new PointData(224, 89), new PointData(267, 127),
+                    advancedFree, advancedKeys);
+            complete &= advancedOk;
+            if (!advancedOk && !currentHeroRecruitmentVisible()) {
+                logWarning("Advanced transition unknown; later recruitment taps blocked");
+                reschedule(LocalDateTime.now().plusMinutes(OCR_FAILURE_RETRY_MINUTES));
+                throw new TaskOutcomeUnknownException(
+                        "Advanced claim transition not safely on Hero Recruitment");
+            }
+        }
+        if (epicFree || epicKeys) {
+            boolean epicOk = recruitModernCategory("Epic",
+                    AreaData.of(40, 1150, 350, 1262),
+                    TemplatesEnum.SERVE_EMU_HERO_EPIC_KEY_ONCE,
+                    AreaData.of(45, 1147, 350, 1270),
+                    new PointData(418, 89), new PointData(461, 127),
+                    epicFree, epicKeys);
+            complete &= epicOk;
+            if (!epicOk && !currentHeroRecruitmentVisible()) {
+                logWarning("Epic transition unknown; Points Chest tap blocked");
+                reschedule(LocalDateTime.now().plusMinutes(OCR_FAILURE_RETRY_MINUTES));
+                throw new TaskOutcomeUnknownException(
+                        "Epic claim transition not safely on Hero Recruitment");
+            }
+        }
+        if (points && currentHeroRecruitmentVisible()) {
+            claimReadyPointsChest();
+        }
         if (!complete) {
             reschedule(LocalDateTime.now().plusMinutes(OCR_FAILURE_RETRY_MINUTES));
             throw new TaskOutcomeUnknownException("Hero Recruitment outcome uncertain; "
@@ -274,7 +298,47 @@ public class HeroRecruitmentRoutine extends DelayedTask {
         // and without this verified exit the next task can inherit Hero UI.
         // NavigationHelper requires two agreeing Back-arrow frames and a
         // verified Home/World anchor; it never blindly presses Android Back.
+        returnFromRecruitmentToCity();
+    }
+
+    private void returnFromRecruitmentToCity() {
+        // Prefer the two known header backs over the expensive global
+        // unknown-screen recovery sweep recorded in the 20:49 Task Coach run.
+        for (int step=0; step<2; step++) {
+            RawImageData frame=emuManager.captureScreen(EMULATOR_NUMBER);
+            if (cityHudVisible(frame)) {
+                logInfo("Hero Recruitment returned to City via direct header navigation");
+                return;
+            }
+            if (!currentHeroRecruitmentVisible() && !heroPageVisible(frame)) break;
+            var arrow=OpenCvPatternLocator.locatePattern(frame,
+                    TemplatesEnum.GAME_HEADER_BACK_ARROW_CURRENT.getTemplate(),
+                    new PointData(0,0),new PointData(110,105),90);
+            if (!arrow.isFound()) break;
+            sleepTask(130);
+            RawImageData check=emuManager.captureScreen(EMULATOR_NUMBER);
+            var confirmed=OpenCvPatternLocator.locatePattern(check,
+                    TemplatesEnum.GAME_HEADER_BACK_ARROW_CURRENT.getTemplate(),
+                    new PointData(0,0),new PointData(110,105),90);
+            if (!RecognitionConsensus.agrees(arrow,confirmed,12)) break;
+            tapInside(confirmed);
+            sleepTask(450);
+        }
         navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME);
+    }
+
+    private boolean heroPageVisible(RawImageData frame) {
+        return frame!=null && frame.isValid()
+                && OpenCvPatternLocator.locatePattern(frame,
+                    TemplatesEnum.SERVE_EMU_HEROES_PAGE_TITLE.getTemplate(),
+                    new PointData(65,0),new PointData(435,190),90).isFound();
+    }
+
+    private boolean cityHudVisible(RawImageData frame) {
+        return frame!=null && frame.isValid()
+                && OpenCvPatternLocator.locatePattern(frame,
+                    TemplatesEnum.SERVE_EMU_CITY_ANCHOR.getTemplate(),
+                    new PointData(590,1145),new PointData(715,1275),90).isFound();
     }
 
     static Duration parseModernCooldown(String raw) {
@@ -398,8 +462,8 @@ public class HeroRecruitmentRoutine extends DelayedTask {
     /** Preserve the established green-Free reward flow independently of key rewards. */
     private boolean waitForFreeRewardsAndReturn() {
         boolean chestAdvanced = false;
-        for (int attempt = 0; attempt < 24; attempt++) {
-            sleepTask(300);
+        for (int attempt = 0; attempt < 16; attempt++) {
+            sleepTask(250);
             // The 14:05 diagnostic captured a full-screen blue chest in the
             // snowy Hero Recruitment cutscene. This is a post-Free-claim
             // animation, not the Rewards exit overlay. Advance it once only
@@ -563,13 +627,34 @@ public class HeroRecruitmentRoutine extends DelayedTask {
      * The framework will handle returning to home screen after task completion.
      */
     private void navigateToHeroRecruitment() {
-        logInfo("Navigating to hero recruitment interface");
-
-        tapInside(NAV_TAP_1_MIN, NAV_TAP_1_MAX);
-        sleepTask(500); // Wait for first menu to open
-
+        logInfo("Opening Hero Recruitment using short verified Heroes route");
+        RawImageData before=emuManager.captureScreen(EMULATOR_NUMBER);
+        if (currentHeroRecruitmentVisible()) return;
+        if (!heroPageVisible(before)) {
+            // Bottom Heroes tab is available directly on the City HUD.
+            // Do not tap an unknown page just because a fixed position exists.
+            if (!cityHudVisible(before)) {
+                navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME);
+                before=emuManager.captureScreen(EMULATOR_NUMBER);
+                if (!cityHudVisible(before)) return;
+            }
+            tapInside(NAV_TAP_1_MIN, NAV_TAP_1_MAX);
+            for(int i=0;i<5;i++) {
+                sleepTask(180);
+                if (heroPageVisible(emuManager.captureScreen(EMULATOR_NUMBER))) break;
+            }
+        }
+        if (currentHeroRecruitmentVisible()) return;
+        if (!heroPageVisible(emuManager.captureScreen(EMULATOR_NUMBER))) {
+            logWarning("Heroes page not confirmed; refusing second navigation tap");
+            return;
+        }
         tapInside(NAV_TAP_2_MIN, NAV_TAP_2_MAX);
-        sleepTask(500); // Wait for hero recruitment interface to load
+        for(int i=0;i<6;i++) {
+            sleepTask(180);
+            if (currentHeroRecruitmentVisible()) return;
+        }
+        logWarning("Hero Recruitment title did not appear after Heroes entry");
     }
 
     // ===============================
