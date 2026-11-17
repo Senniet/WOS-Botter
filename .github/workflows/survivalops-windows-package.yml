@@ -9,6 +9,15 @@ on:
       - "build-support/verification/*app_image*"
       - ".github/workflows/survivalops-windows-package.yml"
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Unpublished SurvivalOps test MSI version (must be newer than the installed stable version)"
+        required: true
+        type: string
+        default: "1.1.79"
+
+env:
+  SURVIVALOPS_TEST_MSI_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '1.1.79' }}
 
 permissions:
   contents: read
@@ -44,13 +53,20 @@ jobs:
           $wixBin = "${env:ProgramFiles(x86)}\WiX Toolset v3.14\bin"
           if (-not (Test-Path -LiteralPath (Join-Path $wixBin "candle.exe"))) { throw "WiX candle.exe missing" }
           $wixBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Verify test installer version
+        shell: pwsh
+        run: |
+          if ($env:SURVIVALOPS_TEST_MSI_VERSION -notmatch '^\d+\.\d+\.\d+$') {
+            throw "Invalid test installer version: $env:SURVIVALOPS_TEST_MSI_VERSION"
+          }
+          Write-Host "Building unpublished SurvivalOps MSI version $env:SURVIVALOPS_TEST_MSI_VERSION"
       - name: Build SurvivalOps application image
         shell: pwsh
         run: |
           $args = @(
             "-B", "--no-transfer-progress", "-Dstyle.color=never",
-            "-Drevision=1.0.0", "-Dfrostguard.windows.app-version=1.0.0",
-            "-Dfrostguard.windows.launcher-version=1.0.0",
+            "-Drevision=$env:SURVIVALOPS_TEST_MSI_VERSION", "-Dfrostguard.windows.app-version=$env:SURVIVALOPS_TEST_MSI_VERSION",
+            "-Dfrostguard.windows.launcher-version=$env:SURVIVALOPS_TEST_MSI_VERSION",
             "-Dfrostguard.product.name=SurvivalOps",
             "-Dfrostguard.product.identifier=dev.survivalops.desktop",
             "-Dfrostguard.product.description=SurvivalOps Whiteout Survival Automation Suite",
@@ -73,8 +89,8 @@ jobs:
         run: |
           $args = @(
             "-B", "--no-transfer-progress", "-Dstyle.color=never",
-            "-Drevision=1.0.0", "-Dfrostguard.windows.app-version=1.0.0",
-            "-Dfrostguard.windows.launcher-version=1.0.0",
+            "-Drevision=$env:SURVIVALOPS_TEST_MSI_VERSION", "-Dfrostguard.windows.app-version=$env:SURVIVALOPS_TEST_MSI_VERSION",
+            "-Dfrostguard.windows.launcher-version=$env:SURVIVALOPS_TEST_MSI_VERSION",
             "-Dfrostguard.product.name=SurvivalOps",
             "-Dfrostguard.product.identifier=dev.survivalops.desktop",
             "-Dfrostguard.product.description=SurvivalOps Whiteout Survival Automation Suite",
