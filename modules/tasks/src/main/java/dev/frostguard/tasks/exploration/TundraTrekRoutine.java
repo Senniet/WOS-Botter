@@ -39,7 +39,15 @@ public class TundraTrekRoutine extends DelayedTask {
             if (trekClaimButton.isFound()) {
                 logInfo("Trek Supplies are available. Claiming now...");
                 tapInside(trekClaimButton);
-                sleepTask(3000);
+                sleepTask(550);
+                // A dispatched tap is not a claimed reward. Avoid a false
+                // success when the panel ignored the click or stayed busy.
+                if (isClaimButtonVisible()) {
+                    markWorkIncomplete("Trek Supplies: Claim remained visible after tap");
+                    logWarning("Trek Supplies claim not confirmed; retrying later without another blind tap");
+                    reschedule(LocalDateTime.now().plusMinutes(5));
+                    return;
+                }
             } else {
                 logInfo("Trek Supplies have already been claimed or are not yet available.");
                 sleepTask(500);
