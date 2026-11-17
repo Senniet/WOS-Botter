@@ -82,24 +82,32 @@ public ChiefOrderRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask, Chie
 			manageTaskFailure("Failed to enact order");
 			return;
 		}
-        // Do not let the generic HOME recovery scan Alliance/Offers/World
-        // while a known Rewards overlay is plainly waiting for one tap.
-        dismissVerifiedChiefOrderReward();
+        // A vanished Enact control does not prove the order was collected.
+        // Confirm actual Rewards and close it before normal cooldown.
+        if (!dismissVerifiedChiefOrderReward()) {
+            manageTaskFailure("Chief Order Rewards not confirmed or not closed");
+            return;
+        }
+        queueNextRun();
 	}
 
-    private void dismissVerifiedChiefOrderReward() {
+    static boolean completedWithVerifiedRewards(ChiefOrderRewardFrame.Exit exit) {
+        return exit == ChiefOrderRewardFrame.Exit.DISMISSED;
+    }
+
+    private boolean dismissVerifiedChiefOrderReward() {
         ChiefOrderRewardFrame.Exit result=ChiefOrderRewardFrame.dismissIfVisible(
                 () -> {checkPreemption();return emuManager.captureScreen(EMULATOR_NUMBER);},
                 target -> {checkPreemption();tapNear(target);},
                 () -> sleepTask(430));
-        if (result==ChiefOrderRewardFrame.Exit.DISMISSED) {
+        if (completedWithVerifiedRewards(result)) {
             logInfo(routineLogChiefOrderLine("Verified Rewards dismissed in one safe tap; "
                     + "no unrelated global recovery scan needed"));
-        } else if (result==ChiefOrderRewardFrame.Exit.UNVERIFIED) {
-            logWarning(routineLogChiefOrderLine("Rewards changed or did not close after one tap; "
-                    + "no repeat input"));
-            markWorkIncomplete("Chief Order: reward overlay exit not confirmed");
+            return true;
         }
+        logWarning(routineLogChiefOrderLine("Chief Order Rewards were " + result
+                + "; outcome unknown; no duplicate tap"));
+        return false;
     }
 
 private String routineLogChiefOrderLine(String note) {
@@ -127,6 +135,7 @@ private boolean openUpChiefOrderMenu() {
 	}
 
 private void manageTaskFailure(String reason) {
+        markWorkIncomplete("Chief Order: " + reason);
 		logWarning(routineLogChiefOrderLine("Routine pass did not complete: " + reason));
 
 		LocalDateTime retryTime = LocalDateTime.now().plusMinutes(ERROR_RETRY_MINUTES_VALUE);
@@ -188,7 +197,6 @@ private boolean enactOrderFlow() {
 					"Enact button disappeared after single press; awaiting next-run cooldown confirmation"));
 		// A changed screen alone does not prove spending was accepted.
 		// Do not issue a second enact on this execution.
-		queueNextRun();
 		return true;
 	}
 
