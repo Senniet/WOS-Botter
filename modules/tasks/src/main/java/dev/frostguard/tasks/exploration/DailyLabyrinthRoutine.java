@@ -140,11 +140,12 @@ public class DailyLabyrinthRoutine extends DelayedTask {
             sleepTask(MENU_NAVIGATION_DELAY);
 
             // Skip battle animation
-            tapNear(SKIP_BUTTON);
-            sleepTask(300);
-            tapInside(SKIP_BUTTON, SKIP_BUTTON, 10, 50);
-            pressBack();
-            return true;
+            // The old path tapped Skip twice and blindly pressed Back,
+            // reporting success without observing a completed challenge.
+            // Stop after the supported action until a result-screen template
+            // can confirm the battle and authorize a safe exit.
+            markWorkIncomplete("Labyrinth: quick challenge tapped, result not visually confirmed");
+            return false;
         }
         return false;
     }
@@ -160,11 +161,8 @@ public class DailyLabyrinthRoutine extends DelayedTask {
             logInfo("'Raid Challenge' is available in Land of Heroes.");
             tapInside(raidResult);
             sleepTask(400);
-            tapInside(SKIP_BUTTON, SKIP_BUTTON, 10, 50);
-            pressBack();
-            sleepTask(400);
-            pressBack();
-            return true;
+            markWorkIncomplete("Labyrinth: raid tapped, result not visually confirmed");
+            return false;
         }
         return false;
     }
@@ -204,9 +202,8 @@ public class DailyLabyrinthRoutine extends DelayedTask {
             sleepTask(BATTLE_COMPLETION_DELAY);
 
             // Skip battle results
-            tapInside(RESULT_SKIP_BUTTON, RESULT_SKIP_BUTTON, 10, 50);
-            pressBack();
-            return true;
+            markWorkIncomplete("Labyrinth: deploy tapped, result not visually confirmed");
+            return false;
         }
 
         logWarning("Could not find 'Deploy' button for Land of Heroes.");
