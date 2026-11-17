@@ -11,6 +11,8 @@ import dev.frostguard.api.domain.PointData;
 import dev.frostguard.api.domain.AreaData;
 import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.api.domain.OcrSettingsData;
+import dev.frostguard.api.domain.RawImageData;
+import dev.frostguard.vision.match.OpenCvPatternLocator;
 import dev.frostguard.engine.error.TaskOutcomeUnknownException;
 import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.schedule.LaunchPoint;
@@ -181,6 +183,22 @@ public class HeroRecruitmentRoutine extends DelayedTask {
     }
 
     private boolean currentHeroRecruitmentVisible() {
+        // Hero Recruitment remains open throughout Advanced, Epic and Points
+        // processing. On the remote 720x1280 Serve-EMU, read ONE screenshot
+        // for both the modern and legacy title variants instead of issuing
+        // two expensive ADB captures for every stage/status observation.
+        if (emuManager.getSelectedEmulatorType()
+                == dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU) {
+            RawImageData frame=emuManager.captureScreen(EMULATOR_NUMBER);
+            if (frame==null || !frame.isValid() || frame.getWidth()!=720 || frame.getHeight()!=1280)
+                return false;
+            if (OpenCvPatternLocator.locatePattern(frame,
+                    TemplatesEnum.SERVE_EMU_HERO_MODERN_RECRUIT_TITLE.getTemplate(),
+                    new PointData(390,70),new PointData(715,330),90).isFound()) return true;
+            return OpenCvPatternLocator.locatePattern(frame,
+                    TemplatesEnum.SERVE_EMU_HERO_RECRUIT_TITLE.getTemplate(),
+                    new PointData(390,130),new PointData(710,315),90).isFound();
+        }
         // The 2026 Hero page moved the heading higher. The old title template
         // fails on the 23:58 frame, so confirm either known title in its own
         // header ROI before deciding whether to navigate or click.
@@ -413,6 +431,17 @@ public class HeroRecruitmentRoutine extends DelayedTask {
     }
 
     private dev.frostguard.api.domain.ImageSearchResultData locateFreeRewardExit() {
+        if (emuManager.getSelectedEmulatorType()
+                == dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU) {
+            RawImageData frame=emuManager.captureScreen(EMULATOR_NUMBER);
+            if (frame==null || !frame.isValid() || frame.getWidth()!=720 || frame.getHeight()!=1280)
+                return ImageSearchResultData.miss();
+            PointData start=new PointData(190,1135),end=new PointData(530,1240);
+            ImageSearchResultData live=OpenCvPatternLocator.locatePattern(frame,
+                    TemplatesEnum.SERVE_EMU_HERO_REWARD_EXIT_LIVE_2026.getTemplate(),start,end,89);
+            return live.isFound() ? live : OpenCvPatternLocator.locatePattern(frame,
+                    TemplatesEnum.SERVE_EMU_HERO_REWARD_EXIT.getTemplate(),start,end,89);
+        }
         var config = TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
                 .withThreshold(89).withArea(AreaData.of(190, 1135, 530, 1240)).build();
         var live = templateSearchHelper.locatePattern(
