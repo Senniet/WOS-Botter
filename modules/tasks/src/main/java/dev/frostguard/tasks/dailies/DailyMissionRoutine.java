@@ -329,6 +329,18 @@ private boolean claimOptional160Milestone() {
     }
 
 private ImageSearchResultData seekForClaimAllButton() {
+        if (emuManager.getSelectedEmulatorType()
+                == dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU) {
+            // On the known current 2026 layout, one current frame is enough
+            // to reject an absent green Claim All. Old full-screen template
+            // + multiscale/mono retries were slow on normal empty days.
+            var first=DailyClaimAllFrame.ready(emuManager.captureScreen(EMULATOR_NUMBER));
+            if (!first.isFound())return ImageSearchResultData.miss();
+            sleepTask(120);
+            var second=DailyClaimAllFrame.ready(emuManager.captureScreen(EMULATOR_NUMBER));
+            return RecognitionConsensus.agrees(first,second,8)
+                    ? second : ImageSearchResultData.miss();
+        }
         ImageSearchResultData match = templateSearchHelper.locatePattern(
                 TemplatesEnum.DAILY_MISSION_CLAIMALL_BUTTON,
                 SearchConfigConstants.DEFAULT_SINGLE);
