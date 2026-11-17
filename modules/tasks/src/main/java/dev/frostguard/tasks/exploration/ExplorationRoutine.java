@@ -57,18 +57,21 @@ public class ExplorationRoutine extends DelayedTask {
 
 	@Override
 	protected void execute() {
-        // City and World expose the same Exploration shortcut. Classify one
-        // current screenshot instead of probing absent Claim/disabled buttons
-        // on the City HUD and unnecessarily navigating City -> World.
+        // Classify the actual page first. City/World use the same direct
+        // bottom-left shortcut; never navigate via other menus or Explore.
         RawImageData startingFrame=emuManager.captureScreen(EMULATOR_NUMBER);
         boolean onExploration=ExplorationPageFrame.title(startingFrame);
-        boolean onRoot=!onExploration &&
-                ExplorationRootFrame.root(startingFrame)!=ExplorationRootFrame.Root.UNKNOWN;
-        boolean onIdleIncome=!onExploration && !onRoot && idleIncomeTitleOnFrame(startingFrame);
+        boolean onRoot=false;
+        boolean onIdleIncome=false;
+        if (!onExploration) {
+            onRoot=ExplorationRootFrame.root(startingFrame)
+                    !=ExplorationRootFrame.Root.UNKNOWN;
+            if (!onRoot) {
+                onIdleIncome=idleIncomeTitleOnFrame(startingFrame);
+            }
+        }
         if (!onExploration && !onRoot && !onIdleIncome) {
-            // Recover a previously-opened Idle Income window whose title
-            // artwork may have changed, but only once on an UNKNOWN screen.
-            // Normal Exploration never runs this expensive OCR fallback.
+            // Only unknown pages need the slower OCR recovery.
             onIdleIncome=idleIncomeVisible();
         }
         if (!onExploration && !onRoot && !onIdleIncome) {
@@ -130,6 +133,13 @@ public class ExplorationRoutine extends DelayedTask {
                 logWarning(routineLogExplorationLine("Exploration still open after verified Back; no blind retry"));
                 return false;
             }
+        }
+        // Already on City: do not run the generic Home navigator, which can
+        // interpret the bottom-left Explore shortcut as its next action.
+        if (ExplorationRootFrame.root(emuManager.captureScreen(EMULATOR_NUMBER))
+                == ExplorationRootFrame.Root.CITY) {
+            logInfo(routineLogExplorationLine("City Home already verified; no extra Explore tap"));
+            return true;
         }
         try {
             navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME,this::checkPreemption);
@@ -364,23 +374,19 @@ public class ExplorationRoutine extends DelayedTask {
 	}
 
     private boolean rewardsOverlayVisible() {
-        // Real 16-Nov Idle Income Rewards uses a blue header that scored
-        // only ~39% against the old shared/current Rewards templates. This
-        // unique title AND its exit footer are verified on the same frame.
-        if (ExplorationIncomeRewardsFrame.visible(
-                emuManager.captureScreen(EMULATOR_NUMBER))) return true;
-        if (templateSearchHelper.locatePattern(TemplatesEnum.SHARED_REWARDS_BANNER_CURRENT,
-                dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig.builder()
-                        .withMaxAttempts(1).withThreshold(92)
-                        .withArea(AreaData.of(50, 245, 670, 400)).build()).isFound()) return true;
-        if (templateSearchHelper.locatePattern(TemplatesEnum.SHARED_REWARDS_BANNER,
+        // Detect the current Idle Income reward sheet in a single fresh frame.
+        // Previous code spent seconds probing four unrelated banner templates
+        // on each check even though this task has a dedicated visual detector.
+        RawImageData frame=emuManager.captureScreen(EMULATOR_NUMBER);
+        if (ExplorationIncomeRewardsFrame.visible(frame)) return true;
+        if (ExplorationPageFrame.title(frame) || idleIncomeTitleOnFrame(frame)
+                || ExplorationRootFrame.root(frame)!=ExplorationRootFrame.Root.UNKNOWN)
+            return false;
+        // Compatibility fallback for older reward artwork on an unknown page.
+        return templateSearchHelper.locatePattern(TemplatesEnum.SHARED_REWARDS_BANNER,
                 dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig.builder()
                         .withMaxAttempts(1).withThreshold(85)
-                        .withArea(AreaData.of(30, 245, 690, 400)).build()).isFound()) return true;
-        return templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_REWARDS_BANNER,
-                dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig.builder()
-                        .withMaxAttempts(2).withDelay(120).withThreshold(90)
-                        .withArea(AreaData.of(235, 285, 495, 425)).build()).isFound();
+                        .withArea(AreaData.of(30, 245, 690, 400)).build()).isFound();
     }
 
     private boolean rewardOverlayAppeared() {
