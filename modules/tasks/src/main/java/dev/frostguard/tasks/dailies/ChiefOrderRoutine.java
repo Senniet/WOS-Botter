@@ -61,6 +61,7 @@ private boolean enactDeferred;
 private boolean returnedHomeDirectly;
 
 private enum OrderSelection { SELECTED, ALREADY_USED, UNKNOWN }
+    enum OrderGate { ALREADY_USED, TRY_ICON, UNKNOWN }
 
 public ChiefOrderRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask, ChiefOrderType chiefOrderType) {
 		super(profile, tpTask);
@@ -116,16 +117,16 @@ public ChiefOrderRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask, Chie
 
     private void returnHomeAfterChiefOrderIfVisible() {
         if (emuManager.getSelectedEmulatorType() == EmulatorType.SERVE_EMU) {
-            var frame = emuManager.captureScreen(EMULATOR_NUMBER);
-            if (ChiefOrderLiveFrame.isOrderBook(frame, chiefOrderType.getDescription())) {
-                tapNear(new PointData(44, 35)); // verified book Back only
-                sleepTask(360);
-                frame = emuManager.captureScreen(EMULATOR_NUMBER);
+            var result = ChiefOrderExit.returnHome(
+                    () -> {checkPreemption(); return emuManager.captureScreen(EMULATOR_NUMBER);},
+                    point -> {checkPreemption(); tapNear(point);},
+                    () -> sleepTask(260), chiefOrderType.getDescription());
+            if (result == ChiefOrderExit.Result.HOME) {
+                logInfo(routineLogChiefOrderLine("City Home verified after Chief Order; no global search"));
+                return;
             }
-            if (ChiefOrderLiveFrame.isChiefOrderList(frame)) {
-                tapNear(new PointData(44, 35)); // verified menu Back only
-                sleepTask(360);
-            }
+            logWarning(routineLogChiefOrderLine("Scoped Chief Order exit " + result
+                    + "; falling back to Home recovery"));
         }
         try {
             navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME, this::checkPreemption);
@@ -197,23 +198,26 @@ private OrderSelection chooseOrderType() {
         if (emuManager.getSelectedEmulatorType() == EmulatorType.SERVE_EMU) {
             var list = ChiefOrderLiveFrame.inspectList(
                     emuManager.captureScreen(EMULATOR_NUMBER), chiefOrderType.getDescription());
-            if (list.state() == ChiefOrderLiveFrame.ListState.ON_COOLDOWN
-                    || list.state() == ChiefOrderLiveFrame.ListState.ACTIVE) {
-                // The status banner is positive evidence of an already-used order.
-                // OCR may corrupt the digits; never invent a precise expiry from them.
-                if (list.remaining() == null || list.remaining().isZero()) {
-                    logWarning(routineLogChiefOrderLine("Order " + list.state()
-                            + ", countdown unverified (OCR: " + list.timer()
-                            + "); using 30-minute recheck, not an exact expiry"));
+            OrderGate gate = orderGate(list.state());
+            if (gate == OrderGate.ALREADY_USED) {
+                sleepTask(210);
+                var second = ChiefOrderLiveFrame.inspectList(
+                        emuManager.captureScreen(EMULATOR_NUMBER), chiefOrderType.getDescription());
+                if (orderGate(second.state()) != OrderGate.ALREADY_USED) {
+                    logWarning(routineLogChiefOrderLine("Order status changed or unreadable; "
+                            + "no claim attempted: " + list.state() + " -> " + second.state()));
+                    return OrderSelection.UNKNOWN;
                 }
-                LocalDateTime next = nextAvailableCheck(LocalDateTime.now(), list.remaining());
+                Duration verifiedRemaining = confirmedCountdown(list.remaining(), second.remaining());
+                LocalDateTime next = nextAvailableCheck(LocalDateTime.now(), verifiedRemaining);
                 reschedule(next);
                 logInfo(routineLogChiefOrderLine(chiefOrderType.getDescription() + " already used ("
-                        + list.state() + ", remaining " + list.remaining()
-                        + "); no Enact or Claim tap; next check " + next));
+                        + second.state() + ", timer="
+                        + (verifiedRemaining == null ? "unverified, 30m fallback" : verifiedRemaining)
+                        + "); no Enact/Claim action; next check " + next));
                 return OrderSelection.ALREADY_USED;
             }
-            if (list.state() != ChiefOrderLiveFrame.ListState.AVAILABLE) {
+            if (gate != OrderGate.TRY_ICON) {
                 logWarning(routineLogChiefOrderLine("Cannot verify order list state: " + list));
                 return OrderSelection.UNKNOWN;
             }
@@ -235,6 +239,21 @@ private OrderSelection chooseOrderType() {
             return OrderSelection.UNKNOWN;
         }
         return OrderSelection.SELECTED;
+    }
+
+    static OrderGate orderGate(ChiefOrderLiveFrame.ListState state) {
+        return switch (state) {
+            case ON_COOLDOWN, ACTIVE -> OrderGate.ALREADY_USED;
+            case AVAILABLE -> OrderGate.TRY_ICON;
+            case UNKNOWN -> OrderGate.UNKNOWN;
+        };
+    }
+
+    static Duration confirmedCountdown(Duration first, Duration second) {
+        if (first == null || second == null || first.isNegative() || second.isNegative()
+                || first.isZero() || second.isZero()
+                || Math.abs(first.minus(second).toSeconds()) > 15) return null;
+        return first.compareTo(second) < 0 ? first : second;
     }
 
     static LocalDateTime nextAvailableCheck(LocalDateTime now, Duration remaining) {
