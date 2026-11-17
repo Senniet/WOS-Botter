@@ -184,26 +184,27 @@ private boolean openUpAllianceWarMenu() {
 	}
 
 private void hydrateConfiguration() {
-		useAllTroops = profile.getConfig(
-				ConfigurationKeyEnum.ALLIANCE_AUTOJOIN_USE_ALL_TROOPS_BOOL,
-				Boolean.class);
+        Boolean allTroopsSetting = profile.getConfig(
+                ConfigurationKeyEnum.ALLIANCE_AUTOJOIN_USE_ALL_TROOPS_BOOL, Boolean.class);
+        useAllTroops = Boolean.TRUE.equals(allTroopsSetting);
 
-		int rawQueueCount = profile.getConfig(
-				ConfigurationKeyEnum.ALLIANCE_AUTOJOIN_QUEUES_INT,
-				Integer.class);
-
-
-		if (rawQueueCount < MIN_QUEUE_COUNT_FLOOR || rawQueueCount > MAX_QUEUE_COUNT_LIMIT) {
-			logWarning(routineLogAllianceAutojoinLine("Invalid queue count configured: " + rawQueueCount +
-					". Using default: " + DEFAULT_QUEUE_COUNT_VALUE));
-			queueCount = DEFAULT_QUEUE_COUNT_VALUE;
-		} else {
-			queueCount = rawQueueCount;
-		}
+        Integer rawQueueCount = profile.getConfig(
+                ConfigurationKeyEnum.ALLIANCE_AUTOJOIN_QUEUES_INT, Integer.class);
+        queueCount = validQueueCount(rawQueueCount);
+        if (rawQueueCount == null || queueCount != rawQueueCount) {
+            logWarning(routineLogAllianceAutojoinLine("Missing/invalid queue count: " + rawQueueCount
+                    + ". Using safe default: " + queueCount));
+        }
 
 		logInfo(routineLogAllianceAutojoinLine("Configuration loaded - Use all troops: " + useAllTroops +
 				", Queue count: " + queueCount));
 	}
+
+    static int validQueueCount(Integer configured) {
+        return configured != null && configured >= MIN_QUEUE_COUNT_FLOOR
+                && configured <= MAX_QUEUE_COUNT_LIMIT
+                ? configured : DEFAULT_QUEUE_COUNT_VALUE;
+    }
 
 private void enableAutoJoinFlow() {
 		logInfo(routineLogAllianceAutojoinLine("Enabling auto-join"));
