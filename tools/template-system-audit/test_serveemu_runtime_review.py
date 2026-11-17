@@ -18,7 +18,9 @@ class RuntimeReviewTest(unittest.TestCase):
         src=mod.source_profile(root,root/'tools/task-dashboard/catalog.json')
         self.assertGreater(len(src),50)
         self.assertTrue(src['DO_EXPLORATION']['source_found'])
-        self.assertGreater(src['DO_EXPLORATION']['source_template_count'],5)
+        # Centralized 2026 screen classifiers now own repeated template
+        # lookups, so fewer direct enum names here means less ADB work.
+        self.assertGreaterEqual(src['DO_EXPLORATION']['source_template_count'],4)
         self.assertGreater(src['TRAINING_TROOPS']['source_match_calls'],0)
         snapshot=mod.review(Path('/nonexistent'),['DO_EXPLORATION'],src)
         self.assertGreater(snapshot['DO_EXPLORATION']['source_match_calls'],0)

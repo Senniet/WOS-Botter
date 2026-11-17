@@ -67,13 +67,20 @@ class TemplateAuditTests(unittest.TestCase):
                base/'lifecycle/KnownGameScreenResume.java']
         for path in files:
             content=path.read_text(encoding='utf-8')
-            self.assertIn('TemplatesEnum.SERVE_EMU_EXPLORATION_TITLE_NOV_2026',
-                          content, path.name)
+            # The fast 2026 routines call ExplorationPageFrame.title() now.
+            # That frame helper owns the approved NOV_2026 template lookup
+            # and avoids an old multi-template hot-path retry cascade.
+            self.assertTrue(
+                'TemplatesEnum.SERVE_EMU_EXPLORATION_TITLE_NOV_2026' in content
+                or 'ExplorationPageFrame.title(' in content,
+                path.name)
             for legacy in ('SERVE_EMU_EXPLORATION_TITLE', 'EXPLORATION_SCREEN_TITLE',
                            'SERVE_EMU_IDLE_INCOME_TITLE', 'EXPLORATION_IDLE_INCOME_TITLE'):
                 self.assertNotRegex(content,
                     r'TemplatesEnum\.'+legacy+r'\b',
                     'Old same-screen fallback was reintroduced in '+path.name)
+        page=(base/'exploration/ExplorationPageFrame.java').read_text()
+        self.assertIn('TemplatesEnum.SERVE_EMU_EXPLORATION_TITLE_NOV_2026',page)
         # This change MUST NOT remove global safety checks for absent screens.
         navigation=(audit.ROOT/'modules/automation/src/main/java/dev/frostguard/engine/helper/NavigationHelper.java').read_text()
         self.assertIn('TemplatesEnum.GAME_HOME_RECONNECT',navigation)
@@ -113,6 +120,11 @@ class TemplateAuditTests(unittest.TestCase):
         # a code regression. Live screenshots have proven the replacement.
         source=(audit.ROOT/'tools/template-system-audit/audit.py').read_text()
         self.assertIn('Retired template has become active again',source)
+
+    def test_baseline_resolution_works_on_pr_checkouts_without_upstream_remote(self):
+        base=audit.resolve_comparison_ref(audit.ROOT, 'nonexistent-origin-for-test/main')
+        self.assertIn(base, ('origin/main', 'HEAD^1', 'HEAD'))
+        self.assertTrue(audit.git_upstream(audit.ROOT, base))
 
     def test_upstream_blob_hash_matches_git_content_semantics(self):
         self.assertEqual('e69de29bb2d1d6434b8b29ae775ad8c2e48c5391', audit.git_hash(b''))

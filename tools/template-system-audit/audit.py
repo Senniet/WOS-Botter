@@ -57,6 +57,22 @@ def png_details(data: bytes) -> tuple[int, int] | None:
     return width, height
 
 
+def resolve_comparison_ref(root: Path, requested: str) -> str:
+    """Use the original upstream when present, with checkout-safe fallbacks.
+
+    Actions PR checkouts fetch origin but do not register an 'upstream' remote.
+    HEAD^1 is the base tree of a GitHub pull-request merge checkout; HEAD is
+    a last resort for a detached local snapshot, never a fabricated remote.
+    """
+    for ref in dict.fromkeys((requested, 'origin/main', 'HEAD^1', 'HEAD')):
+        result = subprocess.run(['git', '-C', str(root), 'rev-parse',
+                                 '--verify', '--quiet', ref + '^{tree}'],
+                                capture_output=True)
+        if result.returncode == 0:
+            return ref
+    raise ValueError('No baseline git tree can be resolved')
+
+
 def git_upstream(root: Path, ref: str) -> dict[str, str]:
     result = subprocess.run(['git', '-C', str(root), 'ls-tree', '-rz', ref,
                              '--', str(ASSETS)], capture_output=True, check=True)
@@ -161,6 +177,7 @@ def audit(root: Path, evidence: Path, upstream: str='upstream/main') -> dict:
     decisions=json.loads((root/DECISIONS).read_text(encoding='utf-8'))
     retired=decisions['retired']
     protected=decisions['protected']
+    upstream = resolve_comparison_ref(root, upstream)
     originals = git_upstream(root, upstream)
     sightings, session_count, checks = coach_observations(evidence)
     entries=[]
