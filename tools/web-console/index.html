@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="nl"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SurvivalOps Web</title><link rel="stylesheet" href="/static/style.css">
+<title>SurvivalOps Web</title><link rel="stylesheet" href="/static/style.css"><link rel="stylesheet" href="/static/operations.css">
 </head><body>
 <div id="app" class="app">
   <aside class="sidebar">
@@ -22,8 +22,8 @@
   <main class="main">
     <header class="topbar"><button class="mobile-menu" id="mobile-menu" aria-label="Menu">☰</button><div><span class="eyebrow">SURVIVALOPS / <span id="breadcrumb">OVERZICHT</span></span><h1 id="page-title">Overzicht</h1></div><div class="top-actions"><span class="clock" id="clock"></span><span class="pill" id="connection">Verbinden…</span><button id="logout" class="small ghost" title="Uitloggen">Uitloggen</button></div></header>
     <div id="notice" class="notice" role="status" hidden></div>
-    <section data-view="dashboard" class="page active">
-      <div class="hero"><div><span class="eyebrow">SURVIVALOPS COMMAND CENTER</span><h2>Alles onder controle.</h2><p>De originele SurvivalOps-taken draaien op de server. Beheer de scheduler, bekijk de uitvoering en volg Serve-Emu live.</p><div class="actions"><button id="start" class="primary">▶ Bot starten</button><button id="pause" class="secondary">Ⅱ Pauzeren</button><button id="resume" class="secondary">↪ Hervatten</button><button id="stop" class="danger">■ Stoppen</button></div></div><div class="hero-emblem"><span>S</span><small>WEB EDITION</small></div></div>
+    <section data-view="dashboard" class="page active operations-home">
+      <div class="hero operations-hero"><div class="operations-hero-head"><span class="operations-kicker">SURVIVALOPS / CONTROL ROOM</span><h2>Werkoverzicht</h2><p>Serve-Emu en de taakplanner op één plek. Controleer eerst de status en start de bot alleen wanneer je de routines wilt uitvoeren.</p></div><div class="operations-controls"><span class="operations-control-label">BOTBEDIENING</span><div class="actions"><button id="start" class="primary">▶ Starten</button><button id="pause" class="secondary">Ⅱ Pauzeren</button><button id="resume" class="secondary">↪ Hervatten</button><button id="stop" class="danger">■ Stoppen</button></div></div></div>
       <div class="metric-grid">
         <article class="metric"><span>Engine</span><strong id="metric-engine">—</strong><small id="metric-engine-sub">Status laden</small></article>
         <article class="metric"><span>Geconfigureerde taken</span><strong id="metric-tasks">—</strong><small id="metric-tasks-sub">Taken in de catalogus</small></article>
@@ -32,13 +32,34 @@
       </div>
       <div class="split-layout">
         <article class="panel"><div class="panel-heading"><h3>Actieve taakrijen</h3><span class="muted" id="queue-count">0 wachtrijen</span></div><div id="queues" class="panel-content empty-message">Er draaien nog geen taken.</div></article>
-        <article class="panel"><div class="panel-heading"><h3>Direct naar</h3></div><div class="quick-links"><button data-go="tasks">☷ <span>Taken beheren <small>In- en uitschakelen, uitvoeren</small></span>›</button><button data-go="emulator">▣ <span>Live Serve-Emu <small>Doorlopend WebSocket-livebeeld</small></span>›</button><button data-go="qa">◇ <span>Diagnostiek <small>Task Coach en screenshots</small></span>›</button></div></article>
+        <article class="panel"><div class="panel-heading"><h3>Werkplek</h3></div><div class="quick-links"><button data-go="tasks">☷ <span>Routines beheren <small>Overzicht, instellingen en uitvoering</small></span>›</button><button data-go="emulator">▣ <span>Live Serve-Emu <small>Doorlopend WebSocket-livebeeld</small></span>›</button><button data-go="qa">◇ <span>Diagnostiek <small>Task Coach en screenshots</small></span>›</button></div></article>
       </div>
     </section>
-    <section data-view="tasks" class="page">
-      <div class="section-intro"><h2>Alle taken</h2><p>Zet routines aan of uit en open <strong>⚙ Opties</strong> om hun gedrag per profiel met duidelijke schakelaars in te stellen. De Java-taaklogica blijft dezelfde als in de MSI.</p></div>
-      <div class="toolbar"><label class="compact-label">Profiel <select id="tasks-profile"></select></label><input id="tasks-search" type="search" placeholder="Zoek taak of categorie…"><select id="tasks-category"><option value="">Alle categorieën</option></select><label class="checkbox-label"><input id="tasks-enabled" type="checkbox"> Alleen ingeschakeld</label></div>
-      <div class="panel task-panel"><div class="task-heading"><span>Taak</span><span>Laatste resultaat</span><span>Volgende uitvoering</span><span>Acties</span></div><div id="task-list"></div></div>
+    <section data-view="tasks" class="page operations-tasks">
+      <header class="work-heading">
+        <div><span class="work-eyebrow">AUTOMATISERING / TAAKBEHEER</span><h2>Mijn routines</h2><p>Schakel een routine in, bekijk het resultaat en stel de werking in. Alle wijzigingen gelden alleen voor het gekozen profiel.</p></div>
+        <label class="work-profile">WERKPROFIEL<select id="tasks-profile" aria-label="Werkprofiel"></select></label>
+      </header>
+      <div class="work-summary" id="task-summary" aria-label="Overzicht van taakstatussen">Taken laden…</div>
+      <div class="work-tools">
+        <label class="work-search"><span class="work-search-icon">⌕</span><input id="tasks-search" type="search" placeholder="Zoek een taak, bijvoorbeeld troepen of kisten" aria-label="Zoeken in taken" autocomplete="off"></label>
+        <div class="work-segments" id="task-filters" aria-label="Filter taken">
+          <button class="is-active" data-task-filter="all" type="button" aria-pressed="true">Alles</button>
+          <button data-task-filter="enabled" type="button" aria-pressed="false">Ingeschakeld</button>
+          <button data-task-filter="issues" type="button" aria-pressed="false">Mislukt</button>
+          <button data-task-filter="favorites" type="button" aria-pressed="false">★ Vastgezet</button>
+        </div>
+      </div>
+      <div class="work-layout">
+        <nav class="work-groups" aria-label="Taakcategorieën"><div class="work-groups-title">WERKGEBIEDEN</div><div id="task-categories"></div></nav>
+        <section class="work-list" aria-label="Routines">
+          <div class="work-list-heading"><div><strong id="task-list-title">Alle routines</strong><span id="task-visible-count">—</span></div><label class="work-sort">Volgorde<select id="task-sort" aria-label="Sorteer taken"><option value="logical">Logisch</option><option value="name">Naam</option><option value="state">Status</option></select></label></div>
+          <div id="task-list" class="work-list-scroll" aria-live="polite">Taken laden…</div>
+        </section>
+        <aside class="work-inspector" id="task-detail" aria-label="Geselecteerde taak"><div id="task-detail-content" class="work-inspector-content"><div class="work-empty-detail"><span>↗</span><strong>Selecteer een routine</strong><p>Klik een taak in de lijst om de werking, planning en laatste uitvoering te bekijken.</p></div></div></aside>
+      </div>
+      <div id="task-detail-scrim" class="work-detail-scrim" aria-hidden="true"></div>
+      <p class="work-footnote">Een ingeschakelde taak wordt pas uitgevoerd wanneer de scheduler draait. De resultaten komen uit de Java-engine; niet-uitgevoerde taken zijn niet automatisch gecontroleerd of goedgekeurd.</p>
     </section>
     <section data-view="custom" class="page">
       <div class="section-intro"><h2>Eigen taken</h2><p>Custom Tasks uit de oorspronkelijke Task Builder worden geladen door dezelfde Java-engine. In- en uitschakelen, eerste start, interval en prioriteit blijven bewaard.</p></div>

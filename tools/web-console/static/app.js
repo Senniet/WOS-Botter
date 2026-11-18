@@ -1,4 +1,4 @@
-const state = { page: 'dashboard', profiles: [], tasks: [], categories: [], profileId: '', settings: [], taskSettings: [], expandedTasks: new Set(), status: null, emulator: null, frameBusy: false, lastFrame: '', lastError: '' };
+const state = { page: 'dashboard', profiles: [], tasks: [], categories: [], profileId: '', settings: [], taskSettings: [], expandedTasks: new Set(), selectedTaskId: '', taskGroup: 'all', taskFilter: 'all', taskSort: 'logical', taskStars: new Set(), taskBusy: new Set(), status: null, emulator: null, frameBusy: false, lastFrame: '', lastError: '' };
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const datetime = value => { if (!value) return '—'; const d = new Date(value); return Number.isNaN(+d) ? esc(value) : d.toLocaleString('nl-NL', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}); };
@@ -14,6 +14,7 @@ let noticeTimer;
 function alertUser(message, isError=false) { const el=$('notice'); el.hidden=false; el.textContent=message; el.classList.toggle('error',isError); clearTimeout(noticeTimer); noticeTimer=setTimeout(()=>el.hidden=true,5500); }
 async function action(fn, success) { try { await fn(); if (success) alertUser(success); } catch(e) { alertUser(e.message,true); } }
 function setPage(page) {
+  if(page!=='tasks' && state.page==='tasks'){state.selectedTaskId='';document.querySelector('.operations-tasks')?.classList.remove('has-task-detail');}
   state.page = page;
   document.querySelectorAll('.nav-btn').forEach(btn=>btn.classList.toggle('active',btn.dataset.page===page));
   document.querySelectorAll('.page').forEach(el=>el.classList.toggle('active',el.dataset.view===page));
@@ -177,38 +178,225 @@ function optionControl(task,s){
  const inputType=['Integer','Long'].includes(s.type)?'number':'text';
  return '<label class="task-option value-option" for="'+esc(id)+'"><span class="option-name">'+esc(label)+help+'</span><span class="value-controls"><input id="'+esc(id)+'" type="'+inputType+'" data-task-value="'+esc(s.key)+'" data-task-owner="'+esc(task.id)+'" value="'+esc(s.value)+'" aria-label="'+esc(label)+'"><button class="secondary small" data-save-task-value="'+esc(s.key)+'" data-task-owner="'+esc(task.id)+'">Opslaan</button></span></label>';
 }
+// Curated working areas; the engine's 63 original task IDs remain authoritative.
+const workGroups=[
+ {id:'daily',name:'Dagelijkse taken',icon:'◷',description:'Beloningen en dagelijkse controles',ids:['DAILY_MISSIONS','MAIL_REWARDS','STOREHOUSE_CHEST','INTEL','CITY_SURVIVORS']},
+ {id:'city',name:'Stad & ontwikkeling',icon:'⌂',description:'Bouwen, onderzoek en Chief Orders',ids:['CITY_UPGRADE_FURNACE','CITY_UPGRADE_PRIORITISE_FURNACE','RESEARCH','CHIEF_ORDER_RUSH_JOB','CHIEF_ORDER_URGENT_MOBILIZATION','CHIEF_ORDER_PRODUCTIVITY_DAY']},
+ {id:'army',name:'Troepen',icon:'♜',description:'Trainen en genezen',ids:['TRAINING_TROOPS','HEAL_TROOPS']},
+ {id:'world',name:'Wereldkaart',icon:'◇',description:'Verzamelen, jagen en marsen',ids:['GATHER_RESOURCES','GATHER_BOOST','BEAST_HUNTING','EVENT_POLAR_TERROR','EVENT_BERSERK_CRYPTID']},
+ {id:'heroes',name:'Helden & verkenning',icon:'✧',description:'Rekrutering, arena, exploratie',ids:['HERO_RECRUITMENT','ARENA','DO_EXPLORATION','EXPLORATION_CHEST','LABYRINTH','EXPERT_AGNES_INTEL','EXPERT_ROMULUS_TAG','EXPERT_ROMULUS_TROOPS','EXPERT_SKILL_TRAINING']},
+ {id:'alliance',name:'Alliantie',icon:'⚑',description:'Hulp, bijdragen, rally en winkels',ids:['ALLIANCE_AUTOJOIN','ALLIANCE_HELP_REQUEST','ALLIANCE_TECH','ALLIANCE_CHESTS','ALLIANCE_TRIUMPH','ALLIANCE_CHAMPIONSHIP','ALLIANCE_MOBILIZATION','ALLIANCE_PET_TREASURE','ALLIANCE_SHOP','LIFE_ESSENCE_CARING']},
+ {id:'rewards',name:'Winkel & extra\'s',icon:'▤',description:'Winkels, VIP en huisdieren',ids:['SHOP_MYSTERY','NOMADIC_MERCHANT','VIP_POINTS','BANK','CRYSTAL_LABORATORY','WAR_ACADEMY','LIFE_ESSENCE','PET_SKILLS','PET_ADVENTURE']},
+ {id:'events',name:'Evenementen',icon:'✳',description:'Tijdelijke en speciale evenementen',ids:['BEAR_TRAP','EVENT_TUNDRA_TRUCK','FISHING_MINIGAME','EVENT_HERO_MISSION','EVENT_JOURNEY_OF_LIGHT','EVENT_MYRIAD_BAZAAR','MERCENARY_EVENT','TREK_AUTOMATION','TREK_SUPPLIES']},
+ {id:'system',name:'Systeem & tests',icon:'⌘',description:'Technische en ondersteunende routines',ids:['INITIALIZE','CREATE_CHARACTER','SKIP_TUTORIAL','DUMMY_TASK','TEST_HOOK_LOOP','CUSTOM_TASK','GAME_ANALYTICS_LABYRINTH','GAME_ANALYTICS_POWER']}
+];
+const workLabels={
+ DAILY_MISSIONS:['Dagelijkse missies','Ontvang beloningen uit voltooide dagelijkse missies.'],
+ MAIL_REWARDS:['Post ophalen','Verzamel beschikbare beloningen uit de mailbox.'],
+ STOREHOUSE_CHEST:['Voorraadkist','Controleer en claim beschikbare voorraadkisten.'],
+ INTEL:['Intel-missies','Voer Intel-opdrachten uit via de vuurtoren.'],
+ CITY_SURVIVORS:['Overlevenden ontvangen','Laat nieuwe overlevenden binnen en wijs ze toe.'],
+ CITY_UPGRADE_FURNACE:['Furnace verbeteren','Verwerk upgrades van de furnace en eventuele vereisten.'],
+ CITY_UPGRADE_PRIORITISE_FURNACE:['Furnace voorrang geven','Geef de furnace prioriteit bij het bouwen.'],
+ RESEARCH:['Onderzoek','Start beschikbare upgrades in het onderzoeksgebouw.'],
+ CHIEF_ORDER_RUSH_JOB:['Chief Order · Rush Job','Activeer de bouwtijdverkorting wanneer deze beschikbaar is.'],
+ CHIEF_ORDER_URGENT_MOBILIZATION:['Chief Order · Urgent Mobilization','Gebruik de mobilisatieopdracht wanneer deze beschikbaar is.'],
+ CHIEF_ORDER_PRODUCTIVITY_DAY:['Chief Order · Productivity Day','Activeer de productieopdracht wanneer deze beschikbaar is.'],
+ TRAINING_TROOPS:['Troepen trainen','Voltooi lopende training en train nieuwe eenheden.'],
+ HEAL_TROOPS:['Troepen genezen','Genees gewonde troepen in de ziekenboeg.'],
+ GATHER_RESOURCES:['Grondstoffen verzamelen','Stuur marsen naar grondstofvelden.'],
+ GATHER_BOOST:['Verzamelsnelheid verhogen','Gebruik ingestelde verzamelbonussen.'],
+ BEAST_HUNTING:['Beesten jagen','Jaag op beesten op het wereldscherm.'],
+ EVENT_POLAR_TERROR:['Polar Terror','Val Polar Terrors aan volgens je instellingen.'],
+ EVENT_BERSERK_CRYPTID:['Rally\'s aansluiten','Neem deel aan beschikbare rally\'s.'],
+ HERO_RECRUITMENT:['Helden rekruteren','Gebruik gratis pogingen en optioneel sleutels.'],
+ ARENA:['Arena','Voer arena-uitdagingen uit en haal beloningen op.'],
+ DO_EXPLORATION:['Exploratie','Ga verder in de exploratie en claim beloningen.'],
+ EXPLORATION_CHEST:['Exploratiekist','Open beschikbare beloningskisten.'],
+ LABYRINTH:['Labyrint','Voer de dagelijkse labyrinttaak uit.'],
+ EXPERT_AGNES_INTEL:['Expert Agnes · Intel','Gebruik de ingestelde Expert Agnes-opties.'],
+ EXPERT_ROMULUS_TAG:['Expert Romulus · Tag','Gebruik de ingestelde Expert Romulus-opties.'],
+ EXPERT_ROMULUS_TROOPS:['Expert Romulus · Troepen','Gebruik de troepenbonus van Romulus.'],
+ EXPERT_SKILL_TRAINING:['Expertvaardigheden','Train ingestelde expertvaardigheden.'],
+ ALLIANCE_AUTOJOIN:['Autojoin-rally\'s','Sluit automatisch aan bij alliantieactiviteiten.'],
+ ALLIANCE_HELP_REQUEST:['Alliantiehulp','Help alliantieleden bij hun verzoeken.'],
+ ALLIANCE_TECH:['Alliantietechnologie','Lever bijdragen aan alliantietechnologie.'],
+ ALLIANCE_CHESTS:['Alliantiekisten','Haal beschikbare alliantiekisten op.'],
+ ALLIANCE_TRIUMPH:['Alliance Triumph','Verwerk beschikbare Triumph-beloningen.'],
+ ALLIANCE_CHAMPIONSHIP:['Alliance Championship','Beheer deelname aan het kampioenschap.'],
+ ALLIANCE_MOBILIZATION:['Alliance Mobilization','Voer de geselecteerde mobilisatieopdrachten uit.'],
+ ALLIANCE_PET_TREASURE:['Alliantie · Dierenschat','Haal de beschikbare dierenbeloningen op.'],
+ ALLIANCE_SHOP:['Alliantiewinkel','Koop items volgens de ingestelde voorkeuren.'],
+ LIFE_ESSENCE_CARING:['Life Essence · Alliantie','Beheer de alliantiegebonden verzorging.'],
+ SHOP_MYSTERY:['Mystery Shop','Controleer aanbiedingen in de Mystery Shop.'],
+ NOMADIC_MERCHANT:['Nomadische handelaar','Bezoek de handelaar en kies ingestelde aankopen.'],
+ VIP_POINTS:['VIP-punten','Verzamel beschikbare VIP-punten.'],
+ BANK:['Bank','Verwerk de ingestelde bankactiviteit.'],
+ CRYSTAL_LABORATORY:['Kristallaboratorium','Verwerk beschikbare laboratoriumbeloningen.'],
+ WAR_ACADEMY:['War Academy','Verwerk War Academy-beloningen.'],
+ LIFE_ESSENCE:['Life Essence','Verzorg dieren en gebruik optionele rollen.'],
+ PET_SKILLS:['Dierenvaardigheden','Activeer de geselecteerde dierenvaardigheden.'],
+ PET_ADVENTURE:['Dierenavontuur','Voer de ingestelde dierenavonturen uit.'],
+ BEAR_TRAP:['Bear Trap','Beheer deelname rondom het Bear Trap-evenement.'],
+ EVENT_TUNDRA_TRUCK:['Tundra Truck','Voer de ingestelde truckactiviteiten uit.'],
+ FISHING_MINIGAME:['Vistoernooi','Voer de ingestelde vispogingen uit.'],
+ EVENT_HERO_MISSION:['Hero Mission','Voer tijdelijke heldenmissies uit.'],
+ EVENT_JOURNEY_OF_LIGHT:['Journey of Light','Beheer het Journey of Light-evenement.'],
+ EVENT_MYRIAD_BAZAAR:['Myriad Bazaar','Voer de ingestelde Bazaar-activiteit uit.'],
+ MERCENARY_EVENT:['Mercenary Event','Voer het huurlingenevenement uit.'],
+ TREK_AUTOMATION:['Tundra Trek','Automatiseer de ingestelde trekactiviteiten.'],
+ TREK_SUPPLIES:['Trek Supplies','Haal beschikbare trekbenodigdheden op.'],
+ INITIALIZE:['Initialisatie','Interne voorbereiding van de bot.'],
+ CREATE_CHARACTER:['Personage maken','Start een nieuw spelpersonage.'],
+ SKIP_TUTORIAL:['Tutorial overslaan','Verwerk het introductiescherm van een nieuw account.'],
+ DUMMY_TASK:['Testtaak','Technische routine voor testdoeleinden.'],
+ TEST_HOOK_LOOP:['Testlus','Technische testfunctie, niet voor normaal gebruik.'],
+ CUSTOM_TASK:['Eigen taken','Verwerkt zelfgemaakte Java-routines.'],
+ GAME_ANALYTICS_LABYRINTH:['Labyrintstatistiek','Verzamel statistische alliantiegegevens.'],
+ GAME_ANALYTICS_POWER:['Machtsstatistiek','Verzamel statistische alliantiegegevens.']
+};
+const workAliases={
+ HERO_RECRUITMENT:'rekrutering recruit sleutels keys heldenwerving',
+ DAILY_MISSIONS:'daily missie dagtaken',MAIL_REWARDS:'mail post beloningen',
+ STOREHOUSE_CHEST:'kisten voorraadkisten storehouse',ALLIANCE_CHESTS:'kisten alliantie chest',
+ GATHER_RESOURCES:'farm farms verzamelen hout vlees ijzer kolen wood meat iron coal',
+ GATHER_BOOST:'snelheid verzamelbonus',HEAL_TROOPS:'healing ziekenboeg genezen helen',
+ TRAINING_TROOPS:'train training opleiden infanterie schutters lanciers',
+ CITY_UPGRADE_FURNACE:'oven furnace bouwen upgrade construction',
+ CITY_SURVIVORS:'survivors welcome in allocate bewoners',
+ ALLIANCE_AUTOJOIN:'rally rallys joins aansluiten alliance autojoin',
+ ALLIANCE_TECH:'contribution bijdragen contributie tech',
+ DO_EXPLORATION:'exploration verkennen claim exploratie',
+ EXPLORATION_CHEST:'exploration kisten kist',
+ EVENT_TUNDRA_TRUCK:'truck vrachtwagen tundra',
+ ARENA:'arena challenges uitdagingen chest kist',
+ INTEL:'lighthouse vuurtoren hero journey beast',
+ LIFE_ESSENCE:'essence dieren verzorging',
+ FISHING_MINIGAME:'viswedstrijd vissen tournament',
+ BEAR_TRAP:'bear beer jacht rally'
+};
+const workIds=new Map(workGroups.flatMap(group=>group.ids.map(id=>[id,group.id])));
+const workSortOrder=new Map(workGroups.flatMap(group=>group.ids.map((id,index)=>[id,index])));
+function workGroup(t){return workIds.get(t.id)||'system';}
+function workName(t){return workLabels[t.id]?.[0]||t.name;}
+function workHelp(t){return workLabels[t.id]?.[1]||'Instellingen en uitvoering van deze routine.';}
+function taskStarsKey(){return 'survivalops.web.stars.'+state.profileId;}
+function loadTaskStars(){try{const ids=JSON.parse(localStorage.getItem(taskStarsKey())||'[]');state.taskStars=new Set(Array.isArray(ids)?ids:[]);}catch(_){state.taskStars=new Set();}}
+function saveTaskStars(){try{localStorage.setItem(taskStarsKey(),JSON.stringify([...state.taskStars]));}catch(_){/* Restricted/private browser mode */}}
+function workStatus(t){
+ if(t.executing)return {label:'Bezig',kind:'running',priority:0};
+ if(t.outcome==='FAILED')return {label:'Mislukt',kind:'failed',priority:1};
+ if(t.outcome==='SUCCEEDED')return {label:'Geslaagd',kind:'success',priority:2};
+ if(t.queued)return {label:'In wachtrij',kind:'queued',priority:3};
+ if(t.outcome==='RUNNING')return {label:'Recent gestart',kind:'running',priority:0};
+ return {label:'Nog geen resultaat',kind:'idle',priority:4};
+}
+function workMatched(t){
+ const text=$('tasks-search').value.trim().toLocaleLowerCase('nl-NL');
+ if(text && ![workName(t),workHelp(t),workAliases[t.id],t.name,t.id,workGroups.find(g=>g.id===workGroup(t))?.name]
+      .some(s=>String(s||'').toLocaleLowerCase('nl-NL').includes(text)))return false;
+ if(state.taskFilter==='enabled'&&!t.enabled)return false;
+ if(state.taskFilter==='issues'&&t.outcome!=='FAILED')return false;
+ if(state.taskFilter==='favorites'&&!state.taskStars.has(t.id))return false;
+ return true;
+}
+function taskSetSelection(id){
+ state.selectedTaskId=id;
+ document.querySelector('.operations-tasks')?.classList.add('has-task-detail');
+ renderTasks();
+ renderTaskDetail();
+}
+function closeTaskDetail(){
+ state.selectedTaskId='';
+ document.querySelector('.operations-tasks')?.classList.remove('has-task-detail');
+ renderTasks();renderTaskDetail();
+}
+function renderTaskNavigation(){
+ const relevant=state.tasks.filter(workMatched);
+ const allEnabled=relevant.filter(t=>t.enabled).length;
+ const allErrors=relevant.filter(t=>t.outcome==='FAILED').length;
+ const counters=state.tasks.filter(t=>t.toggleable).length;
+ $('task-summary').innerHTML='<span><b>'+state.tasks.length+'</b> routines</span><span><i class="work-dot is-on"></i><b>'+state.tasks.filter(t=>t.enabled).length+'</b> ingeschakeld</span><span><i class="work-dot is-error"></i><b>'+state.tasks.filter(t=>t.outcome==='FAILED').length+'</b> mislukt</span><span class="work-summary-note">'+counters+' handmatig schakelbaar · '+allEnabled+' actief in selectie'+(allErrors?' · '+allErrors+' fout in selectie':'')+'</span>';
+ $('task-categories').innerHTML=[{id:'all',name:'Alle gebieden',icon:'▦',description:''},...workGroups].map(group=>{
+  const total=relevant.filter(t=>group.id==='all'||workGroup(t)===group.id).length;
+  const enabled=relevant.filter(t=>(group.id==='all'||workGroup(t)===group.id)&&t.enabled).length;
+  return '<button type="button" class="work-group'+(state.taskGroup===group.id?' is-current':'')+'" data-task-group="'+esc(group.id)+'" aria-current="'+(state.taskGroup===group.id?'true':'false')+'"><span class="work-group-symbol">'+esc(group.icon)+'</span><span>'+esc(group.name)+'</span><small>'+enabled+'/'+total+'</small></button>';
+ }).join('');
+ document.querySelectorAll('[data-task-filter]').forEach(btn=>{
+  const selected=btn.dataset.taskFilter===state.taskFilter;
+  btn.classList.toggle('is-active',selected);btn.setAttribute('aria-pressed',String(selected));
+ });
+}
 async function loadTasks(){
  const profileId=state.profileId;
- if(!profileId){$('task-list').innerHTML='<div class="panel-content text-muted">Maak eerst een profiel aan.</div>';return;}
+ if(!profileId){$('task-list').textContent='Maak eerst een profiel aan.';return;}
  try{
-   const [tasks,settings]=await Promise.all([
-     api('/api/tasks?profile='+encodeURIComponent(profileId)),
-     api('/api/settings?profile='+encodeURIComponent(profileId))]);
-   if(state.profileId!==profileId)return;
-   state.tasks=tasks; state.taskSettings=settings;
-   const categories=[...new Set(tasks.map(t=>t.category))].sort();
-   const selected=$('tasks-category').value;
-   $('tasks-category').innerHTML='<option value="">Alle categorieën</option>'+categories.map(c=>'<option>'+esc(c)+'</option>').join('');
-   $('tasks-category').value=categories.includes(selected)?selected:'';
-   $('metric-tasks').textContent=tasks.filter(t=>t.enabled).length+' / '+tasks.length;
-   $('metric-tasks-sub').textContent='Taken ingeschakeld';
-   // Do not replace a form while the user is typing a task option.
-   if(!document.activeElement?.closest('[data-task-options]'))renderTasks();
- }catch(e){$('task-list').innerHTML='<div class="panel-content">'+esc(e.message)+'</div>';}
+  const [tasks,settings]=await Promise.all([api('/api/tasks?profile='+encodeURIComponent(profileId)),api('/api/settings?profile='+encodeURIComponent(profileId))]);
+  if(profileId!==state.profileId)return;
+  state.tasks=tasks;state.taskSettings=settings;
+  $('metric-tasks').textContent=tasks.filter(t=>t.enabled).length+' / '+tasks.length;
+  $('metric-tasks-sub').textContent='Taken ingeschakeld';
+  renderTasks();
+  const editing=document.activeElement?.closest('.work-inspector [data-task-options]');
+  if(!editing)renderTaskDetail();
+ }catch(e){$('task-list').textContent=e.message;}
 }
 function renderTasks(){
- const search=$('tasks-search').value.trim().toLowerCase(),cat=$('tasks-category').value,enabled=$('tasks-enabled').checked;
- const items=state.tasks.filter(t=>(!search||(t.name+' '+t.id+' '+t.category).toLowerCase().includes(search))&&(!cat||t.category===cat)&&(!enabled||t.enabled));
- $('task-list').innerHTML=items.map(t=>{
-   const label=t.outcome==='SUCCEEDED'?'Geslaagd':t.outcome==='FAILED'?'Mislukt':t.outcome==='RUNNING'?'Uitvoering':t.outcome==='NOT_RUN'?'Nog niet':t.outcome;
-   const cls=t.outcome==='SUCCEEDED'?'good':t.outcome==='FAILED'?'bad':'';
-   const behavior=taskBehavior(t),isOpen=state.expandedTasks.has(t.id);
-   const actionButton=behavior.length?'<button class="secondary" data-expand-task="'+esc(t.id)+'" aria-expanded="'+isOpen+'">⚙ Opties ('+behavior.length+') '+(isOpen?'▴':'▾')+'</button>':'';
-   const top='<div class="task-row"><div class="task-name"><label><input type="checkbox" data-task-toggle="'+esc(t.id)+'" '+(t.enabled?'checked ':'')+(t.toggleable?'':'disabled ')+'> <span><strong>'+esc(t.name)+'</strong><small>'+esc(t.category.replace(/_/g,' '))+'</small></span></label></div><div class="outcome '+cls+'" title="'+esc(t.detail)+'">'+esc(t.executing?'Bezig':label)+'<small class="text-muted">'+(t.lastAttempt?' · '+datetime(t.lastAttempt):'')+'</small></div><div class="text-muted">'+datetime(t.next)+'</div><div class="task-actions">'+actionButton+'<button class="secondary" data-schedule-task="'+esc(t.id)+'" '+(!t.enabled?'disabled':'')+'>Plannen</button><button class="secondary" data-run-task="'+esc(t.id)+'" '+(!t.enabled?'disabled':'')+'>Nu uitvoeren</button></div></div>';
-   const opts=isOpen&&behavior.length?'<div class="task-option-panel" data-task-options="'+esc(t.id)+'"><div class="task-option-heading"><strong>Gedrag van deze taak</strong><span>Deze keuzes worden direct per profiel opgeslagen.</span></div><div class="task-option-grid">'+behavior.map(s=>optionControl(t,s)).join('')+'</div></div>':'';
-   return '<div class="task-card">'+top+opts+'</div>';
- }).join('')||'<div class="panel-content text-muted">Geen taken gevonden.</div>';
+ renderTaskNavigation();
+ const groups=state.taskGroup==='all'?workGroups:workGroups.filter(g=>g.id===state.taskGroup);
+ const relevant=state.tasks.filter(workMatched);
+ const listing=groups.flatMap(g=>relevant.filter(t=>workGroup(t)===g.id));
+ $('task-list-title').textContent=state.taskGroup==='all'?'Alle routines':(workGroups.find(g=>g.id===state.taskGroup)?.name||'Routines');
+ $('task-visible-count').textContent=listing.length+' zichtbaar';
+ let html='';
+ for(const group of groups){
+  let items=relevant.filter(t=>workGroup(t)===group.id);
+  if(!items.length)continue;
+  if($('task-sort').value==='name')items=items.sort((a,b)=>workName(a).localeCompare(workName(b),'nl-NL'));
+  else if($('task-sort').value==='state')items=items.sort((a,b)=>workStatus(a).priority-workStatus(b).priority||workName(a).localeCompare(workName(b),'nl-NL'));
+  else items=items.sort((a,b)=>(workSortOrder.get(a.id)??999)-(workSortOrder.get(b.id)??999));
+  html+='<div class="work-section"><div class="work-section-header"><div><span class="work-section-icon">'+esc(group.icon)+'</span><strong>'+esc(group.name)+'</strong><small>'+esc(group.description)+'</small></div><span>'+items.filter(t=>t.enabled).length+' / '+items.length+' aan</span></div>';
+  for(const t of items){
+   const status=workStatus(t),selected=state.selectedTaskId===t.id;
+   const note=t.executing?'Wordt momenteel uitgevoerd':t.lastAttempt?'Laatste '+datetime(t.lastAttempt):'Nog niet uitgevoerd';
+   const next=t.enabled?(t.next?'Volgende '+datetime(t.next):'Geen planning'):'Uitgeschakeld';
+   const opts=taskBehavior(t).length;
+   html+='<div class="work-task'+(selected?' is-selected':'')+(t.enabled?' is-enabled':'')+'" data-task-row="'+esc(t.id)+'">'
+     +'<button class="work-star'+(state.taskStars.has(t.id)?' is-starred':'')+'" type="button" data-star-task="'+esc(t.id)+'" title="'+(state.taskStars.has(t.id)?'Losmaken van favorieten':'Vastzetten als favoriet')+'" aria-label="Favoriet: '+esc(workName(t))+'" aria-pressed="'+state.taskStars.has(t.id)+'">'+(state.taskStars.has(t.id)?'★':'☆')+'</button>'
+     +'<button class="work-task-open" type="button" data-open-task="'+esc(t.id)+'" aria-label="Instellingen voor '+esc(workName(t))+' openen"><strong>'+esc(workName(t))+'</strong><small>'+esc(workHelp(t))+'</small></button>'
+     +'<span class="work-state is-'+status.kind+'"><i></i>'+status.label+'</span>'
+     +'<span class="work-task-timing" title="'+esc(note)+'">'+esc(next)+'</span>'
+     +'<label class="work-main-toggle" title="'+(t.toggleable?'Taak in- of uitschakelen':'Interne taak, niet handmatig schakelbaar')+'"><input type="checkbox" data-task-toggle="'+esc(t.id)+'" aria-label="'+esc(workName(t))+' in- of uitschakelen" '+(t.enabled?'checked ':'')+(t.toggleable?'':'disabled ')+(state.taskBusy.has(t.id)?'disabled ':'')+'><span></span></label>'
+     +'<button type="button" class="work-row-arrow" data-open-task="'+esc(t.id)+'" aria-label="Details '+esc(workName(t))+'">'+(opts?'⚙':'›')+'</button></div>';
+  }
+  html+='</div>';
+ }
+ $('task-list').innerHTML=html||'<div class="work-no-results"><strong>Geen routines gevonden</strong><p>Wijzig je zoekwoord, filter of werkgebied.</p><button type="button" data-clear-task-filters>Filters wissen</button></div>';
 }
+function renderTaskDetail(){
+ const t=state.tasks.find(t=>t.id===state.selectedTaskId);
+ if(!t){$('task-detail-content').innerHTML='<div class="work-empty-detail"><span>↗</span><strong>Selecteer een routine</strong><p>Open een taak om instellingen, planning en het laatste resultaat te bekijken.</p></div>';return;}
+ const status=workStatus(t),group=workGroups.find(g=>g.id===workGroup(t));
+ const settings=taskBehavior(t);
+ const booleans=settings.filter(s=>s.type==='Boolean'), values=settings.filter(s=>s.type!=='Boolean');
+ const optionSection=(title,items)=>items.length?'<div class="work-option-section"><h4>'+esc(title)+'</h4><div class="task-option-grid">'+items.map(s=>optionControl(t,s)).join('')+'</div></div>':'';
+ const last=t.lastAttempt?'Laatste poging: '+datetime(t.lastAttempt):'Nog geen uitvoering geregistreerd';
+ const successful=t.lastSuccess?'Laatste succes: '+datetime(t.lastSuccess):'Nog geen succes geregistreerd';
+ const options=booleans.length+values.length;
+ $('task-detail-content').innerHTML='<header class="work-detail-head"><span>'+esc(group?.name||'Taak')+'</span><button type="button" data-close-task aria-label="Details sluiten">×</button></header>'
+   +'<div class="work-detail-title"><h3>'+esc(workName(t))+'</h3><p>'+esc(workHelp(t))+'</p></div>'
+   +'<div class="work-detail-status"><span class="work-state is-'+status.kind+'"><i></i>'+esc(status.label)+'</span><span>'+(t.enabled?'Ingeschakeld':'Uitgeschakeld')+'</span></div>'
+   +'<div class="work-detail-activation"><div><strong>Automatisch uitvoeren</strong><small>Wordt uitgevoerd als de bot draait en deze taak aan de beurt is.</small></div><label class="work-main-toggle"><input type="checkbox" data-task-toggle="'+esc(t.id)+'" aria-label="Taak automatisch uitvoeren" '+(t.enabled?'checked ':'')+(t.toggleable?'':'disabled ')+(state.taskBusy.has(t.id)?'disabled ':'')+'><span></span></label></div>'
+   +'<div class="work-detail-actions"><button type="button" class="primary" data-run-task="'+esc(t.id)+'" '+(!t.enabled?'disabled ':'')+'>▶ Nu uitvoeren</button><button type="button" class="secondary" data-schedule-task="'+esc(t.id)+'" '+(!t.enabled?'disabled ':'')+'>◷ Plannen</button></div>'
+   +'<div class="work-detail-block"><h4>UITVOERING</h4><dl><div><dt>Laatste poging</dt><dd>'+esc(t.lastAttempt?datetime(t.lastAttempt):'Nog niet')+'</dd></div><div><dt>Laatste succes</dt><dd>'+esc(t.lastSuccess?datetime(t.lastSuccess):'Nog niet')+'</dd></div><div><dt>Volgende planning</dt><dd>'+esc(t.next?datetime(t.next):'Niet gepland')+'</dd></div></dl>'+(t.outcome==='FAILED'&&t.detail?'<p class="work-error-detail">'+esc(t.detail.slice(0,500))+'</p>':'')+'</div>'
+   +'<div class="work-detail-options" data-task-options="'+esc(t.id)+'"><div class="work-detail-section-head"><h4>GEDRAG & OPTIES</h4><span>'+options+' opties</span></div>'
+   +(settings.length?optionSection('Schakelaars',booleans)+optionSection('Waarden en grenzen',values):'<p class="work-no-options">Deze routine heeft geen extra opties. In- en uitschakelen doe je hierboven.</p>')
+   +'</div><p class="work-detail-help">Instellingen worden direct in het gekozen profiel opgeslagen. Aanpassingen starten geen taak.</p>';
+}
+function clearTaskFilters(){
+ state.taskGroup='all';state.taskFilter='all';$('tasks-search').value='';$('task-sort').value='logical';renderTasks();
+}
+
 async function saveTaskOption(key,value,profileId){
  await api('/api/setting','POST',{profileId,key,value});
  if(profileId===state.profileId){
@@ -340,30 +528,37 @@ document.addEventListener('click',e=>{
  const diag=e.target.closest('[data-diagnostic]');if(diag)showQa(diag.dataset.diagnostic);
  const edit=e.target.closest('[data-edit-profile]');if(edit)editProfile(edit.dataset.editProfile);
  const go=e.target.closest('[data-go]');if(go)setPage(go.dataset.go);
- const run=e.target.closest('[data-run-task]');if(run) action(async()=>{await api('/api/task','POST',{action:'run',profileId:state.profileId,task:run.dataset.runTask}); await loadTasks();},'Taak toegevoegd aan de wachtrij');
+ const run=e.target.closest('[data-run-task]');if(run)action(async()=>{await api('/api/task','POST',{action:'run',profileId:state.profileId,task:run.dataset.runTask});await loadTasks();},'Taak toegevoegd aan de wachtrij');
  const setting=e.target.closest('[data-save-setting]');if(setting)action(()=>saveSetting(setting.dataset.saveSetting));
- const expand=e.target.closest('[data-expand-task]');if(expand){
-   const id=expand.dataset.expandTask;
-   if(state.expandedTasks.has(id))state.expandedTasks.delete(id);else state.expandedTasks.add(id);
-   renderTasks();
- }
+ const close=e.target.closest('[data-close-task]');if(close)closeTaskDetail();
+ const open=e.target.closest('[data-open-task]');if(open)taskSetSelection(open.dataset.openTask);
+ const group=e.target.closest('[data-task-group]');if(group){state.taskGroup=group.dataset.taskGroup;renderTasks();}
+ const filter=e.target.closest('[data-task-filter]');if(filter){state.taskFilter=filter.dataset.taskFilter;renderTasks();}
+ const star=e.target.closest('[data-star-task]');if(star){const id=star.dataset.starTask;if(state.taskStars.has(id))state.taskStars.delete(id);else state.taskStars.add(id);saveTaskStars();renderTasks();}
+ const clear=e.target.closest('[data-clear-task-filters]');if(clear)clearTaskFilters();
  const saveTask=e.target.closest('[data-save-task-value]');if(saveTask){
    const input=saveTask.parentElement.querySelector('input[data-task-value]');
    if(input && input.checkValidity()){
      const profileId=state.profileId,key=input.dataset.taskValue;
-     action(()=>saveTaskOption(key,input.value,profileId));
-   } else if(input)input.reportValidity();
+     saveTask.disabled=true;
+     action(async()=>{try{await saveTaskOption(key,input.value,profileId);}finally{saveTask.disabled=false;}});
+   }else if(input)input.reportValidity();
  }
 });
 document.addEventListener('change',e=>{
  const task=e.target.closest('[data-task-toggle]');
  if(task){
-   const profileId=state.profileId,enabled=task.checked;
-   task.disabled=true;
+   const profileId=state.profileId,enabled=task.checked,id=task.dataset.taskToggle;
+   if(state.taskBusy.has(id))return;
+   state.taskBusy.add(id);task.disabled=true;
    action(async()=>{
-     await api('/api/task','POST',{action:'toggle',profileId,task:task.dataset.taskToggle,enabled});
-     await loadTasks();
-   },'Taakinstelling opgeslagen');
+     try{
+       await api('/api/task','POST',{action:'toggle',profileId,task:id,enabled});
+       if(profileId===state.profileId){const model=state.tasks.find(t=>t.id===id);if(model)model.enabled=enabled;}
+       await loadTasks();
+     }catch(error){task.checked=!enabled;throw error;}
+     finally{state.taskBusy.delete(id);if(profileId===state.profileId){renderTasks();renderTaskDetail();}}
+   },'Routine '+(enabled?'ingeschakeld':'uitgeschakeld'));
  }
  const taskOption=e.target.closest('[data-task-option]');
  if(taskOption){
@@ -439,8 +634,11 @@ $('logout').addEventListener('click',async()=>{try{await api('/api/logout','POST
 for(const [name, actionName] of [['start','start'],['pause','pause'],['resume','resume'],['stop','stop']]) {
  $(name).addEventListener('click',()=>action(async()=>{await api('/api/engine','POST',{action:actionName});await loadStatus();await loadProfiles();},'Bot: '+actionName));
 }
-$('tasks-profile').addEventListener('change',e=>{state.profileId=e.target.value;state.expandedTasks.clear();loadTasks();});
-for(const id of ['tasks-search','tasks-category','tasks-enabled']) $(id).addEventListener(id==='tasks-search'?'input':'change',renderTasks);
+$('tasks-profile').addEventListener('change',e=>{state.profileId=e.target.value;state.selectedTaskId='';document.querySelector('.operations-tasks')?.classList.remove('has-task-detail');loadTaskStars();loadTasks();});
+$('tasks-search').addEventListener('input',renderTasks);
+$('task-sort').addEventListener('change',renderTasks);
+$('task-detail-scrim').addEventListener('click',closeTaskDetail);
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&state.page==='tasks'&&state.selectedTaskId)closeTaskDetail();});
 $('settings-profile').addEventListener('change',loadSettings);
 for(const id of ['settings-search','settings-type','settings-advanced']) $(id).addEventListener(id==='settings-search'?'input':'change',renderSettings);
 $('profile-new').addEventListener('click',()=>{$('profile-form').reset();$('profile-id').value='';});
@@ -511,4 +709,4 @@ setInterval(loadStatus,4500);
 // The embedded native Serve-Emu browser provides its own continuous WebSocket stream.
 // ADB screenshot capture is now manual fallback only, never an automatic 1.8s loop.
 setInterval(()=>{if(state.page==='tasks')loadTasks();if(state.page==='logs')loadLogs();if(state.page==='qa')loadQa();if(state.page==='statistics')loadStatistics();},20000);
-(async()=>{await loadStatus();await loadProfiles();if(state.profileId)await loadTasks();loadDevice();})().catch(e=>alertUser(e.message,true));
+(async()=>{await loadStatus();await loadProfiles();loadTaskStars();if(state.profileId)await loadTasks();loadDevice();})().catch(e=>alertUser(e.message,true));
