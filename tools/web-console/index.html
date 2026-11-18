@@ -68,16 +68,20 @@
       <p class="hint">Built-in routines are under Task Manager. Advanced MSI graph editing, OCR branches and template capture are not available in this simplified browser editor.</p>
     </section>
     <section data-view="emulator" class="page emulator-page">
-      <article class="panel emu-live-panel">
-        <div class="panel-heading emu-live-heading"><h3>Live View</h3><span id="emu-connection" class="pill">Checking connection</span></div>
-        <div class="emu-live-container">
-          <iframe id="emu-live" src="https://192.168.1.20:8448/" title="Serve-Emu live screen from TrueNAS" loading="lazy" referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin" aria-label="Continuous Serve-Emu live stream" tabindex="-1" inert></iframe>
+      <div class="emu-stage" aria-label="Interactive Serve-Emu">
+        <div class="emu-stage-toolbar">
+          <div class="emu-stage-title"><strong>Live emulator</strong><span>Android 16 · 720 × 1280</span></div>
+          <div class="emu-stage-actions">
+            <span id="emu-connection" class="pill">Checking connection</span>
+            <a class="emu-external-link" href="https://192.168.1.20:8448/" target="_blank" rel="noopener noreferrer" aria-label="Open full Serve-Emu in a new tab">Full Serve-Emu <span aria-hidden="true">↗</span></a>
+          </div>
         </div>
-        <p class="hint">Live video comes directly from Serve-Emu and is view-only here to prevent accidental input while the bot is running. Open Serve-Emu separately for full control. If the browser warns about the certificate, first open the TrueNAS page directly.</p>
-      </article>
-      <div class="emu-layout emu-secondary">
-        <article class="panel"><div class="panel-heading"><h3>Manual Screenshot and Controls</h3><span class="pill" id="emu-snapshot-status">No screenshot yet</span></div><div class="emu-center"><div class="phone-frame"><img id="emu-image" alt="Manual screenshot of Whiteout Survival" draggable="false"></div></div><div class="emu-buttons"><button id="screen-refresh" class="secondary">↻ Take Screenshot</button><button id="emu-back" class="secondary">← Back</button></div><p class="hint">This is a manual fallback, not a periodic screenshot feed. Tapping and Back are only available while the bot is stopped and no other controller is active.</p></article>
-        <article class="panel"><div class="panel-heading"><h3>Serve-Emu Management</h3></div><div class="panel-content"><div class="detail-row"><span>Type</span><strong>Serve-Emu / Android 16</strong></div><div class="detail-row"><span>ADB</span><strong id="emu-endpoint">—</strong></div><div class="detail-row"><span>Display</span><strong>720 × 1280</strong></div><div class="detail-row"><span>Stream</span><strong id="emu-mode">WebSocket (live)</strong></div><a class="link-button" href="https://192.168.1.20:8448/" target="_blank" rel="noopener noreferrer">Open Interactive Serve-Emu</a></div></article>
+        <div class="emu-player-area">
+          <div class="emu-phone" id="emu-phone">
+            <iframe id="emu-live" src="https://192.168.1.20:8448/embed.html" title="Interactive live Serve-Emu screen" loading="lazy" referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin" aria-label="Interactive Whiteout Survival screen" tabindex="0"></iframe>
+            <div class="emu-input-shield" id="emu-input-shield" hidden role="status" aria-live="polite"><span class="emu-shield-icon" aria-hidden="true">◉</span><strong>Bot is controlling the emulator</strong><span>Stop automation to use the screen here.</span></div>
+          </div>
+        </div>
       </div>
     </section>
     <section data-view="statistics" class="page"><div class="section-intro"><h2>Execution Statistics</h2><p>Execution statistics from the Java engine, including run counts, average duration and OCR/template errors for each profile.</p></div><div class="toolbar"><label class="compact-label">Profile <select id="statistics-profile"></select></label><button id="statistics-refresh" class="secondary small">↻ Refresh</button><button id="statistics-reset" class="danger small">Reset Statistics</button></div><div id="statistics-stats" class="metric-grid"></div><div class="split-layout"><article class="panel"><div class="panel-heading"><h3>Routine Performance</h3></div><div class="panel-content stats-scroll" id="statistics-routines">No execution recorded yet.</div></article><article class="panel"><div class="panel-heading"><h3>Additional Counters</h3></div><div class="panel-content" id="statistics-counters">No additional counters available.</div></article></div></section>

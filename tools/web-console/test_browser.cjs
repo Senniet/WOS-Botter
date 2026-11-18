@@ -72,7 +72,7 @@ const {chromium}=require('playwright-core');
   await page.locator('[data-star-task="HERO_RECRUITMENT"]').click();
   await page.locator('[data-task-filter="all"]').click();
   const pageLabels={
-    dashboard:'Operations Overview',custom:'Saved Custom Tasks',emulator:'Live View',
+    dashboard:'Operations Overview',custom:'Saved Custom Tasks',emulator:'Live emulator',
     statistics:'Execution Statistics',profiles:'Existing Profiles',settings:'Account Security',
     logs:'Live Engine Logs',qa:'Task Coach & QA Review'
   };
@@ -80,9 +80,31 @@ const {chromium}=require('playwright-core');
     await page.locator('.nav-btn[data-page="'+route+'"]').click();
     await page.locator('.page.active').getByText(label,{exact:false}).first().waitFor();
     if(route==='emulator'){
-      const view=await page.locator('.emu-live-container').boundingBox();
-      assert.ok(view && view.y<175, 'Live emulator view should start high on the desktop, actual y='+view?.y);
+      const view=await page.locator('.emu-phone').boundingBox();
+      assert.ok(view && view.y<190, 'Live emulator view should start high on the desktop, actual y='+view?.y);
       assert.ok(await page.evaluate(()=>document.body.classList.contains('is-emulator-page')));
+      const iframe=page.locator('#emu-live');
+      assert.match(await iframe.getAttribute('src'),/\/embed\.html$/,'Must use the native compact interactive player');
+      assert.equal(await iframe.getAttribute('inert'),null,'Native input must be enabled when bot is stopped');
+      assert.equal(await page.locator('.emu-secondary').count(),0,'No duplicate screenshot or settings area');
+      assert.equal(await page.locator('.emu-external-link').count(),1,'Full Serve-Emu link in the toolbar');
+      await page.frameLocator('#emu-live').locator('.device canvas').waitFor({timeout:14000});
+      const nativeSidebar=await page.frameLocator('#emu-live').locator('.device-sidebar').evaluate(el=>getComputedStyle(el).display);
+      assert.equal(nativeSidebar,'none','Native device sidebar must be hidden in compact player');
+      const player=page.frameLocator('#emu-live').locator('.device canvas');
+      await page.waitForTimeout(1800); // Allow the native OffscreenCanvas first frames to arrive.
+      const canvasBox=await player.boundingBox();
+      assert.ok(canvasBox && canvasBox.height>400 && canvasBox.width>200,
+        'The native interactive canvas must fill the portrait player, not be a tiny preview');
+      const nativePanels=await page.frameLocator('#emu-live').locator('.side-panel').evaluate(el=>getComputedStyle(el).display);
+      assert.equal(nativePanels,'none','Native settings/tools panel must be hidden');
+      // Simulate the web scheduler going active without starting any actual bot tasks.
+      await page.evaluate(()=>{state.status={...state.status,running:true};updateEmulatorInputSafety()});
+      assert.ok(await page.locator('#emu-input-shield').isVisible(),'Controls are shielded while bot runs');
+      assert.equal(await iframe.getAttribute('tabindex'),'-1');
+      await page.evaluate(()=>{state.status={...state.status,running:false,executing:false};updateEmulatorInputSafety()});
+      assert.equal(await page.locator('#emu-input-shield').isVisible(),false,'Controls restore on stop');
+      assert.equal(await iframe.getAttribute('tabindex'),'0');
       await page.screenshot({path:path.join(os.homedir(),'.cache/survivalops-emulator-compact-desktop.png'),fullPage:false});
     }
   }
@@ -107,8 +129,11 @@ const {chromium}=require('playwright-core');
   assert.equal(await page.locator('.operations-tasks.has-task-detail').count(),0);
   await page.locator('#mobile-menu').click();
   await page.locator('.nav-btn[data-page="emulator"]').click();
-  const mobileView=await page.locator('.emu-live-container').boundingBox();
-  assert.ok(mobileView && mobileView.y<150,'Live emulator view should start high on mobile, actual y='+mobileView?.y);
+  const mobileView=await page.locator('.emu-phone').boundingBox();
+  assert.ok(mobileView && mobileView.y<160,'Live emulator view should start high on mobile, actual y='+mobileView?.y);
+  assert.equal(await page.locator('.emu-secondary').count(),0);
+  await page.frameLocator('#emu-live').locator('.device canvas').waitFor({timeout:14000});
+  await page.waitForTimeout(500); // allow the collapsing mobile navigation transition to finish
   await page.screenshot({path:path.join(os.homedir(),'.cache/survivalops-emulator-compact-mobile.png'),fullPage:false});
   const distinct=errs.filter(e=>!e.includes('ERR_CERT_AUTHORITY_INVALID')&&!e.includes('Failed to load resource: the server responded with a status of 401'));
   assert.equal(distinct.length,0,'No JavaScript or console errors: '+distinct.join('; '));

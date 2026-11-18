@@ -57,3 +57,41 @@ body.is-emulator-page .topbar h1{margin-top:3px;font-size:22px}
  .emulator-page .emu-live-heading{min-height:35px;padding:6px 10px}
  .emulator-page .emu-live-container{height:calc(100dvh - 112px);min-height:350px}
 }
+
+/* Only the real 720×1280 interactive player; no native Serve-Emu side panels. */
+body.is-emulator-page .main{padding-bottom:0}
+body.is-emulator-page .topbar{padding-top:12px;padding-bottom:11px;margin-bottom:11px}
+body.is-emulator-page .topbar h1{font-size:20px;margin-top:2px}
+body.is-emulator-page .footer{display:none}
+.emulator-page{animation:none}
+.emulator-page .emu-stage{width:100%;min-width:0}
+.emu-stage-toolbar{min-height:42px;display:flex;align-items:center;justify-content:space-between;gap:15px;flex-wrap:wrap;margin-bottom:10px}
+.emu-stage-title{display:flex;align-items:baseline;gap:11px;min-width:0}
+.emu-stage-title strong{font-size:13px;letter-spacing:-.1px;font-weight:750;color:#f1f6ff}
+.emu-stage-title span{font-size:11px;color:#91a2ba;white-space:nowrap}
+.emu-stage-actions{display:flex;align-items:center;gap:12px;margin-left:auto}
+.emu-stage-actions .pill{font-size:10px;padding:4px 9px}
+.emu-external-link{display:inline-flex;align-items:center;gap:8px;text-decoration:none;white-space:nowrap;font-size:12px;font-weight:700;color:#c6dcff;background:#18273b;border:1px solid #384962;border-radius:8px;padding:8px 12px;transition:background .15s,border-color .15s}
+.emu-external-link:hover,.emu-external-link:focus-visible{background:#243b58;border-color:#6586b8;color:#fff}
+.emu-player-area{display:flex;align-items:flex-start;justify-content:center;min-height:0;width:100%;padding:0}
+.emu-phone{position:relative;width:min(100%,480px,calc((100dvh - 176px)*9/16));aspect-ratio:9/16;max-height:calc(100dvh - 176px);overflow:hidden;background:#03070d;border-radius:13px;box-shadow:0 10px 42px #0007;border:1px solid #334155}
+.emu-phone iframe{width:100%;height:100%;display:block;border:0;background:#03070d;touch-action:none}
+.emu-input-shield{position:absolute;inset:0;z-index:2;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;text-align:center;padding:24px;background:#070d19c9;color:#e5efff;pointer-events:auto}
+.emu-input-shield[hidden]{display:none!important}
+.emu-input-shield .emu-shield-icon{font-size:26px;color:#8ab5f4}
+.emu-input-shield strong{font-size:14px}
+.emu-input-shield span:last-child{font-size:12px;color:#afc0d7}
+@media(max-width:750px){
+ body.is-emulator-page .topbar{padding-top:10px;padding-bottom:9px;margin-bottom:8px}
+ .emu-stage-toolbar{margin-bottom:8px;min-height:38px}
+ .emu-stage-title span{display:none}
+ .emu-stage-actions{gap:8px}
+ .emu-external-link{font-size:11px;padding:7px 9px}
+ .emu-phone{width:min(100%,calc((100dvh - 153px)*9/16));max-height:calc(100dvh - 153px);border-radius:10px}
+}
+@media(max-width:400px){
+ .emu-stage-toolbar{gap:4px}
+ .emu-stage-title strong{font-size:12px}
+ .emu-stage-actions .pill{font-size:9px;padding:3px 7px}
+ .emu-external-link{font-size:10px;padding:6px 7px}
+}

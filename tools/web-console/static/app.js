@@ -1,4 +1,4 @@
-const state = { page: 'dashboard', profiles: [], tasks: [], categories: [], profileId: '', settings: [], taskSettings: [], expandedTasks: new Set(), selectedTaskId: '', taskGroup: 'all', taskFilter: 'all', taskSort: 'logical', taskStars: new Set(), taskBusy: new Set(), status: null, emulator: null, frameBusy: false, lastFrame: '', lastError: '' };
+const state = { page: 'dashboard', profiles: [], tasks: [], categories: [], profileId: '', settings: [], taskSettings: [], expandedTasks: new Set(), selectedTaskId: '', taskGroup: 'all', taskFilter: 'all', taskSort: 'logical', taskStars: new Set(), taskBusy: new Set(), status: null, emulator: null, lastError: '' };
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const datetime = value => { if (!value) return '—'; const d = new Date(value); return Number.isNaN(+d) ? esc(value) : d.toLocaleString('en-GB', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}); };
@@ -71,6 +71,7 @@ async function loadStatus(){
   try{
     state.status=await api('/api/status');
     engineControls(state.status);
+    updateEmulatorInputSafety();
     $('connection').textContent='Connected'; $('connection').className='pill good';
     $('side-status').textContent='Engine connected';document.querySelector('.status-led').classList.add('on');
     $('last-sync').textContent='Updated '+new Date().toLocaleTimeString('en-GB');
@@ -713,6 +714,22 @@ async function saveSetting(key){
  if(input.type==='password')input.value='';
  alertUser('Setting saved: '+key);
 }
+function updateEmulatorInputSafety(){
+ const shield=$('emu-input-shield'),frame=$('emu-live');
+ if(!shield||!frame)return;
+ const busy=Boolean(state.status?.running||state.status?.executing);
+ const external=Boolean(state.emulator?.externalControllerLikelyActive);
+ const blocked=busy||external;
+ shield.hidden=!blocked;
+ frame.inert=blocked;
+ frame.style.pointerEvents=blocked?'none':'auto';
+ frame.tabIndex=blocked?-1:0;
+ if(blocked)frame.blur();
+ if(blocked){
+  shield.querySelector('strong').textContent=busy?'Bot is controlling the emulator':'Another controller may be active';
+  shield.querySelector('span:last-child').textContent=busy?'Stop automation to use the screen here.':'Manual control is temporarily paused while another session uses Serve-Emu.';
+ }
+}
 async function loadDevice(){
  try {
   state.emulator=await api('/api/emulator/state');
@@ -720,28 +737,12 @@ async function loadDevice(){
   $('emu-connection').className='pill '+(state.emulator.connected?'good':'bad');
   $('metric-device').textContent=state.emulator.connected?'Online':'Offline';
   $('metric-device-sub').textContent=state.emulator.endpoint || 'Serve-Emu';
-  $('emu-endpoint').textContent=state.emulator.endpoint || '—';
-  if(state.emulator.externalControllerLikelyActive){
-   $('emu-mode').textContent='MSI/Task Coach may be active; manual control blocked';
-  }
+  updateEmulatorInputSafety();
  } catch(e){
   $('emu-connection').textContent='Disconnected';$('emu-connection').className='pill bad';
   $('metric-device').textContent='Offline';$('metric-device-sub').textContent=e.message;
+  updateEmulatorInputSafety();
  }
-}
-async function refreshFrame(){
- if(state.frameBusy || state.page!=='emulator')return;
- state.frameBusy=true;
- try{
-   const response=await fetch('/api/emulator/frame',{cache:'no-store'});
-   if(!response.ok){const data=await response.json();throw new Error(data.error||'No image available');}
-   const blob=await response.blob();
-   const url=URL.createObjectURL(blob), previous=state.lastFrame;
-   $('emu-image').src=url;state.lastFrame=url;
-   if(previous) $('emu-image').onload=()=>URL.revokeObjectURL(previous);
-   $('emu-snapshot-status').textContent='Screenshot '+new Date().toLocaleTimeString('en-GB');
- }catch(e){$('emu-snapshot-status').textContent=e.message;}
- finally{state.frameBusy=false;}
 }
 async function loadLogs(){
  try{const result=await api('/api/logs');$('logs-body').textContent=(result.lines||[]).join('\n')||result.note||'No logs available';}catch(e){$('logs-body').textContent=e.message;}
@@ -960,35 +961,9 @@ $('schedule-form').addEventListener('submit',e=>{
  action(async()=>{await api('/api/task','POST',{action:'schedule',profileId:state.profileId,task,when});$('schedule-dialog').close();await loadTasks();},'Schedule saved');
 });
 
-$('screen-refresh').addEventListener('click',refreshFrame);
-$('emu-back').addEventListener('click',()=>action(async()=>{await api('/api/emulator/input','POST',{action:'back'});await refreshFrame();},'Back pressed'));
-let emuPointer = null;
-function emulatorPoint(e, rect){
- return {x:Math.max(0,Math.min(719,Math.floor((e.clientX-rect.left)/rect.width*720))),
-         y:Math.max(0,Math.min(1279,Math.floor((e.clientY-rect.top)/rect.height*1280)))};
-}
-$('emu-image').addEventListener('pointerdown', e=>{
- e.preventDefault();
- const img=e.currentTarget;
- if(img.setPointerCapture)img.setPointerCapture(e.pointerId);
- emuPointer={...emulatorPoint(e,img.getBoundingClientRect()),at:performance.now()};
-});
-$('emu-image').addEventListener('pointerup',e=>{
- e.preventDefault();
- if(!emuPointer)return;
- const from=emuPointer,to=emulatorPoint(e,e.currentTarget.getBoundingClientRect());
- emuPointer=null;
- if(state.status?.running){alertUser('Stop the bot before controlling the screen',true);return;}
- const distance=Math.hypot(to.x-from.x,to.y-from.y);
- const request=distance>=18
-   ?{action:'swipe',x:from.x,y:from.y,toX:to.x,toY:to.y,duration:Math.max(150,Math.min(1200,Math.floor(performance.now()-from.at)))}
-   :{action:'tap',x:to.x,y:to.y};
- action(async()=>{await api('/api/emulator/input','POST',request);await refreshFrame();});
-});
-$('emu-image').addEventListener('pointercancel',()=>{emuPointer=null;});
 setInterval(()=>{$('clock').textContent=new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});},1000);
 setInterval(loadStatus,4500);
 // The embedded native Serve-Emu browser provides its own continuous WebSocket stream.
 // ADB screenshot capture is now manual fallback only, never an automatic 1.8s loop.
-setInterval(()=>{if(state.page==='tasks')loadTasks();if(state.page==='logs')loadLogs();if(state.page==='qa')loadQa();if(state.page==='statistics')loadStatistics();},20000);
+setInterval(()=>{if(state.page==='tasks')loadTasks();if(state.page==='logs')loadLogs();if(state.page==='qa')loadQa();if(state.page==='statistics')loadStatistics();if(state.page==='emulator')loadDevice();},20000);
 (async()=>{await loadStatus();await loadProfiles();loadTaskStars();if(state.profileId)await loadTasks();loadDevice();})().catch(e=>alertUser(e.message,true));
