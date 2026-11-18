@@ -16,6 +16,7 @@ async function action(fn, success) { try { await fn(); if (success) alertUser(su
 function setPage(page) {
   if(page!=='tasks' && state.page==='tasks'){state.selectedTaskId='';document.querySelector('.operations-tasks')?.classList.remove('has-task-detail');}
   state.page = page;
+  document.body.classList.toggle('is-emulator-page', page === 'emulator');
   document.querySelectorAll('.nav-btn').forEach(btn=>btn.classList.toggle('active',btn.dataset.page===page));
   document.querySelectorAll('.page').forEach(el=>el.classList.toggle('active',el.dataset.view===page));
   const label = {dashboard:'Overview',tasks:'Task Manager',custom:'Custom Tasks',statistics:'Statistics',emulator:'Serve-Emu',profiles:'Profiles',settings:'Settings',logs:'Logs',qa:'Diagnostics'}[page] || page;

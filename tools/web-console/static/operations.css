@@ -39,3 +39,21 @@ button.primary,a.link-button{background:#c5a268;color:#1a1b1d;border-color:#d8b6
 }
 
 .operations-home{animation:none}
+
+/* Serve-Emu is a viewer, not a second dashboard: put video directly below top navigation. */
+body.is-emulator-page .topbar{padding-top:14px;padding-bottom:12px;margin-bottom:10px}
+body.is-emulator-page .topbar h1{margin-top:3px;font-size:22px}
+.emulator-page .emu-live-panel{border-radius:5px;margin:0 0 12px}
+.emulator-page .emu-live-heading{padding:8px 13px;min-height:39px;gap:10px}
+.emulator-page .emu-live-heading h3{font-size:12px;font-weight:750;letter-spacing:.2px}
+.emulator-page .emu-live-heading .pill{padding:3px 8px;font-size:10px}
+.emulator-page .emu-live-container{height:calc(100dvh - 160px);min-height:560px;max-height:1040px;min-width:0}
+.emulator-page .emu-secondary{margin-top:12px}
+@media(max-width:850px){
+ body.is-emulator-page .topbar{padding-top:10px;padding-bottom:10px;margin-bottom:8px}
+ .emulator-page .emu-live-container{height:calc(100dvh - 134px);min-height:440px}
+}
+@media(max-width:560px){
+ .emulator-page .emu-live-heading{min-height:35px;padding:6px 10px}
+ .emulator-page .emu-live-container{height:calc(100dvh - 112px);min-height:350px}
+}

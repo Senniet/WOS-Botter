@@ -67,10 +67,9 @@
       <div class="panel builder-panel"><div class="panel-heading"><h3>New Task Builder Workflow</h3><span class="muted">Uses the original MSI Java code generator</span></div><div class="panel-content"><form id="builder-form" class="form-grid"><div class="builder-row"><label>Workflow name (letters/numbers)<input required id="builder-name" maxlength="41" pattern="[A-Za-z][A-Za-z0-9]{2,40}" placeholder="e.g. MyMailTask" autocomplete="off"></label><label>Starting screen<select id="builder-location"><option>ANY</option><option>HOME</option><option>WORLD</option></select></label></div><p class="hint">Create a disabled Java routine from steps. It will only join the scheduler after you save, compile and explicitly enable it.</p><div class="builder-actions"><button type="button" class="secondary small" data-add-step="TAP_POINT">+ Tap</button><button type="button" class="secondary small" data-add-step="WAIT">+ Wait</button><button type="button" class="secondary small" data-add-step="SWIPE">+ Swipe</button><button type="button" class="secondary small" data-add-step="BACK_BUTTON">+ Back</button></div><div id="builder-steps" class="builder-steps"></div><button class="primary" type="submit">Save and Compile Java Task</button></form></div></div>
       <p class="hint">Built-in routines are under Task Manager. Advanced MSI graph editing, OCR branches and template capture are not available in this simplified browser editor.</p>
     </section>
-    <section data-view="emulator" class="page">
-      <div class="section-intro"><h2>Serve-Emu · Live</h2><p>The existing TrueNAS emulator displayed through its native WebSocket stream, without periodic screenshot refreshes.</p></div>
+    <section data-view="emulator" class="page emulator-page">
       <article class="panel emu-live-panel">
-        <div class="panel-heading"><h3>Live Serve-Emu Screen</h3><span id="emu-connection" class="pill">Checking connection</span></div>
+        <div class="panel-heading emu-live-heading"><h3>Live View</h3><span id="emu-connection" class="pill">Checking connection</span></div>
         <div class="emu-live-container">
           <iframe id="emu-live" src="https://192.168.1.20:8448/" title="Serve-Emu live screen from TrueNAS" loading="lazy" referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin" aria-label="Continuous Serve-Emu live stream" tabindex="-1" inert></iframe>
         </div>

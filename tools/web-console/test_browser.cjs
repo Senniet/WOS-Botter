@@ -24,7 +24,7 @@ const {chromium}=require('playwright-core');
   await page.locator('.nav-btn[data-page="tasks"]').waitFor({timeout:15000});
   assert.match(await page.locator('.nav-btn[data-page="tasks"]').innerText(),/Task Manager/);
   await page.locator('.nav-btn[data-page="tasks"]').click();
-  await page.locator('.work-task').first().waitFor({timeout:15000});
+  await page.locator('.work-task').first().waitFor({timeout:12000});
   const count=await page.locator('.work-task').count();
   assert.equal(count,63,'All routines visible');
   assert.equal(await page.locator('.work-group').count(),10,'All areas + all menu');
@@ -72,13 +72,19 @@ const {chromium}=require('playwright-core');
   await page.locator('[data-star-task="HERO_RECRUITMENT"]').click();
   await page.locator('[data-task-filter="all"]').click();
   const pageLabels={
-    dashboard:'Operations Overview',custom:'Saved Custom Tasks',emulator:'Live Serve-Emu Screen',
+    dashboard:'Operations Overview',custom:'Saved Custom Tasks',emulator:'Live View',
     statistics:'Execution Statistics',profiles:'Existing Profiles',settings:'Account Security',
     logs:'Live Engine Logs',qa:'Task Coach & QA Review'
   };
   for(const [route,label] of Object.entries(pageLabels)){
     await page.locator('.nav-btn[data-page="'+route+'"]').click();
     await page.locator('.page.active').getByText(label,{exact:false}).first().waitFor();
+    if(route==='emulator'){
+      const view=await page.locator('.emu-live-container').boundingBox();
+      assert.ok(view && view.y<175, 'Live emulator view should start high on the desktop, actual y='+view?.y);
+      assert.ok(await page.evaluate(()=>document.body.classList.contains('is-emulator-page')));
+      await page.screenshot({path:path.join(os.homedir(),'.cache/survivalops-emulator-compact-desktop.png'),fullPage:false});
+    }
   }
   await page.locator('.nav-btn[data-page="tasks"]').click();
   await page.evaluate(()=>showScheduleDialog('HERO_RECRUITMENT'));
@@ -99,6 +105,11 @@ const {chromium}=require('playwright-core');
   await page.screenshot({path:path.join(os.homedir(),'.cache/survivalops-redesign-mobile.png'),fullPage:false});
   await page.locator('[data-close-task]').click();
   assert.equal(await page.locator('.operations-tasks.has-task-detail').count(),0);
+  await page.locator('#mobile-menu').click();
+  await page.locator('.nav-btn[data-page="emulator"]').click();
+  const mobileView=await page.locator('.emu-live-container').boundingBox();
+  assert.ok(mobileView && mobileView.y<150,'Live emulator view should start high on mobile, actual y='+mobileView?.y);
+  await page.screenshot({path:path.join(os.homedir(),'.cache/survivalops-emulator-compact-mobile.png'),fullPage:false});
   const distinct=errs.filter(e=>!e.includes('ERR_CERT_AUTHORITY_INVALID')&&!e.includes('Failed to load resource: the server responded with a status of 401'));
   assert.equal(distinct.length,0,'No JavaScript or console errors: '+distinct.join('; '));
   console.log('Browser PASS: 63 tasks, categories, detail panel, settings, search, favorites, desktop/mobile overflow, close panel.');

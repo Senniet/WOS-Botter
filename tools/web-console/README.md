@@ -54,3 +54,7 @@ Validation: `node tools/web-console/test_task_ui.cjs` uses the live Java task/se
 All operator-facing pages (including login, dashboard, task workbench, scheduler dialogs, task builder, profiles, QA labels, settings, live Serve-Emu, notifications and password-change errors) now use English and game-aligned Whiteout Survival terms. The HTML language is `en`; date formatting uses `en-GB` for a clear 24-hour clock. Each of the 63 built-in routines has an explicit English label and purpose, and behavior controls use English names without changing persisted MSI config keys. Historical diagnostics and user-entered profile names/log lines remain as originally recorded (not translated or altered).
 
 Browser tests check desktop and mobile navigation and the English task workbench. Python tests protect against reintroducing common Dutch UI wording. Localization changes are frontend-only apart from English server error messages and do not start the scheduler or change user settings.
+
+## Compact Serve-Emu viewport (November 2026)
+
+The Serve-Emu page is focused on the actual native live viewer: duplicate section title/intro removed; a 39 px compact connection heading remains; top navigation, top margins and panel padding are reduced only while on the emulator page. The continuous iframe uses the available dynamic viewport height with desktop and mobile minimums. Existing viewer URL, read-only safety, ADB fallback controls, connection status and other pages remain unchanged. The browser smoke checks that the live viewport starts near the top on desktop and mobile.
