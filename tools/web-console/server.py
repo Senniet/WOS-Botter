@@ -266,7 +266,7 @@ class Handler(BaseHTTPRequestHandler):
     def is_safe_origin(self) -> bool:
         origin = self.headers.get("Origin", "")
         host = self.headers.get("Host", "")
-        return (host in ("10.0.0.100:9098", "localhost:9098", "127.0.0.1:9098")
+        return (host in ("10.0.0.100:9098", "192.168.1.20:9098", "localhost:9098", "127.0.0.1:9098")
                 and (not origin or origin == f"https://{host}"))
 
     def do_GET(self):
@@ -513,7 +513,10 @@ def main():
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.minimum_version = ssl.TLSVersion.TLSv1_2
     private = Path.home() / "survivalops-diagnostics/private"
-    context.load_cert_chain(private / "server-cert.pem", private / "server-key.pem")
+    certificate = AUTH_PATH.parent / "server-cert.pem"
+    private_key = AUTH_PATH.parent / "server-key.pem"
+    context.load_cert_chain(certificate if certificate.exists() else private / "server-cert.pem",
+                            private_key if private_key.exists() else private / "server-key.pem")
     server.socket = context.wrap_socket(server.socket, server_side=True)
     print(f"SurvivalOps Web HTTPS ready on https://{args.host}:{args.port}", flush=True)
     server.serve_forever()
