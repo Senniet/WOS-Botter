@@ -30,6 +30,34 @@ class AuthTests(unittest.TestCase):
         self.assertFalse(WEB.token_ok(data, cookie + "alteration"))
         self.assertFalse(WEB.token_ok(data, "other=value"))
 
+    def test_operator_interface_uses_english(self):
+        """English game terminology should remain consistent across all web screens."""
+        import re
+        source = Path(__file__).parent
+        html = (source / "index.html").read_text(encoding="utf-8")
+        login = (source / "login.html").read_text(encoding="utf-8")
+        app = (source / "static/app.js").read_text(encoding="utf-8")
+        login_js = (source / "static/login.js").read_text(encoding="utf-8")
+        self.assertIn('<html lang="en">', html)
+        self.assertIn('<html lang="en">', login)
+        self.assertIn("'en-GB'", app)
+        self.assertIn('Daily Tasks', app)
+        self.assertIn('Hero Recruitment', app)
+        self.assertIn('Claim Recruitment Points Chest', app)
+        self.assertIn('Password', login)
+        self.assertIn('Login failed', login_js)
+        dutch_ui = re.compile(
+            r"\b(?:instellingen|takenbeheer|wachtwoord|inloggen|overzicht|"
+            r"ingeschakeld|uitgeschakeld|beloningen|troepen|gebruiken|"
+            r"verwijderen|opgeslagen|verversen|wachtrij|beveiligde|"
+            r"verzamelen|profielen|laad|beschikbaar|niet|geen|voor)\b",
+            re.IGNORECASE,
+        )
+        for label, content in (("index", html), ("login", login),
+                               ("app", app), ("login script", login_js)):
+            self.assertIsNone(dutch_ui.search(content),
+                              f"Dutch operator text remains in {label}")
+
     def test_qa_directory_traversal_is_not_available(self):
         self.assertIsNone(WEB.qa_indexed_record("../../etc/passwd"))
         self.assertIsNone(WEB.qa_indexed_record("2026-11-18/../secret.json"))

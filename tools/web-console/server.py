@@ -351,8 +351,8 @@ class Handler(BaseHTTPRequestHandler):
                 data = self.read_json()
                 if parsed.path == "/api/engine" and data.get("action") == "start" \
                         and other_controller_recent():
-                    self.json(409, {"error": "De MSI/Task Coach gebruikt mogelijk Serve-Emu. "
-                                           "Start de webbot pas nadat de andere sessie gestopt is."})
+                    self.json(409, {"error": "The MSI/Task Coach may already be controlling Serve-Emu. "
+                                           "Only start the web bot once the other session has stopped."})
                     return
                 body = json.dumps(data).encode("utf-8")
                 self.forward(parsed.path, "POST", body)
@@ -395,9 +395,9 @@ class Handler(BaseHTTPRequestHandler):
             old, new = data.get("current", ""), data.get("new", "")
             if not isinstance(old, str) or not isinstance(new, str) or \
                     len(new) < 14 or len(new) > 128 or new.isspace():
-                raise ValueError("Nieuw wachtwoord moet 14 tot 128 tekens bevatten")
+                raise ValueError("New password must contain between 14 and 128 characters")
             if not password_ok(self.server.auth, old):
-                self.json(403, {"error": "Huidig wachtwoord onjuist"})
+                self.json(403, {"error": "Current password is incorrect"})
                 return
             salt = secrets.token_bytes(24)
             next_auth = {"salt": salt.hex(),
@@ -457,8 +457,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.json(409, {"error": "Stop the bot before manual emulator control"})
                 return
             if other_controller_recent():
-                self.json(409, {"error": "Een andere SurvivalOps-sessie produceert nu diagnostiek. "
-                                         "Handmatige ADB-bediening is tijdelijk geblokkeerd."})
+                self.json(409, {"error": "Another SurvivalOps session is currently producing diagnostics. "
+                                         "Manual ADB controls are temporarily blocked."})
                 return
             endpoint = emulator_endpoint()
             action = data.get("action")
