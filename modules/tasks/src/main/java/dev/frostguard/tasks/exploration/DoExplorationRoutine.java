@@ -75,6 +75,21 @@ public class DoExplorationRoutine extends DelayedTask {
         // geometry and already-open page/root probes. Previously those
         // passive checks each triggered their own remote ADB screencap.
         RawImageData initialFrame=emuManager.captureScreen(EMULATOR_NUMBER);
+        // A previous losing normal battle used to be marked complete without
+        // dismissing the Defeat result, leaving every later task blocked.
+        // Recover the exact Return to City button BEFORE the ordinary
+        // Exploration entry / Quick Exploration probes.
+        if (ExplorationDefeatFrame.visible(initialFrame)) {
+            logInfo("Resuming pending normal Exploration Defeat and restoring City");
+            if (closeDefeatAndVerifyHome()) {
+                rescheduleInOneHour();
+            } else {
+                battleOutcomeUnknown=true;
+                markWorkIncomplete("Exploration Defeat: Return to City remains unverified");
+                reschedule(LocalDateTime.now().plusMinutes(10));
+            }
+            return;
+        }
         QuickExplorationFrame.State existing=QuickExplorationFrame.classify(
                 initialFrame,EMULATOR_NUMBER);
         if (existing!=QuickExplorationFrame.State.OTHER) {
@@ -401,7 +416,7 @@ public class DoExplorationRoutine extends DelayedTask {
                 // NEVER tap Fight or Back on an unrelated screen.
                 if(!prepareNextStageAfterVictory())return false;
             } else if (battleResult == BattleResult.DEFEAT) {
-                handleDefeat();
+                if (!handleDefeat()) battleOutcomeUnknown=true;
                 return false;
             } else if (battleResult == BattleResult.QUICK_CONFIRMED) {
                 logInfo("Late Quick Exploration confirmed; handling result instead of manual battle");
@@ -673,9 +688,48 @@ public class DoExplorationRoutine extends DelayedTask {
         return true;
     }
 
-    private void handleDefeat() {
-        logInfo("Defeated.. Rescheduling...");
+    private boolean handleDefeat() {
+        logInfo("Exploration Defeat detected; returning to City before ending the task");
         StatisticsService.obtain().addToCounter(profile, "Exploration Fights Lost", 1);
+        return closeDefeatAndVerifyHome();
+    }
+
+    /**
+     * Positive, bounded Defeat -> Return to City -> City HUD transition.
+     * Never tap Retry or use a generic Back or broad overlay dismissal.
+     */
+    private boolean closeDefeatAndVerifyHome() {
+        var first=ExplorationDefeatFrame.returnToCity(
+                emuManager.captureScreen(EMULATOR_NUMBER));
+        if (!first.isFound()) {
+            logWarning("Exploration Defeat visible but Return to City was not recognized; "
+                    + TaskDiagnosticSnapshots.capture(emuManager,EMULATOR_NUMBER,
+                    "exploration","defeat-return-city-missing"));
+            return false;
+        }
+        sleepTask(190);
+        var second=ExplorationDefeatFrame.returnToCity(
+                emuManager.captureScreen(EMULATOR_NUMBER));
+        if (!RecognitionConsensus.agrees(first,second,14)) {
+            logWarning("Exploration Defeat Return to City changed between frames; no blind tap");
+            return false;
+        }
+        tapVerifiedSquadAction(second);
+        sleepTask(650);
+        // The loading animation may last a few seconds. Poll only for the
+        // positively recognized city shortcut after the confirmed CTA.
+        for (int poll=0;poll<7;poll++) {
+            var current=emuManager.captureScreen(EMULATOR_NUMBER);
+            if (ExplorationRootFrame.root(current)==ExplorationRootFrame.Root.CITY) {
+                logInfo("Exploration Defeat dismissed; City Home verified");
+                return true;
+            }
+            if (poll<6) sleepTask(450);
+        }
+        logWarning("Exploration Defeat Return to City tapped but City Home not confirmed; "
+                + TaskDiagnosticSnapshots.capture(emuManager,EMULATOR_NUMBER,
+                "exploration","defeat-city-unverified"));
+        return false;
     }
 
     private BattleResult waitForBattleResult(long fightingStartedAt) {
