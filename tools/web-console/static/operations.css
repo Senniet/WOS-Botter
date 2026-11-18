@@ -101,3 +101,24 @@ body.is-emulator-page .footer{display:none}
    scroll the outer panel 3,000px on a task switch, leaving a black panel.
    Clip cannot scroll; layout containment still prevents phantom page height. */
 .operations-tasks .work-list { contain: layout; overflow: clip; }
+
+/* Research: sortable operator-defined category order, shared with the Java
+   PriorityConfigResolver. This intentionally replaces the raw rank string. */
+.work-inspector .research-priority-option {display:block;padding:12px;background:#1b2832;border:1px solid #394958;border-radius:6px}
+.research-priority-help {margin:6px 0 11px;color:#a8b7c2;font-size:11px;line-height:1.5}
+.research-priority-list {display:grid;gap:6px;margin:0;padding:0;list-style:none}
+.research-priority-row {display:grid;grid-template-columns:15px 18px minmax(0,1fr) 71px 57px;align-items:center;gap:7px;min-width:0;padding:9px 8px;background:#263440;border:1px solid #405361;border-radius:5px;cursor:grab}
+.research-priority-row:active {cursor:grabbing}
+.research-priority-row:focus-visible {outline:2px solid #d5b178;outline-offset:1px}
+.research-priority-row.is-dragged {opacity:.45;border-style:dashed}
+.research-priority-row strong {font-size:12px;color:#e8edf0;font-weight:650}
+.research-priority-grip {color:#8c9ba5;font-size:18px;line-height:1;user-select:none}
+.research-priority-rank {font:700 12px ui-monospace,monospace;color:#d6bd91}
+.research-priority-actions {display:flex;gap:3px}
+.research-priority-actions button {padding:0;width:32px;height:30px;min-width:0;border-radius:4px;border:1px solid #526371;background:#26343f;color:#dce6ec;font-size:17px;cursor:pointer}
+.research-priority-actions button:hover:not(:disabled) {background:#385066;border-color:#b8a37c}
+.research-priority-actions button:disabled {opacity:.3;cursor:not-allowed}
+.research-priority-enabled {display:flex;align-items:center;gap:4px;justify-content:flex-end;color:#b7c7d0;font-size:10px;cursor:pointer}
+.research-priority-enabled input {width:15px;height:15px;accent-color:#86ae99;margin:0}
+.research-priority-feedback {font-size:10px;color:#a2c0ad;margin:10px 0 0;line-height:1.35}
+@media(max-width:580px){.research-priority-row{grid-template-columns:12px 15px minmax(0,1fr) 65px 47px;gap:4px;padding:8px 5px}.research-priority-actions button{width:29px;height:29px}}

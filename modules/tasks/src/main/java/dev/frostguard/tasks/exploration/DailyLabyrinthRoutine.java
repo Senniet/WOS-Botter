@@ -1,224 +1,190 @@
 package dev.frostguard.tasks.exploration;
 
-import dev.frostguard.vision.convert.GameTimeUtils;
-import dev.frostguard.api.configs.TemplatesEnum;
 import dev.frostguard.api.configs.TpDailyTaskEnum;
+import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.api.domain.ImageSearchResultData;
 import dev.frostguard.api.domain.PointData;
-import dev.frostguard.api.domain.AccountDescriptor;
+import dev.frostguard.api.domain.RawImageData;
+import dev.frostguard.engine.helper.RecognitionConsensus;
 import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.schedule.LaunchPoint;
-import dev.frostguard.engine.nav.SearchConfigConstants;
-import dev.frostguard.tasks.diagnostics.TaskControlSignals;
-
+import dev.frostguard.tasks.diagnostics.TaskDiagnosticSnapshots;
+import dev.frostguard.vision.convert.GameTimeUtils;
 import java.time.LocalDateTime;
 
 /**
- * Task responsible for completing daily labyrinth challenges.
- * This task navigates to the labyrinth menu and executes appropriate challenges
- * in the currently active Land of Heroes dungeon.
+ * Daily Labyrinth -> Cave of Monsters. The 2026 version opens a stage map,
+ * Challenge, troop-ratio formation and Deploy; it does NOT have the old
+ * Land-of-Heroes Quick Challenge / Raid / Quick Deploy controls.
+ *
+ * Every tap requires a verified state and the one daily attempt only counts
+ * as completed if the game actually displays Victory. No paid replenishment
+ * or automatic repeated battle is permitted.
  */
-public class DailyLabyrinthRoutine extends DelayedTask {
+public final class DailyLabyrinthRoutine extends DelayedTask {
+    private static final PointData EXIT_CAVE = new PointData(680,36);
+    private static final PointData BACK_OVERVIEW = new PointData(41,36);
+    private static final PointData BACK_FORMATION = new PointData(41,36);
+    private static final int ENTRY_DELAY_MS=440;
+    private boolean completedVerified;
 
-    // =========================== CONSTANTS ===========================
+    public DailyLabyrinthRoutine(AccountDescriptor profile,TpDailyTaskEnum type){super(profile,type);}
 
-    // Navigation points
-    private static final PointData SKIP_BUTTON = new PointData(71, 827);
-    private static final PointData RESULT_SKIP_BUTTON = new PointData(640, 175);
-
-    // Timing constants
-    private static final int MENU_NAVIGATION_DELAY = 1000;
-    private static final int BATTLE_COMPLETION_DELAY = 3000;
-
-    private boolean challengeAttempted;
-
-    // =========================== CONSTRUCTOR ===========================
-
-    public DailyLabyrinthRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
-        super(profile, tpTask);
+    @Override public boolean provideDailyMissionProgress(){return shouldReportDailyMissionProgress(completedVerified);}
+    static boolean shouldReportDailyMissionProgress(boolean completed){return completed;}
+    @Override protected LaunchPoint getRequiredStartLocation(){return LaunchPoint.HOME;}
+    @Override protected boolean acceptsInjections(){return false;}
+    @Override protected void execute(){
+        completedVerified=false;
+        runExclusiveUiTransaction(this::runCaveOfMonsters);
     }
 
-    // =========================== TASK OVERRIDES ===========================
-
-    @Override
-    public boolean provideDailyMissionProgress() {
-        return shouldReportDailyMissionProgress(challengeAttempted);
-    }
-
-    static boolean shouldReportDailyMissionProgress(boolean challengeAttempted) {
-        return challengeAttempted;
-    }
-
-    @Override
-    public LaunchPoint getRequiredStartLocation() {
-        return LaunchPoint.HOME;
-    }
-
-    @Override
-    protected void execute() {
-
-        challengeAttempted = false;
+    private void runCaveOfMonsters(){
         try {
-            // Step 1: Navigate to labyrinth menu
-            if (!navigateToLabyrinthMenu()) {
-                rescheduleOneHourLater("Failed to navigate to the Labyrinth menu");
+            navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME,this::checkPreemption);
+            if(!navigationHelper.navigateToLabyrinth()){
+                defer("Labyrinth Daily sidebar destination not found",60);return;
+            }
+            RawImageData overview=emuManager.captureScreen(EMULATOR_NUMBER);
+            if(!DailyLabyrinthFrame.overview(overview)){
+                defer("The Labyrinth overview and Cave of Monsters portal not verified",40);return;
+            }
+            // The portal is the only free daily dungeon currently unlocked.
+            // A second screenshot avoids following a transitioning sidebar.
+            sleepTask(180);
+            RawImageData fresh=emuManager.captureScreen(EMULATOR_NUMBER);
+            if(!DailyLabyrinthFrame.overview(fresh)){
+                defer("Cave of Monsters entrance changed before tap",30);return;
+            }
+            tapNear(new PointData(204,484),4);
+            sleepTask(ENTRY_DELAY_MS);
+            RawImageData cave=waitForCave();
+            if(cave==null){defer("Cave of Monsters stage map not confirmed",30);return;}
+            ImageSearchResultData first=DailyLabyrinthFrame.challenge(cave);
+            if(!first.isFound()){
+                logInfo("Labyrinth: no verified free Cave of Monsters Challenge on current stage; retry after daily reset");
+                reschedule(GameTimeUtils.dailyResetTime());return;
+            }
+            sleepTask(160);
+            ImageSearchResultData second=DailyLabyrinthFrame.challenge(
+                    emuManager.captureScreen(EMULATOR_NUMBER));
+            if(!RecognitionConsensus.agrees(first,second,26)){
+                defer("Cave Challenge shifted before tap",20);return;
+            }
+            tapNear(second.getPoint(),4);
+            RawImageData formation=waitForFormation();
+            if(formation==null){defer("Cave of Monsters troop formation not confirmed",30);return;}
+            ImageSearchResultData deployFirst=DailyLabyrinthFrame.deploy(formation);
+            sleepTask(180);
+            ImageSearchResultData deploySecond=DailyLabyrinthFrame.deploy(
+                    emuManager.captureScreen(EMULATOR_NUMBER));
+            if(!RecognitionConsensus.agrees(deployFirst,deploySecond,28)){
+                defer("Cave Deploy moved or disappeared; no blind action",30);return;
+            }
+            // One normal pet-stat battle, no resource/item/gem purchases.
+            logInfo("Labyrinth Cave of Monsters: deploying one positively verified daily battle");
+            tapNear(deploySecond.getPoint(),4);
+            RawImageData win=waitForVictory();
+            if(win==null){
+                defer("Cave battle was launched, but no Victory result verified; do not deploy twice",120);
                 return;
             }
-
-            // The Daily sidebar opens the currently active Land of Heroes dungeon directly.
-            challengeAttempted = executeCurrentChallenge();
-            if (!challengeAttempted) {
-                rescheduleOneHourLater("No supported Land of Heroes challenge action completed");
-                return;
+            completedVerified=true;
+            logInfo("Labyrinth Cave of Monsters: actual Victory result confirmed");
+            // Next selects the next stage. It is not Auto-Challenge, which
+            // is locked and must never be activated by unattended automation.
+            ImageSearchResultData nextFirst=DailyLabyrinthFrame.nextStage(win);
+            sleepTask(210);
+            ImageSearchResultData nextSecond=DailyLabyrinthFrame.nextStage(
+                    emuManager.captureScreen(EMULATOR_NUMBER));
+            if(RecognitionConsensus.agrees(nextFirst,nextSecond,25)){
+                tapNear(nextSecond.getPoint(),3);
+                sleepTask(370);
+                logInfo("Labyrinth: Next selected next stage; checking result dismissal");
             }
-
+            // In the live game Next advances the selected stage BEHIND the
+            // Victory overlay. The overlay does not disappear by itself.
+            // Tap the verified 'Tap anywhere to close' area exactly once,
+            // then confirm the Cave map before touching its top-right X.
+            RawImageData result=emuManager.captureScreen(EMULATOR_NUMBER);
+            if(DailyLabyrinthFrame.victory(result)){
+                tapNear(new PointData(335,1164),4);
+                sleepTask(500);
+            }
+            if(waitForCave()==null){
+                markWorkIncomplete("Labyrinth Victory earned but Cave stage map missing after result dismissal");
+                logWarning("Labyrinth: Victory confirmed, Cave map not verified after dismiss; no second battle");
+            }else{
+                logInfo("Labyrinth: Victory dismissed; next Cave of Monsters stage selected");
+            }
             reschedule(GameTimeUtils.dailyResetTime());
-
-        } catch (Exception e) {
-            TaskControlSignals.rethrowControlSignal(e);
-            logError("An error occurred during the Labyrinth task: " + e.getMessage());
-            rescheduleOneHourLater("Unexpected error during execution: " + e.getMessage());
+        }catch(dev.frostguard.engine.error.TaskPreemptedException
+                |java.util.concurrent.CancellationException signal){throw signal;}
+        catch(RuntimeException unexpected){
+            logWarning("Labyrinth: failed safely: "+unexpected.getClass().getSimpleName()+" - "+unexpected.getMessage());
+            defer("Unverified Labyrinth state: "+unexpected.getClass().getSimpleName(),60);
+        }finally{
+            // Exit ONLY from a positively recognized game screen. Never tap
+            // Back repeatedly on unknown battle dialogs or purchase prompts.
+            RawImageData frame=emuManager.captureScreen(EMULATOR_NUMBER);
+            if(completedVerified && DailyLabyrinthFrame.victory(frame)){
+                // A prior Next may have progressed the stage without closing
+                // the overlay; this guarded exit does not start another fight.
+                tapNear(new PointData(335,1164),4);
+                sleepTask(430);
+                frame=emuManager.captureScreen(EMULATOR_NUMBER);
+            }
+            if(DailyLabyrinthFrame.cave(frame)){
+                tapNear(EXIT_CAVE,3);
+                sleepTask(430);
+            }else if(DailyLabyrinthFrame.overviewHeader(frame)){
+                tapNear(BACK_OVERVIEW,3);
+                sleepTask(430);
+            }else if(DailyLabyrinthFrame.formation(frame)){
+                tapNear(BACK_FORMATION,3);
+                sleepTask(380);
+                if(DailyLabyrinthFrame.cave(emuManager.captureScreen(EMULATOR_NUMBER))){
+                    tapNear(EXIT_CAVE,3);sleepTask(420);
+                }
+            }
+            if(completedVerified && !DailyLabyrinthFrame.home(emuManager.captureScreen(EMULATOR_NUMBER))){
+                markWorkIncomplete("Labyrinth Victory verified, but City Home not yet confirmed after exit");
+                logWarning("Labyrinth Victory was earned; Home not confirmed (no repeat battle)");
+            }
         }
     }
 
-    // =========================== NAVIGATION METHODS ===========================
-
-    /**
-     * Opens the side menu, switches to city tab, scrolls down and searches for
-     * labyrinth
-     * 
-     * @return true if navigation was successful, false otherwise
-     */
-    private boolean navigateToLabyrinthMenu() {
-        logInfo("Navigating to the Labyrinth menu...");
-
-        if (navigationHelper.navigateToLabyrinth()) {
-            logInfo("Successfully navigated to the Labyrinth menu.");
-            return true;
+    private RawImageData waitForCave(){
+        for(int n=0;n<8;n++){
+            checkPreemption();
+            RawImageData f=emuManager.captureScreen(EMULATOR_NUMBER);
+            if(DailyLabyrinthFrame.cave(f))return f;
+            sleepTask(300);
         }
-        logWarning("Labyrinth menu item not found.");
-        return false;
+        return null;
     }
-
-    // =========================== CHALLENGE EXECUTION ===========================
-
-    private boolean executeCurrentChallenge() {
-        logInfo("Executing the active Land of Heroes challenge.");
-        // Try quick challenge first
-        if (attemptQuickChallenge()) {
-            return true;
+    private RawImageData waitForFormation(){
+        for(int n=0;n<9;n++){
+            checkPreemption();
+            sleepTask(260);
+            RawImageData f=emuManager.captureScreen(EMULATOR_NUMBER);
+            if(DailyLabyrinthFrame.formation(f))return f;
         }
-
-        // Try raid challenge
-        if (attemptRaidChallenge()) {
-            return true;
-        }
-
-        // Try normal challenge
-        boolean completed = attemptNormalChallenge();
-        if (!completed) {
-            logWarning("No supported challenge action was available in Land of Heroes.");
-        }
-        return completed;
+        return null;
     }
-
-    /**
-     * Attempts to execute a quick challenge
-     */
-    private boolean attemptQuickChallenge() {
-        ImageSearchResultData quickChallengeResult = templateSearchHelper.locatePattern(
-                TemplatesEnum.LABYRINTH_QUICK_CHALLENGE_CURRENT,
-                SearchConfigConstants.SINGLE_WITH_RETRIES);
-        if (!quickChallengeResult.isFound()) {
-            quickChallengeResult = templateSearchHelper.locatePattern(
-                    TemplatesEnum.LABYRINTH_QUICK_CHALLENGE,
-                    SearchConfigConstants.SINGLE_WITH_RETRIES);
+    private RawImageData waitForVictory(){
+        for(int n=0;n<32;n++){
+            checkPreemption();
+            sleepTask(n==0?750:300);
+            RawImageData f=emuManager.captureScreen(EMULATOR_NUMBER);
+            if(DailyLabyrinthFrame.victory(f))return f;
         }
-        if (quickChallengeResult.isFound()) {
-            logInfo("'Quick Challenge' is available in Land of Heroes.");
-            tapInside(quickChallengeResult);
-            sleepTask(MENU_NAVIGATION_DELAY);
-
-            // Skip battle animation
-            // The old path tapped Skip twice and blindly pressed Back,
-            // reporting success without observing a completed challenge.
-            // Stop after the supported action until a result-screen template
-            // can confirm the battle and authorize a safe exit.
-            markWorkIncomplete("Labyrinth: quick challenge tapped, result not visually confirmed");
-            return false;
-        }
-        return false;
+        return null;
     }
-
-    /**
-     * Attempts to execute a raid challenge
-     */
-    private boolean attemptRaidChallenge() {
-        ImageSearchResultData raidResult = templateSearchHelper.locatePattern(
-                TemplatesEnum.LABYRINTH_RAID_CHALLENGE,
-                SearchConfigConstants.DEFAULT_SINGLE);
-        if (raidResult.isFound()) {
-            logInfo("'Raid Challenge' is available in Land of Heroes.");
-            tapInside(raidResult);
-            sleepTask(400);
-            markWorkIncomplete("Labyrinth: raid tapped, result not visually confirmed");
-            return false;
-        }
-        return false;
+    private void defer(String reason,int retryMinutes){
+        markWorkIncomplete("Labyrinth: "+reason);
+        logWarning("Labyrinth: "+reason+"; "
+                +TaskDiagnosticSnapshots.capture(emuManager,EMULATOR_NUMBER,"labyrinth","unverified"));
+        reschedule(LocalDateTime.now().plusMinutes(retryMinutes));
     }
-
-    /**
-     * Attempts to execute a normal challenge
-     */
-    private boolean attemptNormalChallenge() {
-        ImageSearchResultData normalChallengeResult = templateSearchHelper.locatePattern(
-                TemplatesEnum.LABYRINTH_NORMAL_CHALLENGE,
-                SearchConfigConstants.DEFAULT_SINGLE);
-        if (!normalChallengeResult.isFound()) {
-            logDebug("No 'Normal Challenge' button found in Land of Heroes.");
-            return false;
-        }
-
-        tapInside(normalChallengeResult);
-        sleepTask(300);
-
-        // Try quick deploy first
-        ImageSearchResultData quickDeployResult = templateSearchHelper.locatePattern(
-                TemplatesEnum.LABYRINTH_QUICK_DEPLOY,
-                SearchConfigConstants.DEFAULT_SINGLE);
-        if (quickDeployResult.isFound()) {
-            logInfo("'Quick Deploy' button found. Deploying for Land of Heroes.");
-            tapInside(quickDeployResult);
-            sleepTask(100);
-        }
-
-        // Deploy troops
-        ImageSearchResultData deployResult = templateSearchHelper.locatePattern(
-                TemplatesEnum.LABYRINTH_DEPLOY,
-                SearchConfigConstants.DEFAULT_SINGLE);
-        if (deployResult.isFound()) {
-            logInfo("'Deploy' button found. Deploying troops for Land of Heroes.");
-            tapInside(deployResult);
-            sleepTask(BATTLE_COMPLETION_DELAY);
-
-            // Skip battle results
-            markWorkIncomplete("Labyrinth: deploy tapped, result not visually confirmed");
-            return false;
-        }
-
-        logWarning("Could not find 'Deploy' button for Land of Heroes.");
-        return false;
-    }
-
-    /**
-     * Reschedules the task for one hour later with a reason
-     * 
-     * @param reason the reason for rescheduling
-     */
-    private void rescheduleOneHourLater(String reason) {
-        LocalDateTime nextExecution = LocalDateTime.now().plusHours(1);
-        logWarning(reason + ". Rescheduling task for one hour later.");
-        this.reschedule(nextExecution);
-    }
-
 }

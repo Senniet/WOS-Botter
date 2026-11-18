@@ -250,7 +250,8 @@ function taskBehavior(task){
      !activations.has(s.key) && prefixes.some(prefix=>s.key.startsWith(prefix)) &&
      !(task.id==='GATHER_RESOURCES'&&s.key.startsWith('GATHER_SPEED_')) &&
      !(task.id==='CITY_UPGRADE_FURNACE'&&s.key==='CITY_UPGRADE_PRIORITISE_FURNACE_BOOL') &&
-     !(task.id==='ALLIANCE_AUTOJOIN'&&s.key==='ALLIANCE_AUTOJOIN_USE_PREDEFINED_FORMATION_BOOL'));
+     !(task.id==='ALLIANCE_AUTOJOIN'&&s.key==='ALLIANCE_AUTOJOIN_USE_PREDEFINED_FORMATION_BOOL') &&
+     !(task.id==='RESEARCH'&&/^RESEARCH_(GROWTH|ECONOMY|BATTLE)_BOOL$/.test(s.key)));
 }
 function optionLabel(task,key){
  if(taskOptionLabels[key])return taskOptionLabels[key];
@@ -261,7 +262,95 @@ function optionLabel(task,key){
  const label=words.join(' ').trim();
  return label?label.charAt(0).toUpperCase()+label.slice(1):'Option';
 }
+const researchPriorityDefinitions=[
+ {tag:'growth',label:'Growth'}, {tag:'economy',label:'Economy'}, {tag:'battle',label:'Battle'}
+];
+// The exact Java PriorityItemData format: identifier:caption:rank:active.
+// Do not introduce a second setting: ResearchRoutine reads this same key.
+function parseResearchPriorityOrder(raw){
+ const parsed=new Map();
+ String(raw||'').split('|').forEach((item,index)=>{
+  const parts=item.split(':');
+  if(parts.length!==4)return;
+  const [tag,,rank,active]=parts;
+  if(!researchPriorityDefinitions.some(x=>x.tag===tag)||parsed.has(tag))return;
+  const position=Number(rank);
+  parsed.set(tag,{tag,rank:Number.isInteger(position)&&position>0?position:index+1,
+    enabled:active==='true',index});
+ });
+ const items=researchPriorityDefinitions.map((x,index)=>({
+  tag:x.tag,label:x.label,enabled:parsed.get(x.tag)?.enabled??true,
+  rank:parsed.get(x.tag)?.rank??index+4,index:parsed.get(x.tag)?.index??index+4
+ }));
+ return items.sort((a,b)=>a.rank-b.rank||a.index-b.index);
+}
+function serializeResearchPriorityOrder(items){
+ return items.map((item,index)=>item.tag+':'+item.label+':'+(index+1)+':'+Boolean(item.enabled)).join('|');
+}
+function reorderedResearchPriorities(items,tag,target){
+ const result=items.map(x=>({...x}));
+ const from=result.findIndex(x=>x.tag===tag);
+ const to=result.findIndex(x=>x.tag===target);
+ if(from<0||to<0||from===to)return result;
+ const [item]=result.splice(from,1);
+ result.splice(to,0,item);
+ return result;
+}
+function researchPriorityOption(task,s){
+ const rows=parseResearchPriorityOrder(s.value);
+ const rendered=rows.map((entry,index)=>
+  '<li class="research-priority-row" draggable="true" data-research-row="'+esc(entry.tag)+'" tabindex="0" aria-label="Drag '+esc(entry.label)+' to change research priority">'
+  +'<span class="research-priority-grip" aria-hidden="true">⠿</span>'
+  +'<span class="research-priority-rank">'+(index+1)+'</span>'
+  +'<strong>'+esc(entry.label)+'</strong>'
+  +'<div class="research-priority-actions">'
+  +'<button type="button" data-research-move="up" data-research-tag="'+esc(entry.tag)+'" aria-label="Move '+esc(entry.label)+' higher" '+(index===0?'disabled':'')+'>↑</button>'
+  +'<button type="button" data-research-move="down" data-research-tag="'+esc(entry.tag)+'" aria-label="Move '+esc(entry.label)+' lower" '+(index===rows.length-1?'disabled':'')+'>↓</button>'
+  +'</div><label class="research-priority-enabled"><input type="checkbox" data-research-enabled="'+esc(entry.tag)+'" '+(entry.enabled?'checked':'')+' aria-label="Use '+esc(entry.label)+' research"><span>Use</span></label></li>'
+ ).join('');
+ return '<div class="task-option research-priority-option" data-research-priorities="'+esc(task.id)+'">'
+  +'<strong class="option-name">Research priority</strong>'
+  +'<p class="research-priority-help">Drag a row or use ↑ ↓ to change the order. The bot tries the first enabled category, then the next if no research can start. Changes save automatically.</p>'
+  +'<ol class="research-priority-list">'+rendered+'</ol>'
+  +'<p class="research-priority-feedback" aria-live="polite">'+esc(rows.filter(r=>r.enabled).map(x=>x.label).join(' → ')||'All categories skipped')+'</p></div>';
+}
+let researchPrioritySaving=false;
+let researchDraggedTag=null;
+async function updateResearchPriorities(next,profileId){
+ if(researchPrioritySaving||!next)return;
+ const config=state.taskSettings.find(x=>x.key==='RESEARCH_PRIORITIES_STRING');
+ if(!config)return;
+ const value=serializeResearchPriorityOrder(next);
+ if(value===config.value)return;
+ researchPrioritySaving=true;
+ state.taskRevision++; // Discard stale background settings reads during save.
+ const list=document.querySelector('[data-research-priorities="RESEARCH"]');
+ if(list)list.querySelectorAll('button,input').forEach(control=>control.disabled=true);
+ try{
+  await api('/api/setting','POST',{profileId,key:'RESEARCH_PRIORITIES_STRING',value});
+  if(String(profileId)===String(state.profileId)){
+   // A completed poll may have replaced taskSettings while the POST was in flight.
+   const latest=state.taskSettings.find(s=>s.key==='RESEARCH_PRIORITIES_STRING');
+   if(latest)latest.value=value;
+   config.value=value;
+   const task=state.tasks.find(t=>t.id==='RESEARCH');
+   const previous=document.querySelector('[data-research-priorities="RESEARCH"]');
+   if(previous&&task){
+    const scrollParent=previous.closest('.work-inspector-content');
+    const y=scrollParent?.scrollTop;
+    previous.outerHTML=researchPriorityOption(task,latest||config);
+    if(scrollParent&&y!==undefined)scrollParent.scrollTop=y;
+   }
+  }
+  alertUser('Research priority saved: '+next.filter(x=>x.enabled).map(x=>x.label).join(' → '));
+ }catch(error){
+  // Settings are left unchanged until the server confirms persistence.
+  if(list)list.querySelectorAll('button,input').forEach(control=>control.disabled=false);
+  throw error;
+ }finally{researchPrioritySaving=false;}
+}
 function optionControl(task,s){
+ if(task.id==='RESEARCH'&&s.key==='RESEARCH_PRIORITIES_STRING')return researchPriorityOption(task,s);
  const label=optionLabel(task,s.key);
  const id='option-'+task.id+'-'+s.key;
  if(s.type==='Boolean'){
@@ -653,7 +742,7 @@ async function loadTasks(){
   const [tasks,settings]=await Promise.all([api('/api/tasks?profile='+encodeURIComponent(profileId)),api('/api/settings?profile='+encodeURIComponent(profileId))]);
   // Do not let a request started *before* a switch commit overwrite the new
   // flag, or recreate the list during a change. This also handles polling.
-  if(profileId!==state.profileId || revision!==state.taskRevision || state.taskBusy.size)return;
+  if(profileId!==state.profileId || revision!==state.taskRevision || state.taskBusy.size || researchPrioritySaving)return;
   state.tasks=tasks;state.taskSettings=settings;
   $('metric-tasks').textContent=tasks.filter(t=>t.enabled).length+' / '+tasks.length;
   $('metric-tasks-sub').textContent='Enabled routines';
@@ -909,6 +998,15 @@ async function showQa(path){
  }catch(e){alertUser(e.message,true);}
 }
 document.addEventListener('click',e=>{
+ const researchMove=e.target.closest('[data-research-move]');
+ if(researchMove){
+  const tag=researchMove.dataset.researchTag;
+  const original=parseResearchPriorityOrder(state.taskSettings.find(s=>s.key==='RESEARCH_PRIORITIES_STRING')?.value);
+  const i=original.findIndex(item=>item.tag===tag),delta=researchMove.dataset.researchMove==='up'?-1:1;
+  const target=original[i+delta];
+  if(target)action(()=>updateResearchPriorities(reorderedResearchPriorities(original,tag,target.tag),state.profileId));
+  return;
+ }
  const schedule=e.target.closest('[data-schedule-task]');if(schedule)showScheduleDialog(schedule.dataset.scheduleTask);
  const q=e.target.closest('[data-profile-queue]');if(q)action(async()=>{await api('/api/profile-queue','POST',{profileId:q.dataset.profileQueue,action:q.dataset.queueAction});await loadProfiles();},'Queue updated');
  const diag=e.target.closest('[data-diagnostic]');if(diag)showQa(diag.dataset.diagnostic);
@@ -932,6 +1030,13 @@ document.addEventListener('click',e=>{
  }
 });
 document.addEventListener('change',e=>{
+ const researchEnabled=e.target.closest('[data-research-enabled]');
+ if(researchEnabled){
+  const original=parseResearchPriorityOrder(state.taskSettings.find(s=>s.key==='RESEARCH_PRIORITIES_STRING')?.value);
+  const item=original.find(x=>x.tag===researchEnabled.dataset.researchEnabled);
+  if(item){item.enabled=researchEnabled.checked;action(()=>updateResearchPriorities(original,state.profileId));}
+  return;
+ }
  const task=e.target.closest('[data-task-toggle]');
  if(task){
    const profileId=state.profileId,enabled=task.checked,id=task.dataset.taskToggle;
@@ -968,6 +1073,33 @@ document.addEventListener('change',e=>{
      finally{taskOption.disabled=false;}
    });
  }
+});
+document.addEventListener('dragstart',e=>{
+ const row=e.target.closest('[data-research-row]');
+ if(!row||researchPrioritySaving)return;
+ researchDraggedTag=row.dataset.researchRow;
+ e.dataTransfer.effectAllowed='move';
+ e.dataTransfer.setData('text/plain',researchDraggedTag);
+ row.classList.add('is-dragged');
+});
+document.addEventListener('dragover',e=>{
+ if(researchDraggedTag&&e.target.closest('[data-research-row]')){
+  e.preventDefault();e.dataTransfer.dropEffect='move';
+ }
+});
+document.addEventListener('drop',e=>{
+ const row=e.target.closest('[data-research-row]');
+ if(!row||!researchDraggedTag)return;
+ e.preventDefault();
+ const source=researchDraggedTag,target=row.dataset.researchRow;
+ researchDraggedTag=null;
+ const original=parseResearchPriorityOrder(state.taskSettings.find(s=>s.key==='RESEARCH_PRIORITIES_STRING')?.value);
+ action(()=>updateResearchPriorities(reorderedResearchPriorities(original,source,target),state.profileId));
+ document.querySelectorAll('.is-dragged').forEach(el=>el.classList.remove('is-dragged'));
+});
+document.addEventListener('dragend',()=>{
+ researchDraggedTag=null;
+ document.querySelectorAll('.is-dragged').forEach(el=>el.classList.remove('is-dragged'));
 });
 document.querySelectorAll('.nav-btn').forEach(btn=>btn.addEventListener('click',()=>setPage(btn.dataset.page)));
 $('custom-refresh').addEventListener('click',loadCustom);

@@ -36,6 +36,16 @@ const vm=require('node:vm');
  mustHave('FREE_DAILY_CHESTS','FREE_DAILY_CHESTS_INTERVAL_INT');
  mustHave('SMART_DAILY_OVERVIEW','SMART_DAILY_OVERVIEW_INTERVAL_INT');
  mustHave('SMART_DAILY_OVERVIEW','SMART_DAILY_OVERVIEW_AUTO_DISPATCH_BOOL');
+ mustHave('RESEARCH','RESEARCH_PRIORITIES_STRING');
+ mustNotHave('RESEARCH','RESEARCH_ECONOMY_BOOL');
+ mustNotHave('RESEARCH','RESEARCH_GROWTH_BOOL');
+ mustNotHave('RESEARCH','RESEARCH_BATTLE_BOOL');
+ const priorities=run('parseResearchPriorityOrder("growth:Growth:1:true|economy:Economy:2:true|battle:Battle:3:true")');
+ assert.equal(priorities.map(p=>p.tag).join(','),'growth,economy,battle');
+ const promoted=run('serializeResearchPriorityOrder(reorderedResearchPriorities(parseResearchPriorityOrder("growth:Growth:1:true|economy:Economy:2:true|battle:Battle:3:true"),"economy","growth"))');
+ assert.equal(promoted,'economy:Economy:1:true|growth:Growth:2:true|battle:Battle:3:true',
+  'Research UI reordering must match the exact Java PriorityItemData rank format');
+
  mustHave('GROWTH_MISSION_REWARDS','GROWTH_REWARDS_CHECK_INTERVAL_INT');
  mustHave('EVENT_MILESTONE_REWARDS','EVENT_MILESTONE_CHECK_INTERVAL_INT');
  assert.ok(!tasks.some(t=>t.id==='DAILY_OVERVIEW_CHECK'),'Legacy Daily Overview Check must not be a duplicate routine');
@@ -65,6 +75,11 @@ const vm=require('node:vm');
  assert.match(ui['task-categories'].innerHTML,/All Areas/);
  assert.match(ui['task-summary'].innerHTML,/enabled/);
  assert.match(ui['task-visible-count'].textContent,/69 shown/);
+ run('taskSetSelection("RESEARCH")');
+ assert.match(ui['task-detail-content'].innerHTML,/data-research-priorities="RESEARCH"/);
+ assert.match(ui['task-detail-content'].innerHTML,/data-research-move="up"/);
+ assert.match(ui['task-detail-content'].innerHTML,/draggable="true"/);
+ assert.doesNotMatch(ui['task-detail-content'].innerHTML,/data-task-value="RESEARCH_PRIORITIES_STRING"/);
  run('taskSetSelection("HERO_RECRUITMENT")');
  assert.match(ui['task-detail-content'].innerHTML,/Use free Epic Recruitment/);
  assert.match(ui['task-detail-content'].innerHTML,/Claim Recruitment Points Chest/);
