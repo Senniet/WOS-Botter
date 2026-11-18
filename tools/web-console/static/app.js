@@ -89,6 +89,7 @@ const taskOptionPrefixes = {
  ALLIANCE_SHOP:['ALLIANCE_SHOP_'],ALLIANCE_TECH:['ALLIANCE_TECH_'],ALLIANCE_TRIUMPH:['ALLIANCE_TRIUMPH_'],
  BEAR_TRAP:['BEAR_TRAP_'],CITY_SURVIVORS:['CITY_ACCEPT_NEW_SURVIVORS_'],
  CITY_UPGRADE_FURNACE:['CITY_UPGRADE_'],RESEARCH:['RESEARCH_'],
+ DAILY_OVERVIEW_CHECK:['DAILY_OVERVIEW_CHECK_'],ENDLESS_TRIAL:['ENDLESS_TRIAL_'],
  DAILY_MISSIONS:['DAILY_MISSION_'],EXPERT_AGNES_INTEL:['EXPERT_AGNES_'],
  EXPERT_ROMULUS_TAG:['EXPERT_ROMULUS_TAG_'],EXPERT_ROMULUS_TROOPS:['EXPERT_ROMULUS_TROOPS_'],
  EXPERT_SKILL_TRAINING:['EXPERT_SKILL_TRAINING_'],INTEL:['INTEL_'],MAIL_REWARDS:['MAIL_'],
@@ -111,6 +112,8 @@ const taskOptionPrefixes = {
  SHOP_MYSTERY:['MYSTERY_SHOP_']
 };
 const taskOptionLabels = {
+ ENDLESS_TRIAL_TARGET_ATTACKS_INT:'Daily Windhowler attacks (max 3)',
+ DAILY_OVERVIEW_CHECK_OFFSET_INT:'Check interval (minutes)',
  "HERO_RECRUIT_ADVANCED_FREE_BOOL": "Use free Advanced Recruitment",
  "HERO_RECRUIT_EPIC_FREE_BOOL": "Use free Epic Recruitment",
  "HERO_RECRUIT_ADVANCED_KEYS_BOOL": "Use Advanced Recruitment Keys",
@@ -255,19 +258,27 @@ function optionControl(task,s){
  const inputType=['Integer','Long'].includes(s.type)?'number':'text';
  return '<label class="task-option value-option" for="'+esc(id)+'"><span class="option-name">'+esc(label)+help+'</span><span class="value-controls"><input id="'+esc(id)+'" type="'+inputType+'" data-task-value="'+esc(s.key)+'" data-task-owner="'+esc(task.id)+'" value="'+esc(s.value)+'" aria-label="'+esc(label)+'"><button class="secondary small" data-save-task-value="'+esc(s.key)+'" data-task-owner="'+esc(task.id)+'">Save</button></span></label>';
 }
-// Curated working areas; the engine's 63 original task IDs remain authoritative.
+// Curated work areas; the original Java task IDs remain authoritative.
 const workGroups=[
- {id:'daily',name:'Daily Tasks',icon:'◷',description:'Daily rewards and routine checks',ids:['DAILY_MISSIONS','MAIL_REWARDS','STOREHOUSE_CHEST','INTEL','CITY_SURVIVORS']},
+ {id:'daily',name:'Daily Tasks',icon:'◷',description:'Daily rewards and routine checks',ids:['DAILY_MISSIONS','MAIL_REWARDS','STOREHOUSE_CHEST','INTEL','CITY_SURVIVORS','DAILY_OVERVIEW_CHECK']},
  {id:'city',name:'City & Development',icon:'⌂',description:'Construction, research and Chief Orders',ids:['CITY_UPGRADE_FURNACE','CITY_UPGRADE_PRIORITISE_FURNACE','RESEARCH','CHIEF_ORDER_RUSH_JOB','CHIEF_ORDER_URGENT_MOBILIZATION','CHIEF_ORDER_PRODUCTIVITY_DAY']},
  {id:'army',name:'Troops',icon:'♜',description:'Training and healing',ids:['TRAINING_TROOPS','HEAL_TROOPS']},
  {id:'world',name:'World Map',icon:'◇',description:'Gathering, hunting and marches',ids:['GATHER_RESOURCES','GATHER_BOOST','BEAST_HUNTING','EVENT_POLAR_TERROR','EVENT_BERSERK_CRYPTID']},
  {id:'heroes',name:'Heroes & Exploration',icon:'✧',description:'Recruitment, Arena and exploration',ids:['HERO_RECRUITMENT','ARENA','DO_EXPLORATION','EXPLORATION_CHEST','LABYRINTH','EXPERT_AGNES_INTEL','EXPERT_ROMULUS_TAG','EXPERT_ROMULUS_TROOPS','EXPERT_SKILL_TRAINING']},
  {id:'alliance',name:'Alliance',icon:'⚑',description:'Helps, contributions, rallies and shops',ids:['ALLIANCE_AUTOJOIN','ALLIANCE_HELP_REQUEST','ALLIANCE_TECH','ALLIANCE_CHESTS','ALLIANCE_TRIUMPH','ALLIANCE_CHAMPIONSHIP','ALLIANCE_MOBILIZATION','ALLIANCE_PET_TREASURE','ALLIANCE_SHOP','LIFE_ESSENCE_CARING']},
  {id:'rewards',name:'Shops & Extras',icon:'▤',description:'Merchants, VIP and pets',ids:['SHOP_MYSTERY','NOMADIC_MERCHANT','VIP_POINTS','BANK','CRYSTAL_LABORATORY','WAR_ACADEMY','LIFE_ESSENCE','PET_SKILLS','PET_ADVENTURE']},
- {id:'events',name:'Events',icon:'✳',description:'Limited-time and special events',ids:['BEAR_TRAP','EVENT_TUNDRA_TRUCK','FISHING_MINIGAME','EVENT_HERO_MISSION','EVENT_JOURNEY_OF_LIGHT','EVENT_MYRIAD_BAZAAR','MERCENARY_EVENT','TREK_AUTOMATION','TREK_SUPPLIES']},
+ {id:'events',name:'Events',icon:'✳',description:'Limited-time and special events',ids:['BEAR_TRAP','EVENT_TUNDRA_TRUCK','FISHING_MINIGAME','EVENT_HERO_MISSION','EVENT_JOURNEY_OF_LIGHT','EVENT_MYRIAD_BAZAAR','ENDLESS_TRIAL','MERCENARY_EVENT','TREK_AUTOMATION','TREK_SUPPLIES']},
  {id:'system',name:'System & Tests',icon:'⌘',description:'Technical and support routines',ids:['INITIALIZE','CREATE_CHARACTER','SKIP_TUTORIAL','DUMMY_TASK','TEST_HOOK_LOOP','CUSTOM_TASK','GAME_ANALYTICS_LABYRINTH','GAME_ANALYTICS_POWER']}
 ];
 const workLabels = {
+ "DAILY_OVERVIEW_CHECK": [
+  "Daily Overview Check",
+  "Inspect the Daily tab for available tasks without spending resources."
+ ],
+ "ENDLESS_TRIAL": [
+  "Endless Trial",
+  "Attack Windhowler up to three times, then claim all daily challenges with one Claim."
+ ],
  "DAILY_MISSIONS": [
   "Daily Missions",
   "Claim rewards from completed Daily Missions."
@@ -523,6 +534,8 @@ const workLabels = {
 };
 const workAliases = {
  "HERO_RECRUITMENT": "recruit recruit keys heroes epic advanced",
+ "DAILY_OVERVIEW_CHECK": "daily overview sidebar availability missions status",
+ "ENDLESS_TRIAL": "windhowler endless trial daily challenges three attacks claim rewards",
  "DAILY_MISSIONS": "daily missions quests tasks",
  "MAIL_REWARDS": "mail post rewards",
  "STOREHOUSE_CHEST": "chest chests storehouse rewards",

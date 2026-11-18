@@ -112,6 +112,11 @@ public enum ConfigurationKeyEnum {
     /** Legacy arena alliance protection key retained only so existing persisted profiles can still be read. */
     ARENA_TASK_PROTECT_ALLIANCE_BOOL    ("true",    Boolean.class,  ConfigCategory.DAILIES, true),
     ARENA_TASK_REFRESH_WITH_GEMS_BOOL   ("false",   Boolean.class,  ConfigCategory.DAILIES),
+    // Opt-in only. Never run Windhowler attacks unless the profile explicitly enables this routine.
+    ENDLESS_TRIAL_ENABLED_BOOL          ("false",   Boolean.class, ConfigCategory.DAILIES),
+    ENDLESS_TRIAL_TARGET_ATTACKS_INT    ("3",       Integer.class, ConfigCategory.DAILIES),
+    DAILY_OVERVIEW_CHECK_BOOL          ("false",   Boolean.class, ConfigCategory.DAILIES),
+    DAILY_OVERVIEW_CHECK_OFFSET_INT    ("240",     Integer.class, ConfigCategory.DAILIES),
     DAILY_LABYRINTH_BOOL                ("false",   Boolean.class,  ConfigCategory.DAILIES),
     DAILY_MISSION_AUTO_SCHEDULE_BOOL    ("false",   Boolean.class,  ConfigCategory.DAILIES),
     DAILY_MISSION_BOOL                  ("false",   Boolean.class,  ConfigCategory.DAILIES),

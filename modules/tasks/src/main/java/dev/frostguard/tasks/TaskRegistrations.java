@@ -60,6 +60,7 @@ public class TaskRegistrations {
             case VIP_POINTS -> new VipRoutine(profile, type);
             case MAIL_REWARDS -> new MailRewardsRoutine(profile, type);
             case DAILY_MISSIONS -> new DailyMissionRoutine(profile, type);
+            case DAILY_OVERVIEW_CHECK -> new DailyOverviewCheckRoutine(profile, type);
             case INTEL -> new IntelligenceRoutine(profile, type);
 
             // Chief Order
@@ -103,6 +104,7 @@ public class TaskRegistrations {
 
             // Events
             case EVENT_TUNDRA_TRUCK -> new TundraTruckEventRoutine(profile, type);
+            case ENDLESS_TRIAL -> new EndlessTrialRoutine(profile, type);
             case EVENT_HERO_MISSION -> new HeroMissionEventRoutine(profile, type);
             case MERCENARY_EVENT -> new MercenaryEventRoutine(profile, type);
             case EVENT_JOURNEY_OF_LIGHT -> new JourneyofLightRoutine(profile, type);

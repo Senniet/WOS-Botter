@@ -550,6 +550,7 @@ public class NavigationHelper {
 
         TemplatesEnum tpl = switch (event) {
             case HERO_MISSION -> TemplatesEnum.HERO_MISSION_EVENT_TAB;
+            case ENDLESS_TRIAL -> TemplatesEnum.ENDLESS_TRIAL_TAB;
             case MERCENARY -> TemplatesEnum.MERCENARY_EVENT_TAB;
             case ALLIANCE_CHAMPIONSHIP -> TemplatesEnum.ALLIANCE_CHAMPIONSHIP_TAB;
             case ALLIANCE_MOBILIZATION -> TemplatesEnum.ALLIANCE_MOBILIZATION_TAB;
@@ -1037,7 +1038,7 @@ public class NavigationHelper {
 
     private enum ScreenState { HOME, WORLD, RECONNECT, UNKNOWN }
     public enum AllianceMenu { WAR, CHESTS, TERRITORY, SHOP, TECH, HELP, TRIUMPH }
-    public enum EventMenu { HERO_MISSION, MERCENARY, ALLIANCE_CHAMPIONSHIP, ALLIANCE_MOBILIZATION, TUNDRA_TRUCK }
+    public enum EventMenu { ENDLESS_TRIAL, HERO_MISSION, MERCENARY, ALLIANCE_CHAMPIONSHIP, ALLIANCE_MOBILIZATION, TUNDRA_TRUCK }
     public enum DealsTarget { BANK, JOURNEY_OF_LIGHT }
 
     public enum EventMenuOpenResult { REACHED, PANEL_CLOSED, TAB_ABSENT }

@@ -53,6 +53,7 @@ public enum TpDailyTaskEnum {
 
     /* ── daily objectives ── */
 
+    DAILY_OVERVIEW_CHECK   (38,  "Daily Overview Check", ConfigurationKeyEnum.DAILY_OVERVIEW_CHECK_BOOL, RoutineCategory.DAILY_OBJECTIVE),
     DAILY_MISSIONS         (31,  "Daily Missions",               ConfigurationKeyEnum.DAILY_MISSION_BOOL,                     RoutineCategory.DAILY_OBJECTIVE),
     EXPERT_AGNES_INTEL     (34,  "Expert Agnes Intel",           ConfigurationKeyEnum.EXPERT_AGNES_INTEL_BOOL,                RoutineCategory.DAILY_OBJECTIVE),
     EXPERT_ROMULUS_TAG     (35,  "Expert Romulus Tag",           ConfigurationKeyEnum.EXPERT_ROMULUS_TAG_BOOL,                 RoutineCategory.DAILY_OBJECTIVE),
@@ -69,6 +70,7 @@ public enum TpDailyTaskEnum {
     EVENT_JOURNEY_OF_LIGHT (203, "Journey of Light Event",       ConfigurationKeyEnum.JOURNEY_OF_LIGHT_BOOL,                  RoutineCategory.EVENT),
     EVENT_MYRIAD_BAZAAR    (205, "Myriad Bazaar Event",          ConfigurationKeyEnum.MYRIAD_BAZAAR_EVENT_BOOL,               RoutineCategory.EVENT),
     EVENT_POLAR_TERROR     (204, "Polar Terror Hunting",         ConfigurationKeyEnum.POLAR_TERROR_ENABLED_BOOL,              RoutineCategory.EVENT),
+    ENDLESS_TRIAL          (209, "Endless Trial", ConfigurationKeyEnum.ENDLESS_TRIAL_ENABLED_BOOL, RoutineCategory.EVENT),
     EVENT_TUNDRA_TRUCK     (200, "Tundra Truck Event",           ConfigurationKeyEnum.TUNDRA_TRUCK_EVENT_BOOL,                RoutineCategory.EVENT),
     FISHING_MINIGAME       (207, "Fishing Minigame",             ConfigurationKeyEnum.FISHING_MINIGAME_ENABLED_BOOL,          RoutineCategory.EVENT),
     MERCENARY_EVENT        (202, "Mercenary Event",              ConfigurationKeyEnum.MERCENARY_EVENT_BOOL,                   RoutineCategory.EVENT),
