@@ -90,7 +90,7 @@ const taskOptionPrefixes = {
  ALLIANCE_SHOP:['ALLIANCE_SHOP_'],ALLIANCE_TECH:['ALLIANCE_TECH_'],ALLIANCE_TRIUMPH:['ALLIANCE_TRIUMPH_'],
  BEAR_TRAP:['BEAR_TRAP_'],CITY_SURVIVORS:['CITY_ACCEPT_NEW_SURVIVORS_'],
  CITY_UPGRADE_FURNACE:['CITY_UPGRADE_'],RESEARCH:['RESEARCH_'],
- ONLINE_REWARDS:['ONLINE_REWARDS_'],FREE_DAILY_CHESTS:['FREE_DAILY_CHESTS_'],SMART_DAILY_OVERVIEW:['SMART_DAILY_OVERVIEW_'],ENDLESS_TRIAL:['ENDLESS_TRIAL_'],
+ ONLINE_REWARDS:['ONLINE_REWARDS_'],FREE_DAILY_CHESTS:['FREE_DAILY_CHESTS_'],SMART_DAILY_OVERVIEW:['SMART_DAILY_OVERVIEW_'],GROWTH_MISSION_REWARDS:['GROWTH_REWARDS_'],EVENT_MILESTONE_REWARDS:['EVENT_MILESTONE_'],ENDLESS_TRIAL:['ENDLESS_TRIAL_'],
  DAILY_MISSIONS:['DAILY_MISSION_'],EXPERT_AGNES_INTEL:['EXPERT_AGNES_'],
  EXPERT_ROMULUS_TAG:['EXPERT_ROMULUS_TAG_'],EXPERT_ROMULUS_TROOPS:['EXPERT_ROMULUS_TROOPS_'],
  EXPERT_SKILL_TRAINING:['EXPERT_SKILL_TRAINING_'],INTEL:['INTEL_'],MAIL_REWARDS:['MAIL_'],
@@ -123,6 +123,8 @@ const taskOptionLabels = {
  ONLINE_REWARDS_CHECK_INTERVAL_INT:'Check interval (minutes)',
  FREE_DAILY_CHESTS_INTERVAL_INT:'Free chest check interval (minutes)',
  SMART_DAILY_OVERVIEW_INTERVAL_INT:'Check interval (minutes)',
+ GROWTH_REWARDS_CHECK_INTERVAL_INT:'Growth & Chapter check interval (minutes)',
+ EVENT_MILESTONE_CHECK_INTERVAL_INT:'Event milestone check interval (minutes)',
  SMART_DAILY_OVERVIEW_AUTO_DISPATCH_BOOL:'Automatically schedule available enabled tasks (off: inspect only)',
  "HERO_RECRUIT_ADVANCED_FREE_BOOL": "Use free Advanced Recruitment",
  "HERO_RECRUIT_EPIC_FREE_BOOL": "Use free Epic Recruitment",
@@ -279,17 +281,19 @@ function optionControl(task,s){
 }
 // Curated work areas; the original Java task IDs remain authoritative.
 const workGroups=[
- {id:'daily',name:'Daily Tasks',icon:'◷',description:'Daily rewards and routine checks',ids:['DAILY_MISSIONS','MAIL_REWARDS','STOREHOUSE_CHEST','INTEL','CITY_SURVIVORS','SMART_DAILY_OVERVIEW','ONLINE_REWARDS','FREE_DAILY_CHESTS']},
+ {id:'daily',name:'Daily Tasks',icon:'◷',description:'Daily rewards and routine checks',ids:['DAILY_MISSIONS','MAIL_REWARDS','STOREHOUSE_CHEST','INTEL','CITY_SURVIVORS','SMART_DAILY_OVERVIEW','ONLINE_REWARDS','FREE_DAILY_CHESTS','GROWTH_MISSION_REWARDS']},
  {id:'city',name:'City & Development',icon:'⌂',description:'Construction, research and Chief Orders',ids:['CITY_UPGRADE_FURNACE','CITY_UPGRADE_PRIORITISE_FURNACE','RESEARCH','CHIEF_ORDER_RUSH_JOB','CHIEF_ORDER_URGENT_MOBILIZATION','CHIEF_ORDER_PRODUCTIVITY_DAY']},
  {id:'army',name:'Troops',icon:'♜',description:'Training and healing',ids:['TRAINING_TROOPS','HEAL_TROOPS']},
  {id:'world',name:'World Map',icon:'◇',description:'Gathering, hunting and marches',ids:['GATHER_RESOURCES','GATHER_BOOST','BEAST_HUNTING','EVENT_POLAR_TERROR','EVENT_BERSERK_CRYPTID']},
  {id:'heroes',name:'Heroes & Exploration',icon:'✧',description:'Recruitment, Arena and exploration',ids:['HERO_RECRUITMENT','ARENA','DO_EXPLORATION','EXPLORATION_CHEST','LABYRINTH','EXPERT_AGNES_INTEL','EXPERT_ROMULUS_TAG','EXPERT_ROMULUS_TROOPS','EXPERT_SKILL_TRAINING']},
  {id:'alliance',name:'Alliance',icon:'⚑',description:'Helps, contributions, rallies and shops',ids:['ALLIANCE_AUTOJOIN','ALLIANCE_HELP_REQUEST','ALLIANCE_TECH','ALLIANCE_CHESTS','ALLIANCE_TRIUMPH','ALLIANCE_CHAMPIONSHIP','ALLIANCE_MOBILIZATION','ALLIANCE_PET_TREASURE','ALLIANCE_SHOP','LIFE_ESSENCE_CARING']},
  {id:'rewards',name:'Shops & Extras',icon:'▤',description:'Merchants, VIP and pets',ids:['SHOP_MYSTERY','NOMADIC_MERCHANT','VIP_POINTS','BANK','CRYSTAL_LABORATORY','WAR_ACADEMY','LIFE_ESSENCE','PET_SKILLS','PET_ADVENTURE']},
- {id:'events',name:'Events',icon:'✳',description:'Limited-time and special events',ids:['BEAR_TRAP','EVENT_TUNDRA_TRUCK','FISHING_MINIGAME','EVENT_HERO_MISSION','EVENT_JOURNEY_OF_LIGHT','EVENT_MYRIAD_BAZAAR','ENDLESS_TRIAL','MERCENARY_EVENT','TREK_AUTOMATION','TREK_SUPPLIES']},
+ {id:'events',name:'Events',icon:'✳',description:'Limited-time and special events',ids:['BEAR_TRAP','EVENT_TUNDRA_TRUCK','FISHING_MINIGAME','EVENT_HERO_MISSION','EVENT_JOURNEY_OF_LIGHT','EVENT_MYRIAD_BAZAAR','ENDLESS_TRIAL','EVENT_MILESTONE_REWARDS','MERCENARY_EVENT','TREK_AUTOMATION','TREK_SUPPLIES']},
  {id:'system',name:'System & Tests',icon:'⌘',description:'Technical and support routines',ids:['INITIALIZE','CREATE_CHARACTER','SKIP_TUTORIAL','DUMMY_TASK','TEST_HOOK_LOOP','CUSTOM_TASK','GAME_ANALYTICS_LABYRINTH','GAME_ANALYTICS_POWER']}
 ];
 const workLabels = {
+ "GROWTH_MISSION_REWARDS": ["Growth & Chapter Rewards","Check the Growth and Chapter Missions tabs. Claim only already-earned green rewards; never start upgrades, attacks, or blue Go actions."],
+ "EVENT_MILESTONE_REWARDS": ["Event Milestone Rewards","Collect earned King of Icefield stage milestones when the event is active. Other event types are ignored until verified; never spends gems."],
  "SMART_DAILY_OVERVIEW": ["Smart Daily Overview","Inspect the Daily tab and optionally queue available tasks that are already enabled. Turn off automatic scheduling for a read-only check. Never spends gems or items."],
  "ONLINE_REWARDS": ["Online Rewards","Check the Daily sidebar for available Online Rewards. Claim only if a free reward screen is verified."],
  "FREE_DAILY_CHESTS": ["Free Daily Chests","Visit Top-up Center → Daily Deals. Claim only the verified free chest, never paid packs or gem offers."],

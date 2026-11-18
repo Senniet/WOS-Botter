@@ -56,6 +56,8 @@ public enum TpDailyTaskEnum {
     ONLINE_REWARDS         (39,  "Online Rewards", ConfigurationKeyEnum.ONLINE_REWARDS_ENABLED_BOOL, RoutineCategory.DAILY_OBJECTIVE),
     FREE_DAILY_CHESTS      (210, "Free Daily Chests", ConfigurationKeyEnum.FREE_DAILY_CHESTS_ENABLED_BOOL, RoutineCategory.DAILY_OBJECTIVE),
     SMART_DAILY_OVERVIEW   (211, "Smart Daily Overview", ConfigurationKeyEnum.SMART_DAILY_OVERVIEW_ENABLED_BOOL, RoutineCategory.DAILY_OBJECTIVE),
+    GROWTH_MISSION_REWARDS(212, "Growth Mission Rewards", ConfigurationKeyEnum.GROWTH_REWARDS_ENABLED_BOOL, RoutineCategory.DAILY_OBJECTIVE),
+    EVENT_MILESTONE_REWARDS(213, "Event Milestone Rewards", ConfigurationKeyEnum.EVENT_MILESTONE_REWARDS_ENABLED_BOOL, RoutineCategory.EVENT),
     DAILY_MISSIONS         (31,  "Daily Missions",               ConfigurationKeyEnum.DAILY_MISSION_BOOL,                     RoutineCategory.DAILY_OBJECTIVE),
     EXPERT_AGNES_INTEL     (34,  "Expert Agnes Intel",           ConfigurationKeyEnum.EXPERT_AGNES_INTEL_BOOL,                RoutineCategory.DAILY_OBJECTIVE),
     EXPERT_ROMULUS_TAG     (35,  "Expert Romulus Tag",           ConfigurationKeyEnum.EXPERT_ROMULUS_TAG_BOOL,                 RoutineCategory.DAILY_OBJECTIVE),

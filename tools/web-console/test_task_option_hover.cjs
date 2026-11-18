@@ -45,7 +45,7 @@ const assert=require('node:assert/strict');
       state.selectedTaskId='HERO_RECRUITMENT';renderTaskDetail();renderTasks();
       return {checked,optionCount,issues,options};
     });
-    assert.equal(audit.checked,67);
+    assert.equal(audit.checked,69);
     assert.ok(audit.optionCount>150);
     assert.deepEqual(audit.issues,[]);
     assert.equal(await page.locator('.operations-tasks [title]').count(),0,'No native Task Manager tooltips on controls');
