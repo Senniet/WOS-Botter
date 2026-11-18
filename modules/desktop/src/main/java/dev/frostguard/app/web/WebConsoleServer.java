@@ -204,11 +204,12 @@ public final class WebConsoleServer {
             row.put("detail", state == null ? "" : Objects.toString(state.getExecutionDetail(), ""));
             row.put("executing", state != null && state.isExecuting());
             row.put("queued", state != null && state.isQueued());
-            row.put("lastAttempt", state == null ? null : asText(state.getLastAttemptAt()));
-            row.put("lastSuccess", state == null ? asText(persisted == null
-                    ? null : persisted.getLastCompletion()) : asText(state.getLastSuccessfulAt()));
-            row.put("next", state == null ? asText(persisted == null
-                    ? null : persisted.getScheduledAt()) : asText(state.getNextExecutionTime()));
+            // Live TaskStateData is recreated during scheduler startup and task
+            // toggles. Keep the database's last successful completion visible,
+            // including as proof of at least one past attempt.
+            row.put("lastAttempt", asText(TaskExecutionHistoryView.lastAttempt(state, persisted)));
+            row.put("lastSuccess", asText(TaskExecutionHistoryView.lastSuccess(state, persisted)));
+            row.put("next", asText(TaskExecutionHistoryView.next(state, persisted)));
             rows.add(row);
         }
         return rows;
