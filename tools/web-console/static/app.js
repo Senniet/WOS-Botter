@@ -112,6 +112,12 @@ const taskOptionPrefixes = {
  VIP_POINTS:['VIP_','BOOL_VIP_POINTS'],WAR_ACADEMY:['WAR_ACADEMY_'],
  SHOP_MYSTERY:['MYSTERY_SHOP_']
 };
+// These predefined choices match the original Windows MSI Training panel.
+// Keep their exact persisted values so the Java HealTroopsRoutine interprets
+// the selected batch mode consistently across web and Windows clients.
+const taskOptionChoices = {
+ HEAL_BATCH_MODE_STRING:['Full - Quick Select','Small - Current selection']
+};
 const taskOptionLabels = {
  ENDLESS_TRIAL_TARGET_ATTACKS_INT:'Daily Windhowler attacks (max 3)',
  DAILY_OVERVIEW_CHECK_OFFSET_INT:'Check interval (minutes)',
@@ -255,8 +261,17 @@ function optionControl(task,s){
  if(s.type==='Boolean'){
   return '<label class="task-option toggle-option" for="'+esc(id)+'"><span class="option-name">'+esc(label)+'</span><input type="checkbox" id="'+esc(id)+'" data-task-option="'+esc(s.key)+'" data-task-owner="'+esc(task.id)+'" '+(s.value==='true'?'checked':'')+'><span class="switch-track" aria-hidden="true"></span></label>';
  }
+ const choices=taskOptionChoices[s.key];
  const inputType=['Integer','Long'].includes(s.type)?'number':'text';
- return '<label class="task-option value-option" for="'+esc(id)+'"><span class="option-name">'+esc(label)+'</span><span class="value-controls"><input id="'+esc(id)+'" type="'+inputType+'" data-task-value="'+esc(s.key)+'" data-task-owner="'+esc(task.id)+'" value="'+esc(s.value)+'" aria-label="'+esc(label)+'"><button class="secondary small" data-save-task-value="'+esc(s.key)+'" data-task-owner="'+esc(task.id)+'">Save</button></span></label>';
+ const field=choices
+  ? '<select id="'+esc(id)+'" data-task-value="'+esc(s.key)+'" data-task-owner="'+esc(task.id)+'" aria-label="'+esc(label)+'">'
+   +choices.map(value=>'<option value="'+esc(value)+'"'+(s.value===value?' selected':'')+'>'+esc(value)+'</option>').join('')
+   +(s.value && !choices.includes(s.value)?'<option value="'+esc(s.value)+'" selected disabled>'+esc(s.value)+' (previous value)</option>':'')
+   +'</select>'
+  : '<input id="'+esc(id)+'" type="'+inputType+'" data-task-value="'+esc(s.key)+'" data-task-owner="'+esc(task.id)+'" value="'+esc(s.value)+'" aria-label="'+esc(label)+'">';
+ // Never wrap the Save button in a label: click/focus events should go to
+ // their real control, not be retargeted by HTML's label activation rules.
+ return '<div class="task-option value-option"><label class="option-name" for="'+esc(id)+'">'+esc(label)+'</label><span class="value-controls">'+field+'<button type="button" class="secondary small" data-save-task-value="'+esc(s.key)+'" data-task-owner="'+esc(task.id)+'">Save</button></span></div>';
 }
 // Curated work areas; the original Java task IDs remain authoritative.
 const workGroups=[
@@ -818,7 +833,7 @@ document.addEventListener('click',e=>{
  const star=e.target.closest('[data-star-task]');if(star){const id=star.dataset.starTask;if(state.taskStars.has(id))state.taskStars.delete(id);else state.taskStars.add(id);saveTaskStars();renderTasks();}
  const clear=e.target.closest('[data-clear-task-filters]');if(clear)clearTaskFilters();
  const saveTask=e.target.closest('[data-save-task-value]');if(saveTask){
-   const input=saveTask.parentElement.querySelector('input[data-task-value]');
+   const input=saveTask.parentElement.querySelector('[data-task-value]');
    if(input && input.checkValidity()){
      const profileId=state.profileId,key=input.dataset.taskValue;
      saveTask.disabled=true;
