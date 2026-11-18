@@ -447,7 +447,7 @@ const workLabels = {
  ],
  "LIFE_ESSENCE_CARING": [
   "Life Essence · Alliance",
-  "Manage Alliance-related Life Essence care."
+  "Visit allied Trees of Life from the World map and collect free Life Essence. Works without your own island; up to 3 caring actions daily."
  ],
  "SHOP_MYSTERY": [
   "Mystery Shop",

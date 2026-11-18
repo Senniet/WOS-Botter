@@ -1,287 +1,227 @@
 package dev.frostguard.tasks.pets;
 
-import java.time.LocalDateTime;
-
-import dev.frostguard.vision.convert.GameTimeUtils;
 import dev.frostguard.api.configs.ConfigurationKeyEnum;
-import dev.frostguard.api.configs.TemplatesEnum;
 import dev.frostguard.api.configs.TpDailyTaskEnum;
+import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.api.domain.ImageSearchResultData;
 import dev.frostguard.api.domain.PointData;
-import dev.frostguard.api.domain.AccountDescriptor;
+import dev.frostguard.api.domain.RawImageData;
+import dev.frostguard.engine.helper.RecognitionConsensus;
 import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.schedule.LaunchPoint;
-import dev.frostguard.engine.nav.SidebarDestination;
-import dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig;
+import dev.frostguard.tasks.diagnostics.TaskDiagnosticSnapshots;
+import dev.frostguard.vision.convert.GameTimeUtils;
+import java.time.LocalDateTime;
 
-public class LifeEssenceCaringRoutine extends DelayedTask {
+/**
+ * Care for up to 3 alliance members' Trees of Life from the WORLD MAP.
+ *
+ * No player-owned Daybreak Island is necessary: the blue handshake balloon
+ * above alliance cities is itself the route to the ally island. The previous
+ * implementation opened the user's *own* Life Essence menu, which is locked
+ * for accounts that have no island and caused hourly false retry loops.
+ *
+ * Verified on original Android 16 Serve-Emu 720x1280 (18 Nov 2026): World
+ * handshake -> 'Visit this Chief's island?' -> Confirm -> ally tree handshake
+ * -> +200 Life Essence + care counter 3/3 -> 2/3 -> World.
+ */
+public final class LifeEssenceCaringRoutine extends DelayedTask {
+    private static final PointData CONFIRM_VISIT = new PointData(515,789);
+    private static final PointData RETURN_TO_WORLD = new PointData(41,29);
+    private static final int MAX_DAILY_CARES = 3;
 
-	// ===================== CONSTANTS =====================
-	// Navigation coordinates
-	private static final PointData CARING_TAB_BUTTON = new PointData(670, 100);
-	private static final PointData BACK_TO_MAP_BUTTON = new PointData(42, 28);
+    public LifeEssenceCaringRoutine(AccountDescriptor profile,TpDailyTaskEnum type){super(profile,type);}
 
-	private static final PointData ISLAND_LIST_SCROLL_START = new PointData(350, 1100);
-	private static final PointData ISLAND_LIST_SCROLL_END = new PointData(350, 670);
+    @Override protected LaunchPoint getRequiredStartLocation(){return LaunchPoint.WORLD;}
 
-	// Retry limits
-	private static final int MAX_ISLAND_SCROLL_ATTEMPTS = 10;
-	private static final int MAX_CARING_BUTTON_SEARCHES = 3;
+    @Override protected void execute(){runExclusiveUiTransaction(this::collectFromAllianceWorld);}
 
-	// Default configuration values
-	private static final int DEFAULT_RETRY_OFFSET_MINUTES = Integer.parseInt(
-			ConfigurationKeyEnum.ALLIANCE_LIFE_ESSENCE_OFFSET_INT.getDefaultValue());
-
-	// Configuration (loaded fresh each execution)
-	private int retryOffsetMinutes;
-
-	public LifeEssenceCaringRoutine(AccountDescriptor profile, TpDailyTaskEnum dailyMission) {
-		super(profile, dailyMission);
-	}
-
-	@Override
-	protected void execute() {
-
-		// Load configuration
-		loadConfiguration();
-
-		// Navigate to Life Essence menu
-		if (!navigateToLifeEssenceMenu()) {
-            markWorkIncomplete("Life Essence Caring: sidebar/page not verified; no care action");
-			logWarning("Failed to navigate to Life Essence menu. Retrying in " + retryOffsetMinutes + " minutes.");
-			reschedule(LocalDateTime.now().plusMinutes(retryOffsetMinutes));
-			return;
-		}
-
-        int islandsCared = 0;
-        // Only three confirmed care actions are needed per daily cycle.
-        // A fourth scan cannot add a daily reward and wastes navigation.
-        for (int i = 0; i < 3; i++) {
-			// Check if daily attempts are available
-            if (!checkDailyAttemptsAvailable()) {
-                // A missing "available" marker is NOT evidence of exhaustion:
-                // the menu may be loading, displaced or misrecognized.
-                markWorkIncomplete("Life Essence Caring: attempt count not positively verified");
-                closeAllMenus();
-                reschedule(LocalDateTime.now().plusMinutes(retryOffsetMinutes));
+    private void collectFromAllianceWorld(){
+        Integer delay=profile.getConfig(ConfigurationKeyEnum.ALLIANCE_LIFE_ESSENCE_OFFSET_INT,Integer.class);
+        int retryMinutes=delay!=null&&delay>0?Math.clamp(delay,10,1440):60;
+        int confirmed=0;
+        try {
+            navigationHelper.ensureCorrectScreenLocation(LaunchPoint.WORLD,this::checkPreemption);
+            if(!AllianceTreeCareFrame.world(emuManager.captureScreen(EMULATOR_NUMBER))){
+                incomplete("World HUD not confirmed before alliance tree scan",retryMinutes);
                 return;
             }
-
-			// Attempt to find and care for an island
-			if (findAndCareForIsland()) {
-				islandsCared++;
-				logInfo("Life Essence caring completed successfully for " + islandsCared + " islands.");
-				if (islandsCared >= 3) {
-					logInfo("Life Essence caring completed successfully for all islands today. Rescheduling for next game reset.");
-					closeAllMenus();
-					reschedule(GameTimeUtils.dailyResetTime());
-					return;
-				}
-			}
-		}
-
-        // A skipped/unreachable Caring task must not be marked completed.
-        // The positive claim remains separate from a "no attempts left" run.
-        if (islandsCared == 0) {
-            markWorkIncomplete("Life Essence Caring: no caring action was confirmed");
+            logInfo("Life Essence · Alliance: searching for World-map Tree of Life caring icons; "
+                    +"no personal island needed");
+            for(int slot=0;slot<MAX_DAILY_CARES;slot++){
+                checkPreemption();
+                RawImageData map=emuManager.captureScreen(EMULATOR_NUMBER);
+                ImageSearchResultData first=AllianceTreeCareFrame.worldCareBadge(map);
+                if(!first.isFound()){
+                    if(confirmed==0){
+                        logInfo("Life Essence Caring: no blue alliance tree care badge visible on World");
+                        incomplete("No positively identified alliance tree icon in current World viewport",retryMinutes);
+                    }else{
+                        logInfo("Life Essence Caring: " +confirmed+" verified care(s), no additional visible icon");
+                        reschedule(LocalDateTime.now().plusMinutes(retryMinutes));
+                    }
+                    return;
+                }
+                sleepTask(170);
+                ImageSearchResultData second=AllianceTreeCareFrame.worldCareBadge(
+                        emuManager.captureScreen(EMULATOR_NUMBER));
+                if(!RecognitionConsensus.agrees(first,second,18)){
+                    incomplete("World caring badge moved between screenshots; no tap",15);
+                    return;
+                }
+                logInfo("Life Essence Caring: opening ally badge at "+second.getPoint());
+                tapNear(second.getPoint(),4);
+                sleepTask(310);
+                if(!AllianceTreeCareFrame.visitQuestion(
+                        emuManager.captureScreen(EMULATOR_NUMBER))){
+                    incomplete("Expected Visit this Chief's island? confirmation absent",15);
+                    return;
+                }
+                sleepTask(125);
+                if(!AllianceTreeCareFrame.visitQuestion(
+                        emuManager.captureScreen(EMULATOR_NUMBER))){
+                    incomplete("Visit confirmation changed on second frame",15);
+                    return;
+                }
+                // Only this specifically recognized confirmation authorizes
+                // the one stable blue Confirm action, never any paid prompt.
+                tapNear(CONFIRM_VISIT,4);
+                if(!waitForIsland()){
+                    incomplete("Island did not open after verified Visit confirmation",20);
+                    return;
+                }
+                try {
+                    RawImageData ready=emuManager.captureScreen(EMULATOR_NUMBER);
+                    ImageSearchResultData care=AllianceTreeCareFrame.islandCareBadge(ready);
+                    // The bottom-right island HUD appears before the animated
+                    // central tree and its care balloon finish loading.
+                    // Wait for the *same positive badge*, never guess its
+                    // position from the static island template.
+                    for(int delayed=0;!care.isFound()&&delayed<7;delayed++){
+                        checkPreemption();
+                        sleepTask(380);
+                        ready=emuManager.captureScreen(EMULATOR_NUMBER);
+                        if(!AllianceTreeCareFrame.island(ready))break;
+                        care=AllianceTreeCareFrame.islandCareBadge(ready);
+                    }
+                    if(!care.isFound()){
+                        // No available Tree badge: either attempts exhausted
+                        // or this ally cannot accept care; do not tap the tree.
+                        logInfo("Life Essence Caring: ally island has no available blue caring badge");
+                        if(confirmed==0)incomplete("Visited ally has no claimable caring badge",retryMinutes);
+                        else reschedule(LocalDateTime.now().plusMinutes(retryMinutes));
+                        return;
+                    }
+                    int before=AllianceTreeCareFrame.availableCareAttempts(ready);
+                    if(before==0){
+                        logInfo("Life Essence Caring: daily 0/3 reached; next game reset");
+                        reschedule(GameTimeUtils.dailyResetTime());
+                        return;
+                    }
+                    if(before<0){
+                        logInfo("Life Essence Caring: counter font not recognized; using two-frame "
+                                +"blue Caring badge confirmation instead of guessing a number");
+                    }
+                    sleepTask(160);
+                    var again=AllianceTreeCareFrame.islandCareBadge(
+                            emuManager.captureScreen(EMULATOR_NUMBER));
+                    if(!RecognitionConsensus.agrees(care,again,22)){
+                        incomplete("Caring badge moved before tap",15);
+                        return;
+                    }
+                    logInfo("Life Essence Caring: verified Tree care tap, attempts before="+before);
+                    tapNear(again.getPoint(),4);
+                    // The daily count is a tiny animated glyph and varies by
+                    // island. It is supplementary evidence, not the sole
+                    // success criterion. The positively identified blue
+                    // caring balloon must disappear on TWO fresh island
+                    // frames. This is the same transition observed during
+                    // a real +200 Life Essence claim.
+                    boolean consumed=false;
+                    boolean used=false;
+                    int remaining=-1;
+                    for(int post=0;post<7;post++){
+                        checkPreemption();
+                        sleepTask(post==0?340:210);
+                        RawImageData after=emuManager.captureScreen(EMULATOR_NUMBER);
+                        if(!AllianceTreeCareFrame.island(after))break;
+                        used|=AllianceTreeCareFrame.helpedToast(after);
+                        int newCount=AllianceTreeCareFrame.availableCareAttempts(after);
+                        if(newCount>=0)remaining=newCount;
+                        if(!AllianceTreeCareFrame.islandCareBadge(after).isFound()){
+                            sleepTask(170);
+                            RawImageData stable=emuManager.captureScreen(EMULATOR_NUMBER);
+                            if(AllianceTreeCareFrame.island(stable)
+                                    && !AllianceTreeCareFrame.islandCareBadge(stable).isFound()){
+                                int verified=AllianceTreeCareFrame.availableCareAttempts(stable);
+                                if(verified>=0)remaining=verified;
+                                consumed=true;
+                                break;
+                            }
+                        }
+                    }
+                    if(!consumed){
+                        incomplete("Care click did not clear verified blue badge on two island screenshots; no retry tap",20);
+                        return;
+                    }
+                    if(!used && (before<0||remaining<0))
+                        logInfo("Life Essence Caring: care badge consumed on two stable frames; "
+                                +"daily numeric overlay could not be read");
+                    confirmed++;
+                    logInfo("Life Essence Caring: earned Tree of Life essence from alliance member "
+                            +"("+confirmed+" verified today in this run, attempts "+before+"→"+remaining+")");
+                    if(remaining==0 || confirmed>=MAX_DAILY_CARES){
+                        logInfo("Life Essence Caring: all three care actions complete; next daily reset");
+                        reschedule(GameTimeUtils.dailyResetTime());
+                        return;
+                    }
+                }finally{
+                    // Every island visit must end at World, even if the care
+                    // button isn't found or the task is preempted.
+                    if(!returnToWorld()){
+                        markWorkIncomplete("Life Essence Caring: World return not verified");
+                        logWarning("Life Essence Caring: World return not verified; stop further taps");
+                    }
+                }
+                if(!AllianceTreeCareFrame.world(emuManager.captureScreen(EMULATOR_NUMBER))){
+                    incomplete("World HUD not restored after successful ally care",20);
+                    return;
+                }
+            }
+            reschedule(GameTimeUtils.dailyResetTime());
+        }finally{
+            if(AllianceTreeCareFrame.island(emuManager.captureScreen(EMULATOR_NUMBER))){
+                if(!returnToWorld())markWorkIncomplete("Life Essence Caring: island remained open after task");
+            }
         }
-		// No island found - retry later
+    }
 
-		closeAllMenus();
-		reschedule(LocalDateTime.now().plusMinutes(retryOffsetMinutes));
-	}
+    private boolean waitForIsland(){
+        for(int poll=0;poll<9;poll++){
+            checkPreemption();
+            sleepTask(poll==0?600:280);
+            if(AllianceTreeCareFrame.island(emuManager.captureScreen(EMULATOR_NUMBER)))return true;
+        }
+        return false;
+    }
 
-	/**
-	 * Load configuration from profile after refresh
-	 */
-	private void loadConfiguration() {
-		Integer configOffset = profile.getConfig(
-				ConfigurationKeyEnum.ALLIANCE_LIFE_ESSENCE_OFFSET_INT,
-				Integer.class);
+    private boolean returnToWorld(){
+        RawImageData current=emuManager.captureScreen(EMULATOR_NUMBER);
+        if(AllianceTreeCareFrame.world(current))return true;
+        if(!AllianceTreeCareFrame.island(current))return false;
+        tapNear(RETURN_TO_WORLD,4);
+        for(int pass=0;pass<8;pass++){
+            checkPreemption();
+            sleepTask(pass==0?640:280);
+            if(AllianceTreeCareFrame.world(emuManager.captureScreen(EMULATOR_NUMBER)))return true;
+        }
+        return false;
+    }
 
-		this.retryOffsetMinutes = (configOffset != null && configOffset > 0)
-				? configOffset
-				: DEFAULT_RETRY_OFFSET_MINUTES;
-
-		logDebug("Configuration loaded: retryOffsetMinutes=" + retryOffsetMinutes);
-	}
-
-	/**
-	 * Navigate to the Life Essence menu
-	 * 
-	 * Navigation flow:
-	 * Uses the shared sidebar navigator to select Daily, locate the Life Essence row,
-	 * and tap the Go control associated with that detected row.
-	 * 
-	 * @return true if navigation successful, false otherwise
-	 */
-	private boolean navigateToLifeEssenceMenu() {
-		logInfo("Navigating to Life Essence menu");
-		return navigationHelper.navigateToSidebarDestination(SidebarDestination.LIFE_ESSENCE);
-	}
-
-	/**
-	 * Check if daily caring attempts are available
-	 * 
-	 * UI Navigation:
-	 * 1. Open the Caring tab (top-right icon)
-	 * 2. Search for "Daily Caring Available" indicator
-	 * 
-	 * @return true if attempts available, false if exhausted
-	 */
-	private boolean checkDailyAttemptsAvailable() {
-		logInfo("Checking for daily caring attempts");
-
-		// Open the Caring tab (alliance caring list)
-		logDebug("Opening Caring tab");
-		tapNear(CARING_TAB_BUTTON);
-		sleepTask(2000);
-
-		// Search for daily attempt indicator
-		ImageSearchResultData dailyAttemptIndicator = templateSearchHelper.locatePattern(
-				TemplatesEnum.LIFE_ESSENCE_DAILY_CARING_AVAILABLE,
-				SearchConfig.builder().build());
-
-		if (dailyAttemptIndicator.isFound()) {
-			logInfo("Daily caring attempt is available");
-			return true;
-		}
-
-        logWarning("Daily caring available marker absent; remaining attempts unknown, retry later");
-		return false;
-	}
-
-	/**
-	 * Search through the alliance island list to find one that needs caring
-	 * 
-	 * Strategy:
-	 * 1. Scroll through island list (up to MAX_ISLAND_SCROLL_ATTEMPTS times)
-	 * 2. Look for "Go to Island" button on each screen
-	 * 3. If found, navigate to island and perform caring
-	 * 
-	 * @return true if island found and cared for, false if none found
-	 */
-	private boolean findAndCareForIsland() {
-		logInfo("Searching for island that needs caring");
-
-		for (int scrollAttempt = 0; scrollAttempt < MAX_ISLAND_SCROLL_ATTEMPTS; scrollAttempt++) {
-			logDebug("Searching islands on screen (scroll attempt " + (scrollAttempt + 1) +
-					"/" + MAX_ISLAND_SCROLL_ATTEMPTS + ")");
-
-			// Search for "Go to Island" button indicating island needs care
-			ImageSearchResultData gotoIslandButton = templateSearchHelper.locatePattern(
-					TemplatesEnum.LIFE_ESSENCE_DAILY_CARING_GOTO_ISLAND,
-					SearchConfig.builder().build());
-
-			if (gotoIslandButton.isFound()) {
-				logInfo("Found island needing care (after " + (scrollAttempt + 1) + " scroll(s))");
-				return performCaringOnIsland(gotoIslandButton);
-			}
-
-			// Not found on this screen - scroll down to see more islands
-			if (scrollAttempt < MAX_ISLAND_SCROLL_ATTEMPTS - 1) {
-				logDebug("No island found on this screen. Scrolling to see more islands.");
-				swipe(ISLAND_LIST_SCROLL_START, ISLAND_LIST_SCROLL_END);
-				sleepTask(2000);
-			}
-		}
-
-		logInfo("No island needing care found after " + MAX_ISLAND_SCROLL_ATTEMPTS + " scroll attempts");
-		return false;
-	}
-
-	/**
-	 * Navigate to an island and perform the caring action
-	 * 
-	 * Process:
-	 * 1. Click "Go to Island" button to navigate to island on map
-	 * 2. Wait for map navigation to complete
-	 * 3. Search for "Caring" button on the island
-	 * 4. Click caring button to complete the action
-	 * 5. Return to world map
-	 * 
-	 * @param gotoButton The button to navigate to the island
-	 * @return true if caring performed successfully, false if button not found
-	 */
-	private boolean performCaringOnIsland(ImageSearchResultData gotoButton) {
-		logInfo("Navigating to island location");
-
-		// Click "Go to Island" to navigate on world map
-		tapInside(gotoButton);
-		sleepTask(5000);
-
-		// Search for the caring button multiple times
-		// (May take a moment for island UI to fully load after navigation)
-		for (int attempt = 0; attempt < MAX_CARING_BUTTON_SEARCHES; attempt++) {
-			logDebug("Searching for caring button (attempt " + (attempt + 1) +
-					"/" + MAX_CARING_BUTTON_SEARCHES + ")");
-
-			ImageSearchResultData caringButton = templateSearchHelper.locatePattern(
-					TemplatesEnum.LIFE_ESSENCE_DAILY_CARING_BUTTON_CURRENT,
-					SearchConfig.builder().build());
-			if (!caringButton.isFound()) {
-				caringButton = templateSearchHelper.locatePattern(
-						TemplatesEnum.LIFE_ESSENCE_DAILY_CARING_BUTTON,
-						SearchConfig.builder().build());
-			}
-
-			if (caringButton.isFound()) {
-				logInfo("Caring button found. Performing caring action.");
-
-                // Click once. A dispatched tap alone is not proof of caring.
-                tapInside(caringButton);
-                sleepTask(1000);
-                ImageSearchResultData stillAvailable = templateSearchHelper.locatePattern(
-                        TemplatesEnum.LIFE_ESSENCE_DAILY_CARING_BUTTON_CURRENT,
-                        SearchConfig.builder().build());
-                if (!stillAvailable.isFound()) {
-                    stillAvailable = templateSearchHelper.locatePattern(
-                            TemplatesEnum.LIFE_ESSENCE_DAILY_CARING_BUTTON,
-                            SearchConfig.builder().build());
-                }
-                if (stillAvailable.isFound()) {
-                    markWorkIncomplete("Life Essence Caring: Caring button remains after tap");
-                    logWarning("Caring button still visible; do not report success or tap again");
-                    tapNear(BACK_TO_MAP_BUTTON);
-                    return false;
-                }
-                tapNear(BACK_TO_MAP_BUTTON);
-                sleepTask(500);
-                logInfo("Life Essence Caring button cleared after tap");
-                return true;
-			}
-
-			// Not found yet - wait a bit longer for UI to load
-			if (attempt < MAX_CARING_BUTTON_SEARCHES - 1) {
-				sleepTask(1000);
-			}
-		}
-
-		logWarning("Caring button not found after " + MAX_CARING_BUTTON_SEARCHES +
-				" attempts. Island may not need care or UI didn't load properly.");
-
-		// Return to world map even if caring failed
-		tapNear(BACK_TO_MAP_BUTTON);
-		sleepTask(1000);
-
-		return false;
-	}
-
-	/**
-	 * Close all menus and return to world map
-	 * 
-	 * Uses multiple taps of the back-to-map button to ensure
-	 * all overlays and menus are closed
-	 */
-	private void closeAllMenus() {
-		logDebug("Closing all menus and returning to world map");
-		sleepTask(300);
-		tapInside(BACK_TO_MAP_BUTTON, BACK_TO_MAP_BUTTON, 2, 1000);
-	}
-
-	@Override
-	protected LaunchPoint getRequiredStartLocation() {
-		return LaunchPoint.ANY;
-	}
-
+    private void incomplete(String reason,int retryMinutes){
+        markWorkIncomplete("Life Essence Caring: "+reason);
+        logWarning("Life Essence Caring: "+reason+"; "
+                +TaskDiagnosticSnapshots.capture(emuManager,EMULATOR_NUMBER,"life-essence-alliance","unverified"));
+        reschedule(LocalDateTime.now().plusMinutes(retryMinutes));
+    }
 }
