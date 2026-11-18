@@ -30,6 +30,24 @@ const {chromium}=require('playwright-core');
   await page.locator('.work-task').first().waitFor({timeout:12000});
   const count=await page.locator('.work-task').count();
   assert.equal(count,69,'All routines visible');
+  // Regression: the long All Tasks list must not enlarge the *document*
+  // past the actual page content. It is scrollable inside its own panel.
+  // Without paint containment Chromium reports ~4,428px document height
+  // even though the real content is only ~1,175px, creating blank space.
+  const allScroll=await page.evaluate(()=>({
+    documentHeight:document.documentElement.scrollHeight,
+    bodyHeight:document.body.scrollHeight,
+    listHeight:document.querySelector('#task-list').scrollHeight,
+    listViewport:document.querySelector('#task-list').clientHeight
+  }));
+  assert.ok(allScroll.documentHeight<=allScroll.bodyHeight+4,
+    'All Tasks must not add phantom document scroll: '+JSON.stringify(allScroll));
+  assert.ok(allScroll.listHeight>allScroll.listViewport+600,
+    'All Tasks must remain independently scrollable');
+  await page.locator('#task-list').evaluate(element=>{element.scrollTop=element.scrollHeight;});
+  assert.ok(await page.locator('#task-list').evaluate(element=>element.scrollTop)>300,
+    'The 69 tasks must still be reachable with the internal scrollbar');
+  await page.locator('#task-list').evaluate(element=>{element.scrollTop=0;});
   assert.equal(await page.locator('.work-group').count(),10,'All areas + all menu');
   assert.equal((await page.locator('.work-heading h2').innerText()).trim(),'My Routines');
   assert.match(await page.locator('#task-categories').innerText(),/Daily Tasks/);
@@ -125,6 +143,14 @@ const {chromium}=require('playwright-core');
   await page.locator('.work-task').first().waitFor();
   const mobile=await page.evaluate(()=>({scroll:document.documentElement.scrollWidth,client:document.documentElement.clientWidth}));
   assert.ok(mobile.scroll<=mobile.client+4,'No horizontal overflow mobile '+JSON.stringify(mobile));
+  const mobileScroll=await page.evaluate(()=>({
+    documentHeight:document.documentElement.scrollHeight,
+    bodyHeight:document.body.scrollHeight,
+    rows:document.querySelectorAll('.work-task').length
+  }));
+  assert.ok(mobileScroll.documentHeight<=mobileScroll.bodyHeight+4,
+    'Mobile must keep all tasks in normal page flow: '+JSON.stringify(mobileScroll));
+  assert.equal(mobileScroll.rows,69,'Mobile All Tasks still shows the full routine list');
   await page.locator('[data-open-task="HERO_RECRUITMENT"]').first().click();
   assert.equal(await page.locator('.operations-tasks.has-task-detail').count(),1);
   const bounds=await page.locator('#task-detail').boundingBox();

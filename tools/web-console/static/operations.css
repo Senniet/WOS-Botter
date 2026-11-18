@@ -95,3 +95,8 @@ body.is-emulator-page .footer{display:none}
  .emu-stage-actions .pill{font-size:9px;padding:3px 7px}
  .emu-external-link{font-size:10px;padding:6px 7px}
 }
+
+/* All Tasks can contain dozens of rows inside a height-limited scroller.
+   Paint containment prevents that internal scroll extent from leaking into
+   the document and creating thousands of pixels of empty page scrolling. */
+.operations-tasks .work-list { contain: paint; }
