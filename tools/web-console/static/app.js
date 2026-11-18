@@ -19,7 +19,7 @@ function setPage(page) {
   document.body.classList.toggle('is-emulator-page', page === 'emulator');
   document.querySelectorAll('.nav-btn').forEach(btn=>btn.classList.toggle('active',btn.dataset.page===page));
   document.querySelectorAll('.page').forEach(el=>el.classList.toggle('active',el.dataset.view===page));
-  const label = {dashboard:'Overview',tasks:'Task Manager',custom:'Custom Tasks',statistics:'Statistics',emulator:'Serve-Emu',profiles:'Profiles',settings:'Settings',logs:'Logs',qa:'Diagnostics'}[page] || page;
+  const label = {dashboard:'Overview',tasks:'Task Manager',custom:'Custom Tasks',statistics:'Statistics',emulator:'Emulator',profiles:'Profiles',settings:'Settings',logs:'Logs',qa:'Diagnostics'}[page] || page;
   $('page-title').textContent = label; $('breadcrumb').textContent = label.toUpperCase();
   document.querySelector('.sidebar').classList.remove('open');
   if(page==='tasks') loadTasks();
