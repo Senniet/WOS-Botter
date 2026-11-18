@@ -1,4 +1,4 @@
-const state = { page: 'dashboard', profiles: [], tasks: [], categories: [], profileId: '', settings: [], status: null, emulator: null, frameBusy: false, lastFrame: '', lastError: '' };
+const state = { page: 'dashboard', profiles: [], tasks: [], categories: [], profileId: '', settings: [], taskSettings: [], expandedTasks: new Set(), status: null, emulator: null, frameBusy: false, lastFrame: '', lastError: '' };
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const datetime = value => { if (!value) return '—'; const d = new Date(value); return Number.isNaN(+d) ? esc(value) : d.toLocaleString('nl-NL', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}); };
@@ -22,7 +22,7 @@ function setPage(page) {
   document.querySelector('.sidebar').classList.remove('open');
   if(page==='tasks') loadTasks();
   if(page==='settings') loadSettings();
-  if(page==='emulator') {loadDevice(); refreshFrame();}
+  if(page==='emulator') loadDevice();
   if(page==='logs') loadLogs();
   if(page==='profiles') renderProfiles();
   if(page==='qa') loadQa();
@@ -78,27 +78,143 @@ async function loadStatus(){
     $('metric-engine').textContent='Offline';
   }
 }
+// Task-specific controls reuse the real MSI ConfigurationKeyEnum keys and profile database.
+// The task activation flag itself remains in the task's main checkbox.
+const taskOptionPrefixes = {
+ ALLIANCE_AUTOJOIN:['ALLIANCE_AUTOJOIN_'], ALLIANCE_CHAMPIONSHIP:['ALLIANCE_CHAMPIONSHIP_'],
+ ALLIANCE_CHESTS:['ALLIANCE_CHESTS_'],ALLIANCE_HELP_REQUEST:['ALLIANCE_HELP_'],
+ ALLIANCE_MOBILIZATION:['ALLIANCE_MOBILIZATION_'],ALLIANCE_PET_TREASURE:['ALLIANCE_PET_TREASURE_'],
+ ALLIANCE_SHOP:['ALLIANCE_SHOP_'],ALLIANCE_TECH:['ALLIANCE_TECH_'],ALLIANCE_TRIUMPH:['ALLIANCE_TRIUMPH_'],
+ BEAR_TRAP:['BEAR_TRAP_'],CITY_SURVIVORS:['CITY_ACCEPT_NEW_SURVIVORS_'],
+ CITY_UPGRADE_FURNACE:['CITY_UPGRADE_'],RESEARCH:['RESEARCH_'],
+ DAILY_MISSIONS:['DAILY_MISSION_'],EXPERT_AGNES_INTEL:['EXPERT_AGNES_'],
+ EXPERT_ROMULUS_TAG:['EXPERT_ROMULUS_TAG_'],EXPERT_ROMULUS_TROOPS:['EXPERT_ROMULUS_TROOPS_'],
+ EXPERT_SKILL_TRAINING:['EXPERT_SKILL_TRAINING_'],INTEL:['INTEL_'],MAIL_REWARDS:['MAIL_'],
+ STOREHOUSE_CHEST:['STOREHOUSE_'],EVENT_BERSERK_CRYPTID:['RALLY_'],
+ EVENT_HERO_MISSION:['HERO_MISSION_'],EVENT_JOURNEY_OF_LIGHT:['JOURNEY_OF_LIGHT_'],
+ EVENT_MYRIAD_BAZAAR:['MYRIAD_BAZAAR_'],EVENT_POLAR_TERROR:['POLAR_TERROR_'],
+ EVENT_TUNDRA_TRUCK:['TUNDRA_TRUCK_'],FISHING_MINIGAME:['FISHING_'],
+ MERCENARY_EVENT:['MERCENARY_'],TEST_HOOK_LOOP:['TEST_HOOK_'],
+ CREATE_CHARACTER:['CREATE_CHARACTER_'],DUMMY_TASK:['DUMMY_TASK_'],
+ GATHER_BOOST:['GATHER_SPEED_'],GATHER_RESOURCES:['GATHER_'],
+ HEAL_TROOPS:['HEAL_'],TRAINING_TROOPS:['TRAIN_'],PET_SKILLS:['PET_SKILL_'],
+ ARENA:['ARENA_'],BANK:['INT_BANK_DELAY','BOOL_BANK'],BEAST_HUNTING:['BEAST_HUNTING_'],
+ CRYSTAL_LABORATORY:['CRYSTAL_LAB_','BOOL_CRYSTAL_LAB_'],
+ DO_EXPLORATION:['DO_EXPLORATION_'], EXPLORATION_CHEST:['EXPLORATION_CHEST_','INT_EXPLORATION_CHEST_'],
+ HERO_RECRUITMENT:['HERO_RECRUIT_'],LABYRINTH:['DAILY_LABYRINTH_'],
+ LIFE_ESSENCE:['LIFE_ESSENCE_'],LIFE_ESSENCE_CARING:['ALLIANCE_LIFE_ESSENCE_'],
+ NOMADIC_MERCHANT:['NOMADIC_MERCHANT_'],PET_ADVENTURE:['PET_ADVENTURE_'],
+ TREK_AUTOMATION:['TUNDRA_TREK_AUTOMATION_'],TREK_SUPPLIES:['TUNDRA_TREK_SUPPLIES_'],
+ VIP_POINTS:['VIP_','BOOL_VIP_POINTS'],WAR_ACADEMY:['WAR_ACADEMY_'],
+ SHOP_MYSTERY:['MYSTERY_SHOP_']
+};
+const taskOptionLabels = {
+ HERO_RECRUIT_ADVANCED_FREE_BOOL:'Gratis geavanceerde rekrutering',
+ HERO_RECRUIT_EPIC_FREE_BOOL:'Gratis epische rekrutering',
+ HERO_RECRUIT_ADVANCED_KEYS_BOOL:'Geavanceerde sleutels gebruiken',
+ HERO_RECRUIT_EPIC_KEYS_BOOL:'Epische sleutels gebruiken',
+ HERO_RECRUIT_POINTS_CHEST_BOOL:'Puntenkist claimen',
+ GATHER_REMOVE_HEROS_BOOL:'Helden uit de formatie verwijderen',
+ GATHER_ONLY_FULL_RESOURCES_BOOL:'Alleen volle grondstofvelden',
+ GATHER_DOWNGRADE_LEVEL_BOOL:'Lager niveau proberen als nodig',
+ GATHER_NO_HERO_FALLBACK_BOOL:'Zonder helden proberen',
+ CITY_UPGRADE_DOUBLE_TIME_BOOL:'Dubbele bouwversnelling',
+ CITY_UPGRADE_RESERVE_PRODUCTION_BOOL:'Productiebonus reserveren',
+ ARENA_TASK_ATTACK_QUICK_DEPLOY_BOOL:'Snel inzetten bij aanval',
+ ARENA_TASK_REFRESH_WITH_GEMS_BOOL:'Verversen met edelstenen',
+ ALLIANCE_AUTOJOIN_USE_ALL_TROOPS_BOOL:'Alle beschikbare troepen inzetten',
+ ALLIANCE_AUTOJOIN_USE_PREDEFINED_FORMATION_BOOL:'Vaste formatie gebruiken',
+ INTEL_RECALL_GATHER_TROOPS_BOOL:'Verzameltroepen terugroepen voor Intel',
+ POLAR_TERROR_USE_STAMINA_ITEMS_BOOL:'Uithoudingsvermogen-items gebruiken',
+ TUNDRA_TRUCK_USE_GEMS_BOOL:'Edelstenen gebruiken voor de truck',
+ BOOL_DEBUG:'Extra debugregistratie',
+};
+const taskWords={CONSTRUCTION:'bouw',LOCK:'vergrendeling',
+ SPEED:'snelheid',BOOST:'versnelling',TO:'naar',FOR:'voor',
+ WITH:'met',WITHOUT:'zonder',DURATION:'duur',POINT:'punt',
+ GATHERING:'verzamelen',UPGRADE:'verbeteren',MOBILIZATION:'mobilisatie',
+ BOOL:'',INT:'',STRING:'',ENABLED:'',TASK:'',AUTO:'automatisch',USE:'gebruik',ALL:'alle',
+ TRAIN:'trainen',TRAINING:'training',TROOPS:'troepen',HEAL:'genezen',HEALING:'genezing',
+ HERO:'held',HEROS:'helden',HEROES:'helden',RECRUIT:'rekrutering',REWARDS:'beloningen',
+ CHEST:'kist',CHESTS:'kisten',CLAIM:'claimen',FREE:'gratis',ADVANCED:'geavanceerd',EPIC:'episch',
+ KEYS:'sleutels',POINTS:'punten',PERCENTAGE:'percentage',INFANTRY:'infanterie',
+ LANCERS:'lanciers',MARKSMANS:'schutters',LIMIT:'limiet',SPEEDUPS:'versnellingen',
+ GEMS:'edelstenen',STAMINA:'uithoudingsvermogen',RESERVE:'reserve',LEVEL:'niveau',
+ MARCHES:'marsen',QUEUE:'wachtrij',QUEUES:'wachtrijen',FLAG:'vlag',TARGET:'doelwit',
+ TIME:'tijd',MINUTES:'minuten',HOURS:'uren',OFFSET:'interval',MAX:'maximum',MIN:'minimum',
+ RECALL:'terugroepen',GATHER:'verzamelen',RESOURCE:'grondstof',RESOURCES:'grondstoffen',
+ AUTOJOIN:'automatisch deelnemen',DEFEAT:'verslaan',BEASTS:'beesten',BUY:'kopen',
+ SKILL:'vaardigheid',SKILLS:'vaardigheden',ACTIVE:'actief',ONLY:'alleen',
+ RESTARTS:'herstarts',CASTS:'worpen',CATCHES:'vangsten',FISHING:'vissen',
+ PRIORITIES:'prioriteiten',PRIORITY:'prioriteit',ACTIVATION:'activering',
+ SCHEDULE:'planning',DATETIME:'datum en tijd',USE:'gebruiken',
+};
+// Prefix overlap must never cause one task to edit another task's activation switch.
+function taskBehavior(task){
+ const prefixes=taskOptionPrefixes[task.id]||[];
+ const activations=new Set(state.tasks.map(t=>t.activationKey).filter(Boolean));
+ return state.taskSettings.filter(s=>!s.secret && !/(?:_LAST_|_NEXT_|_CONSECUTIVE_FAILURES_|_STATE_|_TIME_LONG$)/.test(s.key) && s.key!==task.activationKey &&
+     !activations.has(s.key) && prefixes.some(prefix=>s.key.startsWith(prefix)) &&
+     !(task.id==='GATHER_RESOURCES'&&s.key.startsWith('GATHER_SPEED_')) &&
+     !(task.id==='CITY_UPGRADE_FURNACE'&&s.key==='CITY_UPGRADE_PRIORITISE_FURNACE_BOOL'));
+}
+function optionLabel(task,key){
+ if(taskOptionLabels[key])return taskOptionLabels[key];
+ const prefixes=taskOptionPrefixes[task.id]||[];
+ const prefix=prefixes.filter(p=>key.startsWith(p)).sort((a,b)=>b.length-a.length)[0]||'';
+ const remaining=key.slice(prefix.length).replace(/_?(BOOL|INT|STRING|JSON)$/,'');
+ const words=remaining.split('_').map(w=>taskWords[w]===undefined?w.toLowerCase():taskWords[w]).filter(Boolean);
+ const label=words.join(' ').trim();
+ return label?label.charAt(0).toUpperCase()+label.slice(1):'Optie';
+}
+function optionControl(task,s){
+ const label=optionLabel(task,s.key);
+ const id='option-'+task.id+'-'+s.key;
+ const help='<small class="task-option-key" title="Technische sleutel">'+esc(s.key)+'</small>';
+ if(s.type==='Boolean'){
+  return '<label class="task-option toggle-option" for="'+esc(id)+'"><span class="option-name">'+esc(label)+help+'</span><input type="checkbox" id="'+esc(id)+'" data-task-option="'+esc(s.key)+'" data-task-owner="'+esc(task.id)+'" '+(s.value==='true'?'checked':'')+'><span class="switch-track" aria-hidden="true"></span></label>';
+ }
+ const inputType=['Integer','Long'].includes(s.type)?'number':'text';
+ return '<label class="task-option value-option" for="'+esc(id)+'"><span class="option-name">'+esc(label)+help+'</span><span class="value-controls"><input id="'+esc(id)+'" type="'+inputType+'" data-task-value="'+esc(s.key)+'" data-task-owner="'+esc(task.id)+'" value="'+esc(s.value)+'" aria-label="'+esc(label)+'"><button class="secondary small" data-save-task-value="'+esc(s.key)+'" data-task-owner="'+esc(task.id)+'">Opslaan</button></span></label>';
+}
 async function loadTasks(){
- if(!state.profileId){$('task-list').innerHTML='<div class="panel-content text-muted">Maak eerst een profiel aan.</div>';return;}
+ const profileId=state.profileId;
+ if(!profileId){$('task-list').innerHTML='<div class="panel-content text-muted">Maak eerst een profiel aan.</div>';return;}
  try{
-   state.tasks=await api('/api/tasks?profile='+encodeURIComponent(state.profileId));
-   const categories=[...new Set(state.tasks.map(t=>t.category))].sort();
+   const [tasks,settings]=await Promise.all([
+     api('/api/tasks?profile='+encodeURIComponent(profileId)),
+     api('/api/settings?profile='+encodeURIComponent(profileId))]);
+   if(state.profileId!==profileId)return;
+   state.tasks=tasks; state.taskSettings=settings;
+   const categories=[...new Set(tasks.map(t=>t.category))].sort();
    const selected=$('tasks-category').value;
    $('tasks-category').innerHTML='<option value="">Alle categorieën</option>'+categories.map(c=>'<option>'+esc(c)+'</option>').join('');
    $('tasks-category').value=categories.includes(selected)?selected:'';
-   $('metric-tasks').textContent=state.tasks.filter(t=>t.enabled).length+' / '+state.tasks.length;
+   $('metric-tasks').textContent=tasks.filter(t=>t.enabled).length+' / '+tasks.length;
    $('metric-tasks-sub').textContent='Taken ingeschakeld';
-   renderTasks();
+   // Do not replace a form while the user is typing a task option.
+   if(!document.activeElement?.closest('[data-task-options]'))renderTasks();
  }catch(e){$('task-list').innerHTML='<div class="panel-content">'+esc(e.message)+'</div>';}
 }
 function renderTasks(){
  const search=$('tasks-search').value.trim().toLowerCase(),cat=$('tasks-category').value,enabled=$('tasks-enabled').checked;
  const items=state.tasks.filter(t=>(!search||(t.name+' '+t.id+' '+t.category).toLowerCase().includes(search))&&(!cat||t.category===cat)&&(!enabled||t.enabled));
  $('task-list').innerHTML=items.map(t=>{
-   const label=t.outcome==='SUCCEEDED'?'Geslaagd':t.outcome==='FAILED'?'Mislukt':t.outcome==='RUNNING'?'Uitvoering':t.outcome==='NOT_RUN'?'Nog niet':' '+t.outcome;
+   const label=t.outcome==='SUCCEEDED'?'Geslaagd':t.outcome==='FAILED'?'Mislukt':t.outcome==='RUNNING'?'Uitvoering':t.outcome==='NOT_RUN'?'Nog niet':t.outcome;
    const cls=t.outcome==='SUCCEEDED'?'good':t.outcome==='FAILED'?'bad':'';
-   return '<div class="task-row"><div class="task-name"><label><input type="checkbox" data-task-toggle="'+esc(t.id)+'" '+(t.enabled?'checked ':'')+(t.toggleable?'':'disabled ')+'> <span><strong>'+esc(t.name)+'</strong><small>'+esc(t.category.replace(/_/g,' '))+' · '+esc(t.id)+'</small></span></label></div><div class="outcome '+cls+'" title="'+esc(t.detail)+'">'+esc(t.executing?'Bezig':label)+'<small class="text-muted">'+(t.lastAttempt?' · '+datetime(t.lastAttempt):'')+'</small></div><div class="text-muted">'+datetime(t.next)+'</div><div class="task-actions"><button class="secondary" data-schedule-task="'+esc(t.id)+'" '+(!t.enabled?'disabled':'')+'>Plannen</button><button class="secondary" data-run-task="'+esc(t.id)+'" '+(!t.enabled?'disabled':'')+'>Nu uitvoeren</button></div></div>';
+   const behavior=taskBehavior(t),isOpen=state.expandedTasks.has(t.id);
+   const actionButton=behavior.length?'<button class="secondary" data-expand-task="'+esc(t.id)+'" aria-expanded="'+isOpen+'">⚙ Opties ('+behavior.length+') '+(isOpen?'▴':'▾')+'</button>':'';
+   const top='<div class="task-row"><div class="task-name"><label><input type="checkbox" data-task-toggle="'+esc(t.id)+'" '+(t.enabled?'checked ':'')+(t.toggleable?'':'disabled ')+'> <span><strong>'+esc(t.name)+'</strong><small>'+esc(t.category.replace(/_/g,' '))+'</small></span></label></div><div class="outcome '+cls+'" title="'+esc(t.detail)+'">'+esc(t.executing?'Bezig':label)+'<small class="text-muted">'+(t.lastAttempt?' · '+datetime(t.lastAttempt):'')+'</small></div><div class="text-muted">'+datetime(t.next)+'</div><div class="task-actions">'+actionButton+'<button class="secondary" data-schedule-task="'+esc(t.id)+'" '+(!t.enabled?'disabled':'')+'>Plannen</button><button class="secondary" data-run-task="'+esc(t.id)+'" '+(!t.enabled?'disabled':'')+'>Nu uitvoeren</button></div></div>';
+   const opts=isOpen&&behavior.length?'<div class="task-option-panel" data-task-options="'+esc(t.id)+'"><div class="task-option-heading"><strong>Gedrag van deze taak</strong><span>Deze keuzes worden direct per profiel opgeslagen.</span></div><div class="task-option-grid">'+behavior.map(s=>optionControl(t,s)).join('')+'</div></div>':'';
+   return '<div class="task-card">'+top+opts+'</div>';
  }).join('')||'<div class="panel-content text-muted">Geen taken gevonden.</div>';
+}
+async function saveTaskOption(key,value,profileId){
+ await api('/api/setting','POST',{profileId,key,value});
+ if(profileId===state.profileId){
+  const s=state.taskSettings.find(s=>s.key===key);if(s)s.value=value;
+ }
+ alertUser('Taakoptie opgeslagen');
 }
 async function loadSettings(){
  try {state.settings=await api('/api/settings'+($('settings-profile').value?'?profile='+encodeURIComponent($('settings-profile').value):''));renderSettings(); }
@@ -106,7 +222,13 @@ async function loadSettings(){
 }
 function renderSettings(){
  const search=$('settings-search').value.trim().toLowerCase(),type=$('settings-type').value;
- const arr=state.settings.filter(s=>(!search||s.key.toLowerCase().includes(search))&&(!type||s.type===type));
+ const advanced=$('settings-advanced').checked;
+ const essentials=new Set(['CURRENT_EMULATOR_STRING','SERVE_EMU_ADB_ENDPOINTS_STRING',
+  'AUTO_START_ENABLED_BOOL','AUTO_START_DELAY_MINUTES_INT','IDLE_BEHAVIOR_STRING',
+  'STOP_BEHAVIOR_STRING','MAX_IDLE_TIME_INT','BOOL_DEBUG',
+  'LAN_DIAGNOSTICS_ENABLED_BOOL','LAN_DIAGNOSTICS_SCREENSHOTS_BOOL']);
+ const arr=state.settings.filter(s=>(advanced||search||essentials.has(s.key))&&
+    (!search||s.key.toLowerCase().includes(search))&&(!type||s.type===type));
  $('settings-list').innerHTML=arr.map(s=>{
    const id='setting-'+s.key;
    const field=s.type==='Boolean'?'<select data-setting-value="'+esc(s.key)+'"><option value="true" '+(s.value==='true'?'selected':'')+'>Aan</option><option value="false" '+(s.value==='false'?'selected':'')+'>Uit</option></select>':
@@ -147,8 +269,8 @@ async function refreshFrame(){
    const url=URL.createObjectURL(blob), previous=state.lastFrame;
    $('emu-image').src=url;state.lastFrame=url;
    if(previous) $('emu-image').onload=()=>URL.revokeObjectURL(previous);
-   $('emu-mode').textContent=new Date().toLocaleTimeString('nl-NL');
- }catch(e){$('emu-mode').textContent=e.message;}
+   $('emu-snapshot-status').textContent='Screenshot '+new Date().toLocaleTimeString('nl-NL');
+ }catch(e){$('emu-snapshot-status').textContent=e.message;}
  finally{state.frameBusy=false;}
 }
 async function loadLogs(){
@@ -220,10 +342,40 @@ document.addEventListener('click',e=>{
  const go=e.target.closest('[data-go]');if(go)setPage(go.dataset.go);
  const run=e.target.closest('[data-run-task]');if(run) action(async()=>{await api('/api/task','POST',{action:'run',profileId:state.profileId,task:run.dataset.runTask}); await loadTasks();},'Taak toegevoegd aan de wachtrij');
  const setting=e.target.closest('[data-save-setting]');if(setting)action(()=>saveSetting(setting.dataset.saveSetting));
+ const expand=e.target.closest('[data-expand-task]');if(expand){
+   const id=expand.dataset.expandTask;
+   if(state.expandedTasks.has(id))state.expandedTasks.delete(id);else state.expandedTasks.add(id);
+   renderTasks();
+ }
+ const saveTask=e.target.closest('[data-save-task-value]');if(saveTask){
+   const input=saveTask.parentElement.querySelector('input[data-task-value]');
+   if(input && input.checkValidity()){
+     const profileId=state.profileId,key=input.dataset.taskValue;
+     action(()=>saveTaskOption(key,input.value,profileId));
+   } else if(input)input.reportValidity();
+ }
 });
 document.addEventListener('change',e=>{
  const task=e.target.closest('[data-task-toggle]');
- if(task)action(async()=>{await api('/api/task','POST',{action:'toggle',profileId:state.profileId,task:task.dataset.taskToggle,enabled:task.checked});await loadTasks();},'Taakinstelling opgeslagen');
+ if(task){
+   const profileId=state.profileId,enabled=task.checked;
+   task.disabled=true;
+   action(async()=>{
+     await api('/api/task','POST',{action:'toggle',profileId,task:task.dataset.taskToggle,enabled});
+     await loadTasks();
+   },'Taakinstelling opgeslagen');
+ }
+ const taskOption=e.target.closest('[data-task-option]');
+ if(taskOption){
+   const profileId=state.profileId,key=taskOption.dataset.taskOption;
+   const wasChecked=!taskOption.checked,value=String(taskOption.checked);
+   taskOption.disabled=true;
+   action(async()=>{
+     try{await saveTaskOption(key,value,profileId);}
+     catch(e){taskOption.checked=wasChecked;throw e;}
+     finally{taskOption.disabled=false;}
+   });
+ }
 });
 document.querySelectorAll('.nav-btn').forEach(btn=>btn.addEventListener('click',()=>setPage(btn.dataset.page)));
 $('custom-refresh').addEventListener('click',loadCustom);
@@ -287,10 +439,10 @@ $('logout').addEventListener('click',async()=>{try{await api('/api/logout','POST
 for(const [name, actionName] of [['start','start'],['pause','pause'],['resume','resume'],['stop','stop']]) {
  $(name).addEventListener('click',()=>action(async()=>{await api('/api/engine','POST',{action:actionName});await loadStatus();await loadProfiles();},'Bot: '+actionName));
 }
-$('tasks-profile').addEventListener('change',e=>{state.profileId=e.target.value;loadTasks();});
+$('tasks-profile').addEventListener('change',e=>{state.profileId=e.target.value;state.expandedTasks.clear();loadTasks();});
 for(const id of ['tasks-search','tasks-category','tasks-enabled']) $(id).addEventListener(id==='tasks-search'?'input':'change',renderTasks);
 $('settings-profile').addEventListener('change',loadSettings);
-for(const id of ['settings-search','settings-type']) $(id).addEventListener(id==='settings-search'?'input':'change',renderSettings);
+for(const id of ['settings-search','settings-type','settings-advanced']) $(id).addEventListener(id==='settings-search'?'input':'change',renderSettings);
 $('profile-new').addEventListener('click',()=>{$('profile-form').reset();$('profile-id').value='';});
 $('password-form').addEventListener('submit',e=>{
  e.preventDefault();
@@ -356,6 +508,7 @@ $('emu-image').addEventListener('pointerup',e=>{
 $('emu-image').addEventListener('pointercancel',()=>{emuPointer=null;});
 setInterval(()=>{$('clock').textContent=new Date().toLocaleTimeString('nl-NL',{hour:'2-digit',minute:'2-digit'});},1000);
 setInterval(loadStatus,4500);
-setInterval(()=>{if(state.page==='emulator'&&$('auto-frame').checked)refreshFrame();},1800);
+// The embedded native Serve-Emu browser provides its own continuous WebSocket stream.
+// ADB screenshot capture is now manual fallback only, never an automatic 1.8s loop.
 setInterval(()=>{if(state.page==='tasks')loadTasks();if(state.page==='logs')loadLogs();if(state.page==='qa')loadQa();if(state.page==='statistics')loadStatistics();},20000);
 (async()=>{await loadStatus();await loadProfiles();if(state.profileId)await loadTasks();loadDevice();})().catch(e=>alertUser(e.message,true));

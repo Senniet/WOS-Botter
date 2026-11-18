@@ -194,6 +194,7 @@ public final class WebConsoleServer {
             row.put("name", kind.getName());
             row.put("category", kind.routineCategory().name());
             row.put("toggleable", kind.getConfigKey() != null);
+            row.put("activationKey", kind.getConfigKey() == null ? null : kind.getConfigKey().name());
             row.put("enabled", kind.getConfigKey() != null
                     && Boolean.TRUE.equals(p.getConfig(kind.getConfigKey(), Boolean.class)));
             TaskStateData state = stateService.lookupTaskState(p.getId(), kind.getId());
@@ -227,6 +228,7 @@ public final class WebConsoleServer {
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("key", key.name());
             item.put("type", key.getType().getSimpleName());
+            item.put("category", key.category().name());
             item.put("default", secret ? "" : key.getDefaultValue());
             item.put("value", secret ? "" : Objects.toString(value,
                     secret ? "" : Objects.toString(key.getDefaultValue(), "")));

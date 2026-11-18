@@ -32,3 +32,11 @@ Access password is initially provisioned under `~/.config/survivalops-web/initia
 - The gateway temporarily blocks web controls when it detects recent external Task Coach evidence; this is a conservative signal, not a guaranteed global lease.
 
 Avoid running the Windows client and Web scheduler against the same emulator simultaneously.
+
+## Task behavior controls and live display
+
+The Task Management page now reads both `/api/tasks?profile=...` and `/api/settings?profile=...`, maps the original task-specific configuration keys to an expandable behavior panel on each routine, and writes changes back through `/api/setting`. This preserves all original MSI configuration keys and per-profile values. The task's own activation switch is not duplicated in its options, nor is another routine's activation switch exposed as a behavior setting. Internal state fields (last-run timestamps, consecutive failure counts, etc.) are hidden from the ordinary behavior panel. Technical keys remain available via the explicit Advanced checkbox in System Settings; default view shows only core system settings.
+
+Serve-Emu is rendered read-only in an embedded native `https://192.168.1.20:8448/` viewer; its own frontend and WebSocket worker deliver live frames. Automatic periodic ADB screenshot polling was removed. The former ADB screenshot/click/back controls remain as an explicitly requested fallback and refuse manual input while web automation or other detected controllers are active. The embedded iframe is inert to prevent accidental gameplay clicks while viewing. For full interactive native control use the separate Serve-Emu link.
+
+Validation: `node tools/web-console/test_task_ui.cjs` (reads original Java task/setting APIs, asserts option ownership and security-sensitive UI behavior), `node --check tools/web-console/static/app.js`, `python3 -m unittest tools/web-console/test_web_console.py`, and Maven reactor build. Native Serve-Emu WebSocket upgrade and inbound data were verified on port 8448. Because no graphical browser was installed on this host, iframe appearance in mobile Safari has not yet been visually tested.
