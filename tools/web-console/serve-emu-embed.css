@@ -10,7 +10,7 @@ html,body{margin:0!important;width:100%;height:100%;overflow:hidden!important;ba
 #root{display:grid!important;grid-template-rows:minmax(0,1fr)!important;width:100%;height:100%!important;height:100dvh!important;min-height:0!important;overflow:hidden!important}
 #root>header,#root>footer,#root>nav,#root>.control-bar,
 #root>.bottom-bar,.device-sidebar,.side-panel,
-.mobile-android-keyboard,.mobile-android-keyboard-toggle{
+.mobile-android-keyboard,.mobile-android-keyboard-toggle,.keyboard-hint{
   display:none!important
 }
 #root>main.app-layout{
