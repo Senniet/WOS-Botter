@@ -54,6 +54,9 @@ public enum TpDailyTaskEnum {
     /* ── daily objectives ── */
 
     DAILY_OVERVIEW_CHECK   (38,  "Daily Overview Check", ConfigurationKeyEnum.DAILY_OVERVIEW_CHECK_BOOL, RoutineCategory.DAILY_OBJECTIVE),
+    ONLINE_REWARDS         (39,  "Online Rewards", ConfigurationKeyEnum.ONLINE_REWARDS_ENABLED_BOOL, RoutineCategory.DAILY_OBJECTIVE),
+    FREE_DAILY_CHESTS      (210, "Free Daily Chests", ConfigurationKeyEnum.FREE_DAILY_CHESTS_ENABLED_BOOL, RoutineCategory.DAILY_OBJECTIVE),
+    SMART_DAILY_OVERVIEW   (211, "Smart Daily Overview", ConfigurationKeyEnum.SMART_DAILY_OVERVIEW_ENABLED_BOOL, RoutineCategory.DAILY_OBJECTIVE),
     DAILY_MISSIONS         (31,  "Daily Missions",               ConfigurationKeyEnum.DAILY_MISSION_BOOL,                     RoutineCategory.DAILY_OBJECTIVE),
     EXPERT_AGNES_INTEL     (34,  "Expert Agnes Intel",           ConfigurationKeyEnum.EXPERT_AGNES_INTEL_BOOL,                RoutineCategory.DAILY_OBJECTIVE),
     EXPERT_ROMULUS_TAG     (35,  "Expert Romulus Tag",           ConfigurationKeyEnum.EXPERT_ROMULUS_TAG_BOOL,                 RoutineCategory.DAILY_OBJECTIVE),

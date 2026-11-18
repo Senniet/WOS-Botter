@@ -29,18 +29,23 @@ public final class DailyOverviewFrame {
                 new PointData(0, 340), new PointData(215, 615), 86).isFound();
     }
 
-    public static Summary summarize(RawImageData frame) {
-        if (!isDailyOverview(frame)) return new Summary(false,false,false,false,"Unverified Daily sidebar");
-        String text;
+    /** One OCR of the real Daily sidebar serves both reporting and smart dispatch. */
+    static String readVisibleText(RawImageData frame) {
+        if (!isDailyOverview(frame)) return "";
         try {
-            text = OcrEngine.recognizeText(frame,
-                    new PointData(15, 277), new PointData(465, 830), TEXT);
+            return OcrEngine.recognizeText(frame,
+                    new PointData(15,277),new PointData(465,980),TEXT);
         } catch (OcrException expected) {
-            text = "";
+            return "";
         } catch (RuntimeException unexpected) {
             TaskControlSignals.rethrowControlSignal(unexpected);
-            text = "";
+            return "";
         }
+    }
+
+    public static Summary summarize(RawImageData frame) {
+        if (!isDailyOverview(frame)) return new Summary(false,false,false,false,"Unverified Daily sidebar");
+        String text = readVisibleText(frame);
         String normalized = text.toUpperCase(Locale.ROOT);
         boolean arena = normalized.contains("ARENA");
         boolean pet = normalized.contains("PET ADVENTURE");
