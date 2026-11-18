@@ -231,6 +231,7 @@ private DonationStatus performDonationsFlow() {
         }
         if(available==0)return DonationStatus.NONE_AVAILABLE;
         int completed=0;
+        boolean fastBatches=true;
         while(available>0 && completed<DONATION_TAP_COUNT_VALUE){
             checkPreemption();
             current=emuManager.captureScreen(EMULATOR_NUMBER);
@@ -239,24 +240,48 @@ private DonationStatus performDonationsFlow() {
                 logWarning("Alliance blue resource CTA disappeared; never tap orange 10-gem contribution");
                 return DonationStatus.UNVERIFIED;
             }
-            // Exactly ONE resource donation at a time. Previous 25 taps at
-            // 150 ms were faster than the game could process and silently
-            // dropped actions while still reporting task success.
-            tapNear(free.getPoint());
-            int after=-1;
-            for(int observed=0;observed<4;observed++){
-                sleepTask(350);
-                after=readFreeAttemptCount();
-                if(after==available-1)break;
+            int batch=AllianceDonationBatchPolicy.nextBatchSize(available,fastBatches);
+            if(batch==0)return DonationStatus.UNVERIFIED;
+            // Previous implementation did a full screenshot plus OCR after
+            // EVERY click (25+ screenshot/OCR passes). Send a small, bounded
+            // run of 140-ms spaced FREE taps to the already-verified blue
+            // action. Keep one available attempt in reserve: only the last
+            // attempt is tapped and verified individually.
+            for(int tap=0;tap<batch;tap++){
+                checkPreemption();
+                tapNear(free.getPoint());
+                if(tap+1<batch)sleepTask(AllianceDonationBatchPolicy.INTER_TAP_DELAY_MS);
             }
-            if(after!=available-1){
-                logWarning("Alliance donation unverified: attempts expected "
-                        +(available-1)+" but read "+after+"; no duplicate tap");
+            int after=-1;
+            int confirmed=-1;
+            int lastPartial=-1;
+            // Usually ONE OCR per batch. If only some taps are reflected,
+            // let delayed game input settle before counting a partial burst.
+            // A partial first read is not permission to tap again: earlier
+            // queued taps could still be applying on the server.
+            for(int observed=0;observed<5;observed++){
+                if(observed>0)sleepTask(210);
+                after=readFreeAttemptCount();
+                confirmed=AllianceDonationBatchPolicy.confirmedDonationCount(available,after,batch);
+                if(confirmed==batch)break;
+                if(confirmed>0 && after==lastPartial && observed>=2)break;
+                lastPartial=confirmed>0 ? after : -1;
+            }
+            if(confirmed<1){
+                logWarning("Alliance Tech donation batch unverified: before="+available
+                        +" tapped="+batch+" read="+after+". No duplicate clicks.");
                 return DonationStatus.UNVERIFIED;
             }
-            completed++;
+            // If the game dropped one or more rapid clicks, count only the
+            // actual donations and downgrade to individually verified taps.
+            if(confirmed<batch){
+                fastBatches=false;
+                logInfo("Alliance Tech dropped "+(batch-confirmed)
+                        +" rapid taps; switching to single verified contributions");
+            }
+            completed+=confirmed;
             available=after;
-            if(completed==1 || completed%5==0 || available==0)
+            if(completed==confirmed || completed%5==0 || available==0)
                 logInfo("Alliance resource donations confirmed: "+completed
                         +"; free attempts remaining "+available);
         }

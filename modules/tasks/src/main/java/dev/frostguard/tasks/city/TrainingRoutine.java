@@ -209,7 +209,11 @@ protected void loadConfiguration() {
                         + "claim button or confirmation was not verified");
                 return;
             }
-            analyzedQueues = inspectAllQueues();
+            // Every claimed queue was already verified individually and its
+            // snapshot changed COMPLETE -> IDLE. Scanning all three queues
+            // again here duplicated the same costly sidebar OCR immediately
+            // after collection. The final post-Train scan remains mandatory.
+            logInfo(routineLogTrainingLine("Completed queues verified individually; reusing updated sidebar snapshot"));
         }
 
         enabledTroopTypes.stream()
@@ -236,12 +240,8 @@ protected void loadConfiguration() {
         refreshMinistryAppointmentIfNeeded();
 
 
-        List<LocalDateTime> allCompletionTimes = new ArrayList<>();
-
-
-        allCompletionTimes.addAll(extractExistingCompletionTimesFlow(analyzedQueues));
-
-
+        // Only the final sidebar scan is authoritative after the Train taps.
+        // Do not precompute a list that was unconditionally cleared later.
         List<LocalDateTime> newCompletionTimes = trainAllReadyQueuesFlow(readyQueues);
 
         logInfo(routineLogTrainingLine("Verifying final queue states via sidebar."));
@@ -254,9 +254,13 @@ protected void loadConfiguration() {
             logWarning(routineLogTrainingLine("No newly started training queue could be confirmed."));
             markWorkIncomplete("Training: no ready queue was verified as training after attempted start");
         }
-        allCompletionTimes.clear();
-        allCompletionTimes.addAll(extractExistingCompletionTimesFlow(verifiedQueues));
-
+        List<LocalDateTime> allCompletionTimes = new ArrayList<>(
+                extractExistingCompletionTimesFlow(verifiedQueues));
+        // Keep the already OCR-confirmed completion time as a fallback only
+        // if the final sidebar verified training but failed to read its timer.
+        if (trainingProgressConfirmed && allCompletionTimes.isEmpty()) {
+            allCompletionTimes.addAll(newCompletionTimes);
+        }
         deferToEarliestCompletion(allCompletionTimes);
     }
 
@@ -465,7 +469,7 @@ private boolean performPromotionPriorityTraining(QueueSlot queue) {
                     + "2026 panel; training the independently confirmed highest "
                     + "unlocked selected tier instead of blindly swiping"));
             isPromotionTraining = false;
-            return pressTrainButton();
+            return pressTrainButton(true);
         }
 
         int maxLevel = selectHighestUnlockedTroopLevel(queue.type());
@@ -833,7 +837,8 @@ private Integer extractMaxTroopCountFlow() {
     }
 
     private boolean collectCompletedTraining(List<QueueSlot> initialQueues) {
-        for (QueueSlot slot : initialQueues) {
+        for (int index = 0; index < initialQueues.size(); index++) {
+            QueueSlot slot = initialQueues.get(index);
             if (slot.status() != QueueMood.COMPLETE) continue;
             navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME);
             marchHelper.openLeftMenuCitySection(true);
@@ -859,8 +864,8 @@ private Integer extractMaxTroopCountFlow() {
                 if (!dismissConfirmedTroopUnlockOverlay()) {
                     throw new IllegalStateException("Troop unlock blocked completed training collection");
                 }
-                List<QueueSlot> afterUnlock = inspectAllQueues();
-                if (wasCompletedQueueCollected(slot.type(), afterUnlock)) {
+                QueueSlot afterUnlock = inspectCollectedQueueOnly(slot.type());
+                if (recordVerifiedCollectedQueue(initialQueues, index, afterUnlock)) {
                     logInfo(routineLogTrainingLine("Completed " + slot.type()
                             + " verified after closing troop-unlock animation"));
                     continue;
@@ -868,20 +873,65 @@ private Integer extractMaxTroopCountFlow() {
                 screenshot = emuManager.captureScreen(EMULATOR_NUMBER);
             }
             PointData handTarget = completedTroopHandTarget(screenshot);
-            if (handTarget == null) {
-                logWarning(routineLogTrainingLine("No verified completion bubble hand for " + slot.type()));
-                return false;
+            if (handTarget != null) {
+                tapNear(handTarget);
+                sleepTask(650);
+            } else {
+                // Some game versions collect directly from the green icon
+                // without a second tutorial hand. Do not tap a guessed spot:
+                // verify the single changed queue first.
+                logInfo(routineLogTrainingLine("No second completion hand for " + slot.type()
+                        + "; checking whether the sidebar claim already completed"));
             }
-            tapNear(handTarget);
-            sleepTask(800);
-            List<QueueSlot> after = inspectAllQueues();
-            if (!wasCompletedQueueCollected(slot.type(), after)) {
-                logWarning(routineLogTrainingLine("Completion click was not confirmed for " + slot.type()));
+            QueueSlot after = inspectCollectedQueueOnly(slot.type());
+            if (!recordVerifiedCollectedQueue(initialQueues, index, after)) {
+                logWarning(routineLogTrainingLine("Completion click was not confirmed for " + slot.type()
+                        + "; observed=" + after.status()));
                 return false;
             }
             logInfo(routineLogTrainingLine("Collected completed " + slot.type()
-                    + " troops; sidebar no longer reports Completed"));
+                    + " troops; only this queue rechecked, others preserved"));
         }
+        return true;
+    }
+
+    /**
+     * Verify a collected claim using ONLY its own sidebar row. A claim can
+     * move the game to a camp or an unlock overlay; open the sidebar again
+     * from the safe Home state and read just the changed troop type. Unlike
+     * inspectAllQueues this never OCRs the two unrelated troop queues.
+     */
+    private QueueSlot inspectCollectedQueueOnly(TroopTypeShape type) {
+        navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME);
+        marchHelper.openLeftMenuCitySection(true);
+        try {
+            RawImageData frame = emuManager.captureScreen(EMULATOR_NUMBER);
+            if (frame == null || !frame.isValid()) {
+                return new QueueSlot(type, QueueMood.UNKNOWN, null);
+            }
+            boolean currentLayout = SidebarFrameClassifier.isCurrentLayout(
+                    ImageConverter.toBufferedImage(frame));
+            AreaData area = currentLayout ? currentSidebarQueueArea(type) : resolvePipelineArea(type);
+            QueueSlot observed = inspectQueueState(area, type);
+            if (observed.status() == QueueMood.UNKNOWN) {
+                sleepTask(220);
+                observed = inspectQueueState(area, type);
+            }
+            return observed;
+        } finally {
+            marchHelper.closeLeftMenu();
+        }
+    }
+
+    /** Keep only an independently proven COMPLETE -> IDLE change in the snapshot. */
+    static boolean recordVerifiedCollectedQueue(List<QueueSlot> snapshot, int index, QueueSlot verified) {
+        if (snapshot == null || verified == null || index < 0 || index >= snapshot.size())
+            return false;
+        QueueSlot before = snapshot.get(index);
+        if (before.status() != QueueMood.COMPLETE
+                || verified.type() != before.type() || verified.status() != QueueMood.IDLE)
+            return false;
+        snapshot.set(index, verified);
         return true;
     }
 
@@ -1401,7 +1451,7 @@ private List<TemplatesEnum> resolveTroopsTemplates(TroopTypeShape type) {
         if (isVerifiedPreselectedHighestTier()) {
             logInfo(routineLogTrainingLine("Detected game's preselected highest unlocked tier "
                     + "and BLUE Train button on two frames; no legacy-tier swipes needed"));
-            return pressTrainButton();
+            return pressTrainButton(true);
         }
         if (selectHighestUnlockedTroopLevel(troopTypeBeingTrained) != -1) {
             return pressTrainButton();
@@ -1743,6 +1793,10 @@ private void dismissPopupsFlow() {
     }
 
 private boolean pressTrainButton() {
+        return pressTrainButton(false);
+    }
+
+private boolean pressTrainButton(boolean preverifiedTopTier) {
         // Keep BlueStacks/MuMu/LDPlayer/MEmu's original action strategy;
         // only the measured 720x1280 Serve-EMU uses the accelerated path.
         if(emuManager.getSelectedEmulatorType()
@@ -1752,7 +1806,18 @@ private boolean pressTrainButton() {
         // its blue Train button have already passed two independent frame
         // checks, tap promptly: scanning the old TRAINING_TRAIN_BUTTON twice
         // and probing 11 obsolete tiers adds latency but no protection.
-        boolean selectedHighest=isVerifiedPreselectedHighestTier();
+        // A caller that already inspected two independent frames need not
+        // repeat that same expensive recognition. Still demand a new capture
+        // immediately before the final tap so an overlay cannot reuse a stale
+        // verified tier or blue Train button.
+        boolean selectedHighest=preverifiedTopTier
+                ? TrainingPanelFrameEvidence.currentTopUnlockedTierIsTrainable(
+                        emuManager.captureScreen(EMULATOR_NUMBER))
+                : isVerifiedPreselectedHighestTier();
+        if (preverifiedTopTier && !selectedHighest) {
+            logWarning(routineLogTrainingLine("Previously verified top tier changed before Train; no click"));
+            return false;
+        }
         ImageSearchResultData target=ImageSearchResultData.miss();
         if (!selectedHighest) {
             if (!isTrainingCampInterfaceVisible()) {
