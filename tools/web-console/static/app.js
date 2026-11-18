@@ -1,4 +1,4 @@
-const state = { page: 'dashboard', profiles: [], tasks: [], categories: [], profileId: '', settings: [], taskSettings: [], expandedTasks: new Set(), selectedTaskId: '', taskGroup: 'all', taskFilter: 'all', taskSort: 'logical', taskStars: new Set(), taskBusy: new Set(), status: null, emulator: null, lastError: '' };
+const state = { page: 'dashboard', profiles: [], tasks: [], categories: [], profileId: '', settings: [], taskSettings: [], expandedTasks: new Set(), selectedTaskId: '', taskGroup: 'all', taskFilter: 'all', taskSort: 'logical', taskStars: new Set(), taskBusy: new Set(), taskRevision: 0, status: null, emulator: null, lastError: '' };
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const datetime = value => { if (!value) return '—'; const d = new Date(value); return Number.isNaN(+d) ? esc(value) : d.toLocaleString('en-GB', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}); };
@@ -615,13 +615,28 @@ function closeTaskDetail(){
  document.querySelector('.operations-tasks')?.classList.remove('has-task-detail');
  renderTasks();renderTaskDetail();
 }
-function renderTaskNavigation(){
+function renderTaskNavigation(preserveExistingGroups=false){
  const relevant=state.tasks.filter(workMatched);
  const allEnabled=relevant.filter(t=>t.enabled).length;
  const allErrors=relevant.filter(t=>t.outcome==='FAILED').length;
  const counters=state.tasks.filter(t=>t.toggleable).length;
  $('task-summary').innerHTML='<span><b>'+state.tasks.length+'</b> routines</span><span><i class="work-dot is-on"></i><b>'+state.tasks.filter(t=>t.enabled).length+'</b> enabled</span><span><i class="work-dot is-error"></i><b>'+state.tasks.filter(t=>t.outcome==='FAILED').length+'</b> failed</span><span class="work-summary-note">'+counters+' manually configurable · '+allEnabled+' enabled in selection'+(allErrors?' · '+allErrors+' failed in selection':'')+'</span>';
- $('task-categories').innerHTML=[{id:'all',name:'All Areas',icon:'▦',description:''},...workGroups].map(group=>{
+ // A single toggle must update group counts without replacing the menu.
+ // Replacing the entire menu/list detaches the user's active controls,
+ // which looks like the Task Manager has disappeared during an update.
+ const menu=$('task-categories');
+ const groups=[{id:'all',name:'All Areas',icon:'▦',description:''},...workGroups];
+ if(preserveExistingGroups && menu.querySelectorAll('[data-task-group]').length===groups.length){
+  for(const group of groups){
+   const btn=[...menu.querySelectorAll('[data-task-group]')].find(b=>b.dataset.taskGroup===group.id);
+   if(!btn)continue;
+   const total=relevant.filter(t=>group.id==='all'||workGroup(t)===group.id).length;
+   const enabled=relevant.filter(t=>(group.id==='all'||workGroup(t)===group.id)&&t.enabled).length;
+   btn.querySelector('small').textContent=enabled+'/'+total;
+   btn.classList.toggle('is-current',state.taskGroup===group.id);
+   btn.setAttribute('aria-current',String(state.taskGroup===group.id));
+  }
+ }else menu.innerHTML=groups.map(group=>{
   const total=relevant.filter(t=>group.id==='all'||workGroup(t)===group.id).length;
   const enabled=relevant.filter(t=>(group.id==='all'||workGroup(t)===group.id)&&t.enabled).length;
   return '<button type="button" class="work-group'+(state.taskGroup===group.id?' is-current':'')+'" data-task-group="'+esc(group.id)+'" aria-current="'+(state.taskGroup===group.id?'true':'false')+'"><span class="work-group-symbol">'+esc(group.icon)+'</span><span>'+esc(group.name)+'</span><small>'+enabled+'/'+total+'</small></button>';
@@ -632,18 +647,27 @@ function renderTaskNavigation(){
  });
 }
 async function loadTasks(){
- const profileId=state.profileId;
+ const profileId=state.profileId,revision=state.taskRevision;
  if(!profileId){$('task-list').textContent='Create a profile first.';return;}
  try{
   const [tasks,settings]=await Promise.all([api('/api/tasks?profile='+encodeURIComponent(profileId)),api('/api/settings?profile='+encodeURIComponent(profileId))]);
-  if(profileId!==state.profileId)return;
+  // Do not let a request started *before* a switch commit overwrite the new
+  // flag, or recreate the list during a change. This also handles polling.
+  if(profileId!==state.profileId || revision!==state.taskRevision || state.taskBusy.size)return;
   state.tasks=tasks;state.taskSettings=settings;
   $('metric-tasks').textContent=tasks.filter(t=>t.enabled).length+' / '+tasks.length;
   $('metric-tasks-sub').textContent='Enabled routines';
-  renderTasks();
+  // Scheduled refreshes should NOT rebuild unchanged rows. Doing so was
+  // replacing every task card (and its focus/scroll) every 20 seconds.
+  if(!refreshVisibleTasksInPlace())renderTasks();
   const editing=document.activeElement?.closest('.work-inspector [data-task-options]');
-  if(!editing)renderTaskDetail();
- }catch(e){$('task-list').textContent=e.message;}
+  if(!editing && !refreshTaskInspectorInPlace())renderTaskDetail();
+ }catch(e){
+  // A transient API/settings timeout must not replace a populated Task
+  // Manager with an error string. Keep the last known state and retry later.
+  if(!state.tasks.length)$('task-list').textContent=e.message;
+  else console.warn('Task refresh temporarily unavailable:',e.message);
+ }
 }
 function renderTasks(){
  renderTaskNavigation();
@@ -675,6 +699,64 @@ function renderTasks(){
   html+='</div>';
  }
  $('task-list').innerHTML=html||'<div class="work-no-results"><strong>No routines found</strong><p>Try another search term, filter or work area.</p><button type="button" data-clear-task-filters>Clear filters</button></div>';
+}
+// Reconcile visible routine controls without destroying any live DOM nodes.
+// A task click and a 20-second status poll use the same safe update path.
+function refreshTaskRow(id){
+ const t=state.tasks.find(item=>item.id===id);
+ if(!t)return;
+ document.querySelectorAll('[data-task-toggle]').forEach(input=>{
+  if(input.dataset.taskToggle!==id)return;
+  input.checked=!!t.enabled;
+  input.disabled=state.taskBusy.has(id)||!t.toggleable;
+ });
+ const row=[...document.querySelectorAll('[data-task-row]')].find(el=>el.dataset.taskRow===id);
+ if(row){
+  row.classList.toggle('is-enabled',!!t.enabled);
+  const status=workStatus(t),current=row.querySelector('.work-state');
+  if(current){current.className='work-state is-'+status.kind;current.innerHTML='<i></i>'+esc(status.label);}
+  const timing=row.querySelector('.work-task-timing');
+  if(timing)timing.textContent=t.enabled?(t.next?'Next '+datetime(t.next):'Not scheduled'):'Disabled';
+ }
+}
+function refreshTaskCountersInPlace(){
+ renderTaskNavigation(true);
+ $('task-visible-count').textContent=$('task-list').querySelectorAll('[data-task-row]').length+' shown';
+ $('task-list').querySelectorAll('.work-section').forEach(section=>{
+  const rows=[...section.querySelectorAll('[data-task-row]')];
+  const label=section.querySelector('.work-section-header>span');
+  if(label)label.textContent=rows.filter(row=>state.tasks.find(t=>t.id===row.dataset.taskRow)?.enabled).length
+      +' / '+rows.length+' enabled';
+ });
+}
+function refreshTaskInspectorInPlace(){
+ if(!state.selectedTaskId)return Boolean($('task-detail-content').querySelector('.work-empty-detail'));
+ const t=state.tasks.find(t=>t.id===state.selectedTaskId);
+ if(!t || !$('task-detail-content').querySelector('.work-detail-activation'))return false;
+ const status=workStatus(t);
+ const statusEl=$('task-detail-content').querySelector('.work-detail-status .work-state');
+ if(statusEl){statusEl.className='work-state is-'+status.kind;statusEl.innerHTML='<i></i>'+esc(status.label);}
+ const activeEl=$('task-detail-content').querySelector('.work-detail-status>span:last-child');
+ if(activeEl)activeEl.textContent=t.enabled?'Enabled':'Disabled';
+ $('task-detail-content').querySelectorAll('[data-run-task],[data-schedule-task]').forEach(button=>button.disabled=!t.enabled);
+ const fields=$('task-detail-content').querySelectorAll('.work-detail-block dl dd');
+ if(fields.length>=3){fields[0].textContent=t.lastAttempt?datetime(t.lastAttempt):'Never';fields[1].textContent=t.lastSuccess?datetime(t.lastSuccess):'Never';fields[2].textContent=t.next?datetime(t.next):'Not scheduled';}
+ return true;
+}
+function syncTaskToggleSurface(id){
+ refreshTaskRow(id);
+ refreshTaskCountersInPlace();
+ refreshTaskInspectorInPlace();
+}
+function refreshVisibleTasksInPlace(){
+ const rendered=[...$('task-list').querySelectorAll('[data-task-row]')].map(el=>el.dataset.taskRow);
+ const visible=state.tasks.filter(workMatched).filter(t=>state.taskGroup==='all' || workGroup(t)===state.taskGroup).map(t=>t.id);
+ // Rebuild only when actual membership/filter changes, never just because
+ // the enabled flag or a last-run timestamp was updated.
+ if(!rendered.length||rendered.length!==visible.length||visible.some(id=>!rendered.includes(id)))return false;
+ for(const id of rendered)refreshTaskRow(id);
+ refreshTaskCountersInPlace();
+ return true;
 }
 function renderTaskDetail(){
  const t=state.tasks.find(t=>t.id===state.selectedTaskId);
@@ -854,14 +936,25 @@ document.addEventListener('change',e=>{
  if(task){
    const profileId=state.profileId,enabled=task.checked,id=task.dataset.taskToggle;
    if(state.taskBusy.has(id))return;
-   state.taskBusy.add(id);task.disabled=true;
+   state.taskBusy.add(id);
+   state.taskRevision++;
+   // Disable both switches for this routine (row + inspector) during save.
+   document.querySelectorAll('[data-task-toggle]').forEach(input=>{
+     if(input.dataset.taskToggle===id)input.disabled=true;
+   });
    action(async()=>{
      try{
        await api('/api/task','POST',{action:'toggle',profileId,task:id,enabled});
-       if(profileId===state.profileId){const model=state.tasks.find(t=>t.id===id);if(model)model.enabled=enabled;}
-       await loadTasks();
-     }catch(error){task.checked=!enabled;throw error;}
-     finally{state.taskBusy.delete(id);if(profileId===state.profileId){renderTasks();renderTaskDetail();}}
+       if(profileId===state.profileId){
+         const model=state.tasks.find(t=>t.id===id);
+         if(model)model.enabled=enabled;
+       }
+     }finally{
+       state.taskBusy.delete(id);
+       // On failure the in-memory model still has the original value.
+       // Resync it; do not destroy the list or inspector just to flip a flag.
+       if(profileId===state.profileId)syncTaskToggleSurface(id);
+     }
    },'Routine '+(enabled?'enabled':'disabled'));
  }
  const taskOption=e.target.closest('[data-task-option]');
