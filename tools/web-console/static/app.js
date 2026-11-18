@@ -90,7 +90,6 @@ const taskOptionPrefixes = {
  ALLIANCE_SHOP:['ALLIANCE_SHOP_'],ALLIANCE_TECH:['ALLIANCE_TECH_'],ALLIANCE_TRIUMPH:['ALLIANCE_TRIUMPH_'],
  BEAR_TRAP:['BEAR_TRAP_'],CITY_SURVIVORS:['CITY_ACCEPT_NEW_SURVIVORS_'],
  CITY_UPGRADE_FURNACE:['CITY_UPGRADE_'],RESEARCH:['RESEARCH_'],
- DAILY_OVERVIEW_CHECK:['DAILY_OVERVIEW_CHECK_'],
  ONLINE_REWARDS:['ONLINE_REWARDS_'],FREE_DAILY_CHESTS:['FREE_DAILY_CHESTS_'],SMART_DAILY_OVERVIEW:['SMART_DAILY_OVERVIEW_'],ENDLESS_TRIAL:['ENDLESS_TRIAL_'],
  DAILY_MISSIONS:['DAILY_MISSION_'],EXPERT_AGNES_INTEL:['EXPERT_AGNES_'],
  EXPERT_ROMULUS_TAG:['EXPERT_ROMULUS_TAG_'],EXPERT_ROMULUS_TROOPS:['EXPERT_ROMULUS_TROOPS_'],
@@ -121,10 +120,10 @@ const taskOptionChoices = {
 };
 const taskOptionLabels = {
  ENDLESS_TRIAL_TARGET_ATTACKS_INT:'Daily Windhowler attacks (max 3)',
- DAILY_OVERVIEW_CHECK_OFFSET_INT:'Check interval (minutes)',
  ONLINE_REWARDS_CHECK_INTERVAL_INT:'Check interval (minutes)',
  FREE_DAILY_CHESTS_INTERVAL_INT:'Free chest check interval (minutes)',
- SMART_DAILY_OVERVIEW_INTERVAL_INT:'Check and dispatch interval (minutes)',
+ SMART_DAILY_OVERVIEW_INTERVAL_INT:'Check interval (minutes)',
+ SMART_DAILY_OVERVIEW_AUTO_DISPATCH_BOOL:'Automatically schedule available enabled tasks (off: inspect only)',
  "HERO_RECRUIT_ADVANCED_FREE_BOOL": "Use free Advanced Recruitment",
  "HERO_RECRUIT_EPIC_FREE_BOOL": "Use free Epic Recruitment",
  "HERO_RECRUIT_ADVANCED_KEYS_BOOL": "Use Advanced Recruitment Keys",
@@ -280,7 +279,7 @@ function optionControl(task,s){
 }
 // Curated work areas; the original Java task IDs remain authoritative.
 const workGroups=[
- {id:'daily',name:'Daily Tasks',icon:'◷',description:'Daily rewards and routine checks',ids:['DAILY_MISSIONS','MAIL_REWARDS','STOREHOUSE_CHEST','INTEL','CITY_SURVIVORS','DAILY_OVERVIEW_CHECK','SMART_DAILY_OVERVIEW','ONLINE_REWARDS','FREE_DAILY_CHESTS']},
+ {id:'daily',name:'Daily Tasks',icon:'◷',description:'Daily rewards and routine checks',ids:['DAILY_MISSIONS','MAIL_REWARDS','STOREHOUSE_CHEST','INTEL','CITY_SURVIVORS','SMART_DAILY_OVERVIEW','ONLINE_REWARDS','FREE_DAILY_CHESTS']},
  {id:'city',name:'City & Development',icon:'⌂',description:'Construction, research and Chief Orders',ids:['CITY_UPGRADE_FURNACE','CITY_UPGRADE_PRIORITISE_FURNACE','RESEARCH','CHIEF_ORDER_RUSH_JOB','CHIEF_ORDER_URGENT_MOBILIZATION','CHIEF_ORDER_PRODUCTIVITY_DAY']},
  {id:'army',name:'Troops',icon:'♜',description:'Training and healing',ids:['TRAINING_TROOPS','HEAL_TROOPS']},
  {id:'world',name:'World Map',icon:'◇',description:'Gathering, hunting and marches',ids:['GATHER_RESOURCES','GATHER_BOOST','BEAST_HUNTING','EVENT_POLAR_TERROR','EVENT_BERSERK_CRYPTID']},
@@ -291,13 +290,9 @@ const workGroups=[
  {id:'system',name:'System & Tests',icon:'⌘',description:'Technical and support routines',ids:['INITIALIZE','CREATE_CHARACTER','SKIP_TUTORIAL','DUMMY_TASK','TEST_HOOK_LOOP','CUSTOM_TASK','GAME_ANALYTICS_LABYRINTH','GAME_ANALYTICS_POWER']}
 ];
 const workLabels = {
- "SMART_DAILY_OVERVIEW": ["Smart Daily Overview","Read actionable Daily sidebar statuses and queue only already-enabled, unscheduled tasks. Never spends gems or items."],
+ "SMART_DAILY_OVERVIEW": ["Smart Daily Overview","Inspect the Daily tab and optionally queue available tasks that are already enabled. Turn off automatic scheduling for a read-only check. Never spends gems or items."],
  "ONLINE_REWARDS": ["Online Rewards","Check the Daily sidebar for available Online Rewards. Claim only if a free reward screen is verified."],
  "FREE_DAILY_CHESTS": ["Free Daily Chests","Visit Top-up Center → Daily Deals. Claim only the verified free chest, never paid packs or gem offers."],
- "DAILY_OVERVIEW_CHECK": [
-  "Daily Overview Check",
-  "Inspect the Daily tab for available tasks without spending resources."
- ],
  "ENDLESS_TRIAL": [
   "Endless Trial",
   "Attack Windhowler up to three times, then claim all daily challenges with one Claim."
@@ -557,7 +552,7 @@ const workLabels = {
 };
 const workAliases = {
  "HERO_RECRUITMENT": "recruit recruit keys heroes epic advanced",
- "DAILY_OVERVIEW_CHECK": "daily overview sidebar availability missions status",
+ "SMART_DAILY_OVERVIEW": "daily overview sidebar availability missions status read only inspect smart",
  "ENDLESS_TRIAL": "windhowler endless trial daily challenges three attacks claim rewards",
  "DAILY_MISSIONS": "daily missions quests tasks",
  "MAIL_REWARDS": "mail post rewards",

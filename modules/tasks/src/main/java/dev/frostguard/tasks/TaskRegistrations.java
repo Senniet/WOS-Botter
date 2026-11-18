@@ -60,7 +60,6 @@ public class TaskRegistrations {
             case VIP_POINTS -> new VipRoutine(profile, type);
             case MAIL_REWARDS -> new MailRewardsRoutine(profile, type);
             case DAILY_MISSIONS -> new DailyMissionRoutine(profile, type);
-            case DAILY_OVERVIEW_CHECK -> new DailyOverviewCheckRoutine(profile, type);
             case ONLINE_REWARDS -> new OnlineRewardsRoutine(profile, type);
             case FREE_DAILY_CHESTS -> new FreeDailyChestsRoutine(profile, type);
             case SMART_DAILY_OVERVIEW -> new SmartDailyOverviewRoutine(profile, type);

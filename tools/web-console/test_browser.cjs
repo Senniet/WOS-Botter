@@ -22,11 +22,14 @@ const {chromium}=require('playwright-core');
     await page.locator('#login-form button').click();
   }
   await page.locator('.nav-btn[data-page="tasks"]').waitFor({timeout:15000});
+  // The post-login navigation can settle after the sidebar is rendered.
+  // Wait until the deferred app script and task API have initialized.
+  await page.waitForFunction(()=>typeof state!=='undefined' && state.tasks.length>0,{timeout:15000});
   assert.match(await page.locator('.nav-btn[data-page="tasks"]').innerText(),/Task Manager/);
   await page.locator('.nav-btn[data-page="tasks"]').click();
   await page.locator('.work-task').first().waitFor({timeout:12000});
   const count=await page.locator('.work-task').count();
-  assert.equal(count,68,'All routines visible');
+  assert.equal(count,67,'All routines visible');
   assert.equal(await page.locator('.work-group').count(),10,'All areas + all menu');
   assert.equal((await page.locator('.work-heading h2').innerText()).trim(),'My Routines');
   assert.match(await page.locator('#task-categories').innerText(),/Daily Tasks/);
@@ -139,7 +142,7 @@ const {chromium}=require('playwright-core');
   await page.screenshot({path:path.join(os.homedir(),'.cache/survivalops-emulator-compact-mobile.png'),fullPage:false});
   const distinct=errs.filter(e=>!e.includes('ERR_CERT_AUTHORITY_INVALID')&&!e.includes('Failed to load resource: the server responded with a status of 401'));
   assert.equal(distinct.length,0,'No JavaScript or console errors: '+distinct.join('; '));
-  console.log('Browser PASS: 68 tasks, categories, detail panel, settings, search, favorites, desktop/mobile overflow, close panel.');
+  console.log('Browser PASS: 67 tasks, categories, detail panel, settings, search, favorites, desktop/mobile overflow, close panel.');
   console.log('Screenshots saved locally in ~/.cache/survivalops-redesign-*.png');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e.stack||e);process.exitCode=1});

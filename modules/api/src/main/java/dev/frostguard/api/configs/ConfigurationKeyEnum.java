@@ -115,8 +115,8 @@ public enum ConfigurationKeyEnum {
     // Opt-in only. Never run Windhowler attacks unless the profile explicitly enables this routine.
     ENDLESS_TRIAL_ENABLED_BOOL          ("false",   Boolean.class, ConfigCategory.DAILIES),
     ENDLESS_TRIAL_TARGET_ATTACKS_INT    ("3",       Integer.class, ConfigCategory.DAILIES),
-    DAILY_OVERVIEW_CHECK_BOOL          ("false",   Boolean.class, ConfigCategory.DAILIES),
-    DAILY_OVERVIEW_CHECK_OFFSET_INT    ("240",     Integer.class, ConfigCategory.DAILIES),
+    DAILY_OVERVIEW_CHECK_BOOL          ("false",   Boolean.class, ConfigCategory.DAILIES, true),
+    DAILY_OVERVIEW_CHECK_OFFSET_INT    ("240",     Integer.class, ConfigCategory.DAILIES, true),
     // Opt-in tasks: never enable or spend resources without the profile owner.
     ONLINE_REWARDS_ENABLED_BOOL         ("false",   Boolean.class, ConfigCategory.DAILIES),
     ONLINE_REWARDS_CHECK_INTERVAL_INT   ("90",      Integer.class, ConfigCategory.DAILIES),
@@ -124,6 +124,7 @@ public enum ConfigurationKeyEnum {
     FREE_DAILY_CHESTS_INTERVAL_INT      ("120",     Integer.class, ConfigCategory.DAILIES),
     SMART_DAILY_OVERVIEW_ENABLED_BOOL   ("false",   Boolean.class, ConfigCategory.DAILIES),
     SMART_DAILY_OVERVIEW_INTERVAL_INT   ("90",      Integer.class, ConfigCategory.DAILIES),
+    SMART_DAILY_OVERVIEW_AUTO_DISPATCH_BOOL ("true", Boolean.class, ConfigCategory.DAILIES),
     DAILY_LABYRINTH_BOOL                ("false",   Boolean.class,  ConfigCategory.DAILIES),
     DAILY_MISSION_AUTO_SCHEDULE_BOOL    ("false",   Boolean.class,  ConfigCategory.DAILIES),
     DAILY_MISSION_BOOL                  ("false",   Boolean.class,  ConfigCategory.DAILIES),

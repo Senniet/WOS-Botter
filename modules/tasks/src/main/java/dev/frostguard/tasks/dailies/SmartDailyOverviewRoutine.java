@@ -69,7 +69,16 @@ public class SmartDailyOverviewRoutine extends DelayedTask {
             reschedule(LocalDateTime.now().plusMinutes(15));
             return;
         }
-        dispatchReady(ready);
+        // Replaces the former read-only Daily Overview Check routine too.
+        // OFF = inspect visible statuses only; ON = queue existing enabled
+        // routines, never start a disabled task or spend resources directly.
+        boolean autoDispatch=Boolean.TRUE.equals(profile.getConfig(
+                ConfigurationKeyEnum.SMART_DAILY_OVERVIEW_AUTO_DISPATCH_BOOL,Boolean.class));
+        if(autoDispatch){
+            dispatchReady(ready);
+        }else{
+            logInfo("Smart Daily Overview: inspect-only mode; no tasks queued. Available="+ready);
+        }
         reschedule(LocalDateTime.now().plusMinutes(minutes));
     }
 

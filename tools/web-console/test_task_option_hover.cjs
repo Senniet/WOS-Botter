@@ -18,6 +18,7 @@ const assert=require('node:assert/strict');
       await page.locator('#password').fill(password);
       await page.locator('#login-form button').click();
     }
+    await page.waitForFunction(()=>typeof state!=='undefined' && state.tasks.length>0,{timeout:15000});
     await page.locator('[data-page="tasks"]').click();
     await page.locator('[data-task-row]').first().waitFor({timeout:15000});
     const audit=await page.evaluate(()=>{
@@ -44,7 +45,7 @@ const assert=require('node:assert/strict');
       state.selectedTaskId='HERO_RECRUITMENT';renderTaskDetail();renderTasks();
       return {checked,optionCount,issues,options};
     });
-    assert.equal(audit.checked,68);
+    assert.equal(audit.checked,67);
     assert.ok(audit.optionCount>150);
     assert.deepEqual(audit.issues,[]);
     assert.equal(await page.locator('.operations-tasks [title]').count(),0,'No native Task Manager tooltips on controls');

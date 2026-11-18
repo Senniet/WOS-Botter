@@ -40,6 +40,18 @@ class TaskIntervalDefaultsTest {
         assertEquals(60, profile.getConfig(ConfigurationKeyEnum.ALLIANCE_CHESTS_OFFSET_INT, Integer.class));
     }
 
+    @Test
+    void oldDailyOverviewSettingsRemainReadableButDoNotAppearAsNewTaskOptions() {
+        AccountDescriptor profile = new AccountDescriptor(1L);
+        profile.setConfig(ConfigurationKeyEnum.DAILY_OVERVIEW_CHECK_OFFSET_INT, 240);
+        assertEquals(240, profile.getConfig(ConfigurationKeyEnum.DAILY_OVERVIEW_CHECK_OFFSET_INT, Integer.class));
+        assertEquals(true, ConfigurationKeyEnum.DAILY_OVERVIEW_CHECK_BOOL.isLegacyOnly());
+        assertEquals(true, ConfigurationKeyEnum.DAILY_OVERVIEW_CHECK_OFFSET_INT.isLegacyOnly());
+        assertEquals(true, profile.getConfig(ConfigurationKeyEnum.SMART_DAILY_OVERVIEW_AUTO_DISPATCH_BOOL, Boolean.class));
+        assertEquals(null, TpDailyTaskEnum.fromNumericIdOrNull(38));
+        assertEquals(TpDailyTaskEnum.SMART_DAILY_OVERVIEW, TpDailyTaskEnum.fromId(211));
+    }
+
     private void assertMinutes(ConfigurationKeyEnum key, int expected) {
         assertEquals(Integer.toString(expected), key.getDefaultValue(), key.name());
     }

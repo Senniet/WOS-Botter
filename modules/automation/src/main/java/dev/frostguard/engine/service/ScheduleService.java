@@ -777,7 +777,8 @@ public class ScheduleService {
 					if (progress == null) {
 						continue;
 					}
-					TpDailyTaskEnum taskType = TpDailyTaskEnum.fromId(progress.getIdTpDailyTask());
+					// Historical routine IDs may remain in persisted progress after removal.
+					TpDailyTaskEnum taskType = TpDailyTaskEnum.fromNumericIdOrNull(progress.getIdTpDailyTask());
 					if (taskType != null && taskType.getConfigKey() != null
 							&& Boolean.TRUE.equals(account.getConfig(taskType.getConfigKey(), Boolean.class))) {
 						activeTaskNames.add(taskType.getName());
