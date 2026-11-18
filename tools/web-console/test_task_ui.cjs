@@ -60,6 +60,19 @@ const vm=require('node:vm');
  assert.match(ui['task-detail-content'].innerHTML,/Claim Recruitment Points Chest/);
  assert.match(ui['task-detail-content'].innerHTML,/data-task-option="HERO_RECRUIT_POINTS_CHEST_BOOL"/);
  assert.doesNotMatch(ui['task-list'].innerHTML,/data-task-option="HERO_RECRUIT_POINTS_CHEST_BOOL"/,'Behavior belongs only in inspector');
+ // Exhaustively verify all task detail controls: raw Java/Boolean keys are
+ // kept in data attributes for the API, never rendered as hover text.
+ let controlCount=0;
+ for(const task of tasks){
+   run('state.selectedTaskId='+JSON.stringify(task.id)+';renderTaskDetail()');
+   const html=ui['task-detail-content'].innerHTML;
+   assert.doesNotMatch(html,/task-option-key|title=|Technical key/,task.id+' exposed internal hover metadata');
+   assert.doesNotMatch(html,/\b(?:Boolean|Integer|Long|String)\b/,task.id+' exposed technical option types');
+   controlCount+=optionIds(task.id).length;
+ }
+ assert.ok(controlCount>50,'Task Manager should include multiple behavior controls');
+ run('state.selectedTaskId="HERO_RECRUITMENT";renderTaskDetail()');
+
  run('state.taskGroup="army";renderTasks()');
  assert.match(ui['task-list'].innerHTML,/Troop Training/);
  assert.match(ui['task-list'].innerHTML,/Heal Troops/);
@@ -84,5 +97,5 @@ const vm=require('node:vm');
  assert.match(page,/static\/operations.css/);
  assert.match(page,/id="task-detail-content"/);
  assert.match(css,/work-layout/);
- console.log('OK: '+tasks.length+' routines uniquely grouped, '+exposed.length+' with behavior controls, '+settings.length+' original configuration keys');
+ console.log('OK: '+tasks.length+' routines uniquely grouped, '+exposed.length+' with behavior controls, '+controlCount+' task options free of technical hover text, '+settings.length+' original configuration keys');
 })().catch(e=>{console.error(e);process.exitCode=1});

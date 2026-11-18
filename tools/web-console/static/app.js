@@ -252,12 +252,11 @@ function optionLabel(task,key){
 function optionControl(task,s){
  const label=optionLabel(task,s.key);
  const id='option-'+task.id+'-'+s.key;
- const help='<small class="task-option-key" title="Technical key">'+esc(s.key)+'</small>';
  if(s.type==='Boolean'){
-  return '<label class="task-option toggle-option" for="'+esc(id)+'"><span class="option-name">'+esc(label)+help+'</span><input type="checkbox" id="'+esc(id)+'" data-task-option="'+esc(s.key)+'" data-task-owner="'+esc(task.id)+'" '+(s.value==='true'?'checked':'')+'><span class="switch-track" aria-hidden="true"></span></label>';
+  return '<label class="task-option toggle-option" for="'+esc(id)+'"><span class="option-name">'+esc(label)+'</span><input type="checkbox" id="'+esc(id)+'" data-task-option="'+esc(s.key)+'" data-task-owner="'+esc(task.id)+'" '+(s.value==='true'?'checked':'')+'><span class="switch-track" aria-hidden="true"></span></label>';
  }
  const inputType=['Integer','Long'].includes(s.type)?'number':'text';
- return '<label class="task-option value-option" for="'+esc(id)+'"><span class="option-name">'+esc(label)+help+'</span><span class="value-controls"><input id="'+esc(id)+'" type="'+inputType+'" data-task-value="'+esc(s.key)+'" data-task-owner="'+esc(task.id)+'" value="'+esc(s.value)+'" aria-label="'+esc(label)+'"><button class="secondary small" data-save-task-value="'+esc(s.key)+'" data-task-owner="'+esc(task.id)+'">Save</button></span></label>';
+ return '<label class="task-option value-option" for="'+esc(id)+'"><span class="option-name">'+esc(label)+'</span><span class="value-controls"><input id="'+esc(id)+'" type="'+inputType+'" data-task-value="'+esc(s.key)+'" data-task-owner="'+esc(task.id)+'" value="'+esc(s.value)+'" aria-label="'+esc(label)+'"><button class="secondary small" data-save-task-value="'+esc(s.key)+'" data-task-owner="'+esc(task.id)+'">Save</button></span></label>';
 }
 // Curated work areas; the original Java task IDs remain authoritative.
 const workGroups=[
@@ -641,15 +640,14 @@ function renderTasks(){
   html+='<div class="work-section"><div class="work-section-header"><div><span class="work-section-icon">'+esc(group.icon)+'</span><strong>'+esc(group.name)+'</strong><small>'+esc(group.description)+'</small></div><span>'+items.filter(t=>t.enabled).length+' / '+items.length+' enabled</span></div>';
   for(const t of items){
    const status=workStatus(t),selected=state.selectedTaskId===t.id;
-   const note=t.executing?'Currently running':t.lastAttempt?'Last '+datetime(t.lastAttempt):'Not run yet';
    const next=t.enabled?(t.next?'Next '+datetime(t.next):'Not scheduled'):'Disabled';
    const opts=taskBehavior(t).length;
    html+='<div class="work-task'+(selected?' is-selected':'')+(t.enabled?' is-enabled':'')+'" data-task-row="'+esc(t.id)+'">'
-     +'<button class="work-star'+(state.taskStars.has(t.id)?' is-starred':'')+'" type="button" data-star-task="'+esc(t.id)+'" title="'+(state.taskStars.has(t.id)?'Remove from favorites':'Add to favorites')+'" aria-label="Favorite: '+esc(workName(t))+'" aria-pressed="'+state.taskStars.has(t.id)+'">'+(state.taskStars.has(t.id)?'★':'☆')+'</button>'
+     +'<button class="work-star'+(state.taskStars.has(t.id)?' is-starred':'')+'" type="button" data-star-task="'+esc(t.id)+'" aria-label="Favorite: '+esc(workName(t))+'" aria-pressed="'+state.taskStars.has(t.id)+'">'+(state.taskStars.has(t.id)?'★':'☆')+'</button>'
      +'<button class="work-task-open" type="button" data-open-task="'+esc(t.id)+'" aria-label="Open settings for '+esc(workName(t))+'"><strong>'+esc(workName(t))+'</strong><small>'+esc(workHelp(t))+'</small></button>'
      +'<span class="work-state is-'+status.kind+'"><i></i>'+status.label+'</span>'
-     +'<span class="work-task-timing" title="'+esc(note)+'">'+esc(next)+'</span>'
-     +'<label class="work-main-toggle" title="'+(t.toggleable?'Enable or disable routine':'Internal routine; cannot be enabled manually')+'"><input type="checkbox" data-task-toggle="'+esc(t.id)+'" aria-label="'+esc(workName(t))+' enable or disable" '+(t.enabled?'checked ':'')+(t.toggleable?'':'disabled ')+(state.taskBusy.has(t.id)?'disabled ':'')+'><span></span></label>'
+     +'<span class="work-task-timing">'+esc(next)+'</span>'
+     +'<label class="work-main-toggle"><input type="checkbox" data-task-toggle="'+esc(t.id)+'" aria-label="'+esc(workName(t))+' enable or disable" '+(t.enabled?'checked ':'')+(t.toggleable?'':'disabled ')+(state.taskBusy.has(t.id)?'disabled ':'')+'><span></span></label>'
      +'<button type="button" class="work-row-arrow" data-open-task="'+esc(t.id)+'" aria-label="Details for '+esc(workName(t))+'">'+(opts?'⚙':'›')+'</button></div>';
   }
   html+='</div>';
