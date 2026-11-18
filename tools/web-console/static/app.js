@@ -134,8 +134,8 @@ const taskOptionLabels = {
  "CITY_UPGRADE_RESERVE_PRODUCTION_BOOL": "Preserve production bonus",
  "ARENA_TASK_ATTACK_QUICK_DEPLOY_BOOL": "Quick deploy for Arena attacks",
  "ARENA_TASK_REFRESH_WITH_GEMS_BOOL": "Refresh Arena opponents with Gems",
- "ALLIANCE_AUTOJOIN_USE_ALL_TROOPS_BOOL": "Use all available troops",
- "ALLIANCE_AUTOJOIN_USE_PREDEFINED_FORMATION_BOOL": "Use preset troop formation",
+ "ALLIANCE_AUTOJOIN_QUEUES_INT": "Rally queues (1–6)",
+ "ALLIANCE_AUTOJOIN_USE_ALL_TROOPS_BOOL": "Use all available troops (off: specific formation)",
  "INTEL_RECALL_GATHER_TROOPS_BOOL": "Recall gatherers for Intel",
  "POLAR_TERROR_USE_STAMINA_ITEMS_BOOL": "Use Stamina items",
  "TUNDRA_TRUCK_USE_GEMS_BOOL": "Spend Gems on Tundra Truck",
@@ -244,7 +244,8 @@ function taskBehavior(task){
  return state.taskSettings.filter(s=>!s.secret && !/(?:_LAST_|_NEXT_|_CONSECUTIVE_FAILURES_|_STATE_|_TIME_LONG$)/.test(s.key) && s.key!==task.activationKey &&
      !activations.has(s.key) && prefixes.some(prefix=>s.key.startsWith(prefix)) &&
      !(task.id==='GATHER_RESOURCES'&&s.key.startsWith('GATHER_SPEED_')) &&
-     !(task.id==='CITY_UPGRADE_FURNACE'&&s.key==='CITY_UPGRADE_PRIORITISE_FURNACE_BOOL'));
+     !(task.id==='CITY_UPGRADE_FURNACE'&&s.key==='CITY_UPGRADE_PRIORITISE_FURNACE_BOOL') &&
+     !(task.id==='ALLIANCE_AUTOJOIN'&&s.key==='ALLIANCE_AUTOJOIN_USE_PREDEFINED_FORMATION_BOOL'));
 }
 function optionLabel(task,key){
  if(taskOptionLabels[key])return taskOptionLabels[key];
@@ -404,7 +405,7 @@ const workLabels = {
  ],
  "ALLIANCE_AUTOJOIN": [
   "Alliance Auto-Join",
-  "Automatically join eligible Alliance Rallies."
+  "Keeps the game's Alliance → War → Auto-Join active so the game can automatically join eligible rallies."
  ],
  "ALLIANCE_HELP_REQUEST": [
   "Alliance Help",
@@ -682,10 +683,11 @@ function renderTaskDetail(){
  $('task-detail-content').innerHTML='<header class="work-detail-head"><span>'+esc(group?.name||'Routine')+'</span><button type="button" data-close-task aria-label="Close details">×</button></header>'
    +'<div class="work-detail-title"><h3>'+esc(workName(t))+'</h3><p>'+esc(workHelp(t))+'</p></div>'
    +'<div class="work-detail-status"><span class="work-state is-'+status.kind+'"><i></i>'+esc(status.label)+'</span><span>'+(t.enabled?'Enabled':'Disabled')+'</span></div>'
-   +'<div class="work-detail-activation"><div><strong>Run automatically</strong><small>Runs when the bot is active and this routine is due.</small></div><label class="work-main-toggle"><input type="checkbox" data-task-toggle="'+esc(t.id)+'" aria-label="Run routine automatically" '+(t.enabled?'checked ':'')+(t.toggleable?'':'disabled ')+(state.taskBusy.has(t.id)?'disabled ':'')+'><span></span></label></div>'
+   +'<div class="work-detail-activation"><div><strong>'+(t.id==='ALLIANCE_AUTOJOIN'?'Keep in-game Auto-Join enabled':'Run automatically')+'</strong><small>'+(t.id==='ALLIANCE_AUTOJOIN'?'When the bot runs this task, it starts or checks Auto-Join in the game. Switching this on does not activate it instantly.':'Runs when the bot is active and this routine is due.')+'</small></div><label class="work-main-toggle"><input type="checkbox" data-task-toggle="'+esc(t.id)+'" aria-label="'+(t.id==='ALLIANCE_AUTOJOIN'?'Schedule in-game Auto-Join activation':'Run routine automatically')+'" '+(t.enabled?'checked ':'')+(t.toggleable?'':'disabled ')+(state.taskBusy.has(t.id)?'disabled ':'')+'><span></span></label></div>'
    +'<div class="work-detail-actions"><button type="button" class="primary" data-run-task="'+esc(t.id)+'" '+(!t.enabled?'disabled ':'')+'>▶ Run Now</button><button type="button" class="secondary" data-schedule-task="'+esc(t.id)+'" '+(!t.enabled?'disabled ':'')+'>◷ Schedule</button></div>'
    +'<div class="work-detail-block"><h4>EXECUTION</h4><dl><div><dt>Last attempt</dt><dd>'+esc(t.lastAttempt?datetime(t.lastAttempt):'Never')+'</dd></div><div><dt>Last success</dt><dd>'+esc(t.lastSuccess?datetime(t.lastSuccess):'Never')+'</dd></div><div><dt>Next run</dt><dd>'+esc(t.next?datetime(t.next):'Not scheduled')+'</dd></div></dl>'+(t.outcome==='FAILED'&&t.detail?'<p class="work-error-detail">'+esc(t.detail.slice(0,500))+'</p>':'')+'</div>'
    +'<div class="work-detail-options" data-task-options="'+esc(t.id)+'"><div class="work-detail-section-head"><h4>BEHAVIOR & OPTIONS</h4><span>'+options+' options</span></div>'
+   +(t.id==='ALLIANCE_AUTOJOIN'?'<p class="work-no-options">The game joins rallies automatically after Auto-Join is activated. This routine does not manually join individual rallies. Choose the number of rally queues and whether to use all troops or the game’s specific formation.</p>':'')
    +(settings.length?optionSection('Switches',booleans)+optionSection('Values and Limits',values):'<p class="work-no-options">This routine has no additional options. Use the switch above to enable or disable it.</p>')
    +'</div><p class="work-detail-help">Changes are saved to the selected profile immediately. Updating settings will not start a routine.</p>';
 }

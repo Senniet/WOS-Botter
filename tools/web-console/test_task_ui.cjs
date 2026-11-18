@@ -34,6 +34,8 @@ const vm=require('node:vm');
  mustHave('HEAL_TROOPS','HEAL_REQUEST_ALLIANCE_HELP_BOOL');
  mustHave('TRAINING_TROOPS','TRAIN_INFANTRY_BOOL');
  mustHave('ALLIANCE_AUTOJOIN','ALLIANCE_AUTOJOIN_USE_ALL_TROOPS_BOOL');
+ mustHave('ALLIANCE_AUTOJOIN','ALLIANCE_AUTOJOIN_QUEUES_INT');
+ mustNotHave('ALLIANCE_AUTOJOIN','ALLIANCE_AUTOJOIN_USE_PREDEFINED_FORMATION_BOOL');
  mustHave('EXPLORATION_CHEST','INT_EXPLORATION_CHEST_OFFSET');
  mustHave('GATHER_RESOURCES','GATHER_REMOVE_HEROS_BOOL');
  mustNotHave('HERO_RECRUITMENT','BOOL_HERO_RECRUITMENT');
@@ -71,6 +73,13 @@ const vm=require('node:vm');
    controlCount+=optionIds(task.id).length;
  }
  assert.ok(controlCount>50,'Task Manager should include multiple behavior controls');
+ run('state.selectedTaskId="ALLIANCE_AUTOJOIN";renderTaskDetail()');
+ assert.match(ui['task-detail-content'].innerHTML,/Keep in-game Auto-Join enabled/);
+ assert.match(ui['task-detail-content'].innerHTML,/does not activate it instantly/);
+ assert.match(ui['task-detail-content'].innerHTML,/does not manually join individual rallies/);
+ assert.match(ui['task-detail-content'].innerHTML,/Rally queues \(1–6\)/);
+ assert.match(ui['task-detail-content'].innerHTML,/Use all available troops \(off: specific formation\)/);
+ assert.doesNotMatch(ui['task-detail-content'].innerHTML,/ALLIANCE_AUTOJOIN_USE_PREDEFINED_FORMATION_BOOL/);
  run('state.selectedTaskId="HERO_RECRUITMENT";renderTaskDetail()');
 
  run('state.taskGroup="army";renderTasks()');
