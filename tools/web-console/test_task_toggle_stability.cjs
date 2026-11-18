@@ -4,6 +4,7 @@ const fs=require('node:fs');
 const os=require('node:os');
 const path=require('node:path');
 const {chromium}=require('playwright-core');
+const {execFileSync}=require('node:child_process');
 (async()=>{
  const browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_HEADLESS_SHELL||undefined,args:['--no-sandbox']});
  try {
@@ -59,6 +60,38 @@ const {chromium}=require('playwright-core');
   assert.equal(after.scroll,before.scroll,'Scrollbar does not jump on toggling');
   assert.ok(after.visible);
   assert.ok(writes.some(w=>w.task===target&&w.enabled===!original));
+  // Regression for the REAL black-panel bug: the outer work-list used to
+  // have overflow:hidden and was silently scrolled to ~3000px when clicking
+  // a checkbox inside the inner scroll pane. The DOM still had all 69 tasks,
+  // but nothing in the task list was actually visible.
+  async function assertVisibleList(stage){
+    const geometry=await page.evaluate(()=>{
+      const list=document.querySelector('#task-list'),outer=list.parentElement;
+      const r=list.getBoundingClientRect(),p=outer.getBoundingClientRect();
+      return {x:r.x,y:r.y,w:r.width,h:r.height,outerY:p.y,outerH:p.height,
+        outerScrollTop:outer.scrollTop,innerScrollTop:list.scrollTop,
+        outerOverflow:getComputedStyle(outer).overflow};
+    });
+    assert.equal(geometry.outerScrollTop,0,stage+': outer wrapper must never scroll');
+    assert.equal(geometry.outerOverflow,'clip',stage+': outer wrapper must clip without scrolling');
+    assert.ok(Math.abs(geometry.y-(geometry.outerY+43))<15,
+      stage+': inner task list was pushed outside its wrapper: '+JSON.stringify(geometry));
+    const capture=await page.screenshot();
+    const crop=`${Math.round(geometry.w-16)}x${Math.round(geometry.h-16)}+${Math.round(geometry.x+8)}+${Math.round(geometry.y+8)}`;
+    const brightness=Number(execFileSync('convert',['png:-','-crop',crop,'+repage',
+      '-colorspace','Gray','-threshold','58%','-format','%[fx:mean]','info:'],
+      {input:capture}).toString());
+    assert.ok(brightness>0.006,stage+': task list is a black/unpainted panel: '+brightness);
+    console.log('PAINT CHECK',stage,'bright fraction',brightness.toFixed(4),'inner scroll',geometry.innerScrollTop);
+  }
+  await assertVisibleList('first switch');
+  await page.locator('[data-task-row="'+target+'"] label.work-main-toggle').click();
+  await page.waitForFunction(()=>state.taskBusy.size===0,{timeout:10000});
+  await assertVisibleList('second switch');
+  await page.locator('[data-task-row="'+target+'"] label.work-main-toggle').click();
+  await page.waitForFunction(()=>state.taskBusy.size===0,{timeout:10000});
+  await assertVisibleList('third switch');
+
   // A normal background refresh should preserve the very same task row too.
   await page.evaluate(()=>loadTasks());
   await page.waitForTimeout(220);

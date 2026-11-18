@@ -96,7 +96,8 @@ body.is-emulator-page .footer{display:none}
  .emu-external-link{font-size:10px;padding:6px 7px}
 }
 
-/* All Tasks can contain dozens of rows inside a height-limited scroller.
-   Paint containment prevents that internal scroll extent from leaking into
-   the document and creating thousands of pixels of empty page scrolling. */
-.operations-tasks .work-list { contain: paint; }
+/* Long All Tasks lists may scroll only in the INNER task-list.
+   overflow:hidden created a second, hidden scroll container: Chrome could
+   scroll the outer panel 3,000px on a task switch, leaving a black panel.
+   Clip cannot scroll; layout containment still prevents phantom page height. */
+.operations-tasks .work-list { contain: layout; overflow: clip; }
