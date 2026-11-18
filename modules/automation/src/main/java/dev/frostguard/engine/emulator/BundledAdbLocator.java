@@ -10,6 +10,13 @@ public final class BundledAdbLocator {
 
     public static String find(String workingDirectory, String javaHome,
             String applicationPath, String consolePath) {
+        // Server installations use a trusted, explicitly configured Linux adb binary.
+        String configured = System.getProperty("frostguard.adb.path", "");
+        if (!configured.isBlank()) {
+            Path path = Path.of(configured).toAbsolutePath().normalize();
+            if (Files.isRegularFile(path) && Files.isExecutable(path)) return path.toString();
+            throw new IllegalStateException("Configured adb binary is not executable");
+        }
         LinkedHashSet<Path> roots = new LinkedHashSet<>();
         add(roots, applicationPath);
         add(roots, javaHome);
@@ -24,13 +31,16 @@ public final class BundledAdbLocator {
                 root.resolve("lib/adb/adb.exe"),
                 root.resolve("tools/adb/adb.exe"),
                 root.resolve("adb/adb.exe"),
-                root.resolve("packaging/desktop/target/input/lib/adb/adb.exe")
+                root.resolve("packaging/desktop/target/input/lib/adb/adb.exe"),
+                root.resolve("tools/adb/adb"),
+                root.resolve("app/lib/adb/adb"),
+                root.resolve("lib/adb/adb")
             };
             for (Path candidate : candidates) {
                 if (Files.isRegularFile(candidate)) return candidate.toAbsolutePath().normalize().toString();
             }
         }
-        throw new IllegalStateException("Bundled adb.exe not found. Reinstall SurvivalOps with its Android platform tools (app/lib/adb).");
+        throw new IllegalStateException("Android platform-tools adb not found. Set -Dfrostguard.adb.path on Linux or reinstall SurvivalOps.");
     }
 
     private static void add(LinkedHashSet<Path> roots, String raw) {

@@ -27,6 +27,25 @@ class BundledAdbLocatorTest {
                 BundledAdbLocator.find(temp.toString(), "", "", ""));
     }
 
+    @Test void resolvesConfiguredLinuxAdbWithoutChangingBundledWindowsRules() throws Exception {
+        Path executable = temp.resolve("platform-tools/adb");
+        Files.createDirectories(executable.getParent());
+        Files.createFile(executable);
+        org.junit.jupiter.api.Assumptions.assumeTrue(executable.toFile().setExecutable(true));
+        String previous = System.getProperty("frostguard.adb.path");
+        try {
+            System.setProperty("frostguard.adb.path", executable.toString());
+            assertEquals(executable.toAbsolutePath().toString(),
+                    BundledAdbLocator.find("", "", "", ""));
+            System.setProperty("frostguard.adb.path", temp.resolve("nonexistent").toString());
+            assertThrows(IllegalStateException.class,
+                    () -> BundledAdbLocator.find("", "", "", ""));
+        } finally {
+            if (previous == null) System.clearProperty("frostguard.adb.path");
+            else System.setProperty("frostguard.adb.path", previous);
+        }
+    }
+
     @Test void failsClearlyWhenNotBundled() {
         assertThrows(IllegalStateException.class, () -> BundledAdbLocator.find(
                 temp.toString(), "", "", ""));

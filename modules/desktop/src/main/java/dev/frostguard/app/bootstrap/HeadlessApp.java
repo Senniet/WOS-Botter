@@ -35,6 +35,17 @@ public class HeadlessApp {
 		// 3. Initialize Telegram Bot manually
 		initializeTelegramBot();
 
+		for (String argument : args) {
+			if ("--web".equalsIgnoreCase(argument)) {
+				try {
+					dev.frostguard.app.web.WebConsoleServer.start();
+				} catch (IOException failure) {
+					throw new IllegalStateException("Cannot start local web console", failure);
+				}
+				break;
+			}
+		}
+
 		boolean autostart = false;
 		for (String arg : args) {
 			if ("--autostart".equalsIgnoreCase(arg)) {

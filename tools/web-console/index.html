@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="nl"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SurvivalOps Web</title><link rel="stylesheet" href="/static/style.css">
+</head><body>
+<div id="app" class="app">
+  <aside class="sidebar">
+    <div class="identity"><span class="brand-mark">S</span><span><b>SurvivalOps</b><small>WEB CONTROL CENTER</small></span></div>
+    <nav aria-label="Navigatie">
+      <button class="nav-btn active" data-page="dashboard"><span class="nav-icon">◫</span> Overzicht</button>
+      <button class="nav-btn" data-page="tasks"><span class="nav-icon">☷</span> Takenbeheer</button>
+      <button class="nav-btn" data-page="custom"><span class="nav-icon">⚒</span> Eigen taken</button>
+      <button class="nav-btn" data-page="emulator"><span class="nav-icon">▣</span> Serve-Emu</button>
+      <button class="nav-btn" data-page="statistics"><span class="nav-icon">▥</span> Statistieken</button>
+      <button class="nav-btn" data-page="profiles"><span class="nav-icon">♙</span> Profielen</button>
+      <button class="nav-btn" data-page="settings"><span class="nav-icon">⚙</span> Instellingen</button>
+      <button class="nav-btn" data-page="logs"><span class="nav-icon">▤</span> Logboek</button>
+      <button class="nav-btn" data-page="qa"><span class="nav-icon">◇</span> Diagnostiek</button>
+    </nav>
+    <div class="sidebar-footer"><span class="status-led"></span><span id="side-status">Verbinding controleren…</span><small>Java-engine op webserver</small></div>
+  </aside>
+  <main class="main">
+    <header class="topbar"><button class="mobile-menu" id="mobile-menu" aria-label="Menu">☰</button><div><span class="eyebrow">SURVIVALOPS / <span id="breadcrumb">OVERZICHT</span></span><h1 id="page-title">Overzicht</h1></div><div class="top-actions"><span class="clock" id="clock"></span><span class="pill" id="connection">Verbinden…</span><button id="logout" class="small ghost" title="Uitloggen">Uitloggen</button></div></header>
+    <div id="notice" class="notice" role="status" hidden></div>
+    <section data-view="dashboard" class="page active">
+      <div class="hero"><div><span class="eyebrow">SURVIVALOPS COMMAND CENTER</span><h2>Alles onder controle.</h2><p>De originele SurvivalOps-taken draaien op de server. Beheer de scheduler, bekijk de uitvoering en volg Serve-Emu live.</p><div class="actions"><button id="start" class="primary">▶ Bot starten</button><button id="pause" class="secondary">Ⅱ Pauzeren</button><button id="resume" class="secondary">↪ Hervatten</button><button id="stop" class="danger">■ Stoppen</button></div></div><div class="hero-emblem"><span>S</span><small>WEB EDITION</small></div></div>
+      <div class="metric-grid">
+        <article class="metric"><span>Engine</span><strong id="metric-engine">—</strong><small id="metric-engine-sub">Status laden</small></article>
+        <article class="metric"><span>Geconfigureerde taken</span><strong id="metric-tasks">—</strong><small id="metric-tasks-sub">Taken in de catalogus</small></article>
+        <article class="metric"><span>Profielen</span><strong id="metric-profiles">—</strong><small id="metric-profiles-sub">Serve-Emu</small></article>
+        <article class="metric"><span>Emulator</span><strong id="metric-device">—</strong><small id="metric-device-sub">ADB-verbinding</small></article>
+      </div>
+      <div class="split-layout">
+        <article class="panel"><div class="panel-heading"><h3>Actieve taakrijen</h3><span class="muted" id="queue-count">0 wachtrijen</span></div><div id="queues" class="panel-content empty-message">Er draaien nog geen taken.</div></article>
+        <article class="panel"><div class="panel-heading"><h3>Direct naar</h3></div><div class="quick-links"><button data-go="tasks">☷ <span>Taken beheren <small>In- en uitschakelen, uitvoeren</small></span>›</button><button data-go="emulator">▣ <span>Live Serve-Emu <small>Screenshot en bediening</small></span>›</button><button data-go="qa">◇ <span>Diagnostiek <small>Task Coach en screenshots</small></span>›</button></div></article>
+      </div>
+    </section>
+    <section data-view="tasks" class="page">
+      <div class="section-intro"><h2>Alle taken</h2><p>Dit zijn de originele Java-routines uit dezelfde codebasis als de MSI, inclusief bestaande herkenning, scheduling en retrylogica.</p></div>
+      <div class="toolbar"><label class="compact-label">Profiel <select id="tasks-profile"></select></label><input id="tasks-search" type="search" placeholder="Zoek taak of categorie…"><select id="tasks-category"><option value="">Alle categorieën</option></select><label class="checkbox-label"><input id="tasks-enabled" type="checkbox"> Alleen ingeschakeld</label></div>
+      <div class="panel task-panel"><div class="task-heading"><span>Taak</span><span>Laatste resultaat</span><span>Volgende uitvoering</span><span>Acties</span></div><div id="task-list"></div></div>
+    </section>
+    <section data-view="custom" class="page">
+      <div class="section-intro"><h2>Eigen taken</h2><p>Custom Tasks uit de oorspronkelijke Task Builder worden geladen door dezelfde Java-engine. In- en uitschakelen, eerste start, interval en prioriteit blijven bewaard.</p></div>
+      <div class="panel"><div class="panel-heading"><h3>Opgeslagen eigen taken</h3><button id="custom-refresh" class="secondary small">↻ Verversen</button></div><div id="custom-task-list" class="panel-content">Laden…</div></div>
+      <div class="panel builder-panel"><div class="panel-heading"><h3>Nieuwe Task Builder-workflow</h3><span class="muted">Dezelfde Java codegenerator als de MSI</span></div><div class="panel-content"><form id="builder-form" class="form-grid"><div class="builder-row"><label>Workflow naam (letters/cijfers)<input required id="builder-name" maxlength="41" pattern="[A-Za-z][A-Za-z0-9]{2,40}" placeholder="Bijvoorbeeld MijnMails" autocomplete="off"></label><label>Startlocatie<select id="builder-location"><option>ANY</option><option>HOME</option><option>WORLD</option></select></label></div><p class="hint">Bouw een niet-actieve Java-routine op uit stappen. Pas na opslaan, compileren en expliciet inschakelen wordt de taak meegenomen in de scheduler.</p><div class="builder-actions"><button type="button" class="secondary small" data-add-step="TAP_POINT">+ Tik</button><button type="button" class="secondary small" data-add-step="WAIT">+ Wacht</button><button type="button" class="secondary small" data-add-step="SWIPE">+ Veeg</button><button type="button" class="secondary small" data-add-step="BACK_BUTTON">+ Terug</button></div><div id="builder-steps" class="builder-steps"></div><button class="primary" type="submit">Java-taak opslaan en compileren</button></form></div></div>
+      <p class="hint">De ingebouwde routines staan in Takenbeheer. Het geavanceerde MSI-graafontwerp met OCR-vertakkingen en template-opname is niet onderdeel van deze eenvoudige browser-editor.</p>
+    </section>
+    <section data-view="emulator" class="page">
+      <div class="section-intro"><h2>Serve-Emu</h2><p>Android 16 / Whiteout Survival, rechtstreeks gekoppeld via de bestaande TrueNAS ADB-router.</p></div>
+      <div class="emu-layout">
+        <article class="panel emu-panel"><div class="panel-heading"><h3>Live scherm</h3><span id="emu-connection" class="pill">Verbinding controleren</span></div><div class="emu-center"><div class="phone-frame"><img id="emu-image" alt="Live scherm van Whiteout Survival" draggable="false"></div></div><div class="emu-buttons"><button id="screen-refresh" class="secondary">↻ Vernieuwen</button><button id="emu-back" class="secondary">← Terug</button><label class="checkbox-label"><input id="auto-frame" type="checkbox" checked> Automatisch bijwerken</label></div><p class="hint">Handmatige aanrakingen werken alleen wanneer de bot volledig gestopt is. Zo voorkomen we botsingen met lopende taken.</p></article>
+        <article class="panel"><div class="panel-heading"><h3>Serve-Emu beheer</h3></div><div class="panel-content"><div class="detail-row"><span>Type</span><strong>Serve-Emu / Android 16</strong></div><div class="detail-row"><span>ADB</span><strong id="emu-endpoint">—</strong></div><div class="detail-row"><span>Scherm</span><strong>720 × 1280</strong></div><div class="detail-row"><span>Weergave</span><strong id="emu-mode">Live capture</strong></div><p class="hint">De volledige Serve-Emu-interface voor VNC, emulatorinstellingen en beheer kun je apart openen. Deze webapp gebruikt dezelfde emulator, geen tweede Android-installatie.</p><a class="link-button" href="https://192.168.1.20:8448/" target="_blank" rel="noopener noreferrer">Serve-Emu beheer openen ↗</a></div></article>
+      </div>
+    </section>
+    <section data-view="statistics" class="page"><div class="section-intro"><h2>Uitvoeringsstatistieken</h2><p>De bestaande statistiekregistratie van de Java-engine, per profiel met aantallen, gemiddelde duur en OCR-/templatefouten.</p></div><div class="toolbar"><label class="compact-label">Profiel <select id="statistics-profile"></select></label><button id="statistics-refresh" class="secondary small">↻ Verversen</button><button id="statistics-reset" class="danger small">Statistieken wissen</button></div><div id="statistics-stats" class="metric-grid"></div><div class="split-layout"><article class="panel"><div class="panel-heading"><h3>Taakprestaties</h3></div><div class="panel-content stats-scroll" id="statistics-routines">Nog geen uitvoering geregistreerd.</div></article><article class="panel"><div class="panel-heading"><h3>Extra tellers</h3></div><div class="panel-content" id="statistics-counters">Geen tellers beschikbaar.</div></article></div></section>
+    <section data-view="profiles" class="page">
+      <div class="section-intro"><h2>Profielen</h2><p>Gekoppeld aan Serve-Emu. De scheduler bewaart alle profielinstellingen en taakplanningen in zijn eigen database.</p></div>
+      <div class="split-layout">
+        <article class="panel"><div class="panel-heading"><h3>Bestaande profielen</h3></div><div id="profiles-list" class="panel-content">Laden…</div></article>
+        <article class="panel"><div class="panel-heading"><h3>Profiel aanmaken of aanpassen</h3></div><form id="profile-form" class="panel-content form-grid"><input id="profile-id" type="hidden"><label>Profielnaam<input required id="profile-name" placeholder="Bijvoorbeeld WOS Main" maxlength="80"></label><label>Serve-Emu slot<input value="0" disabled></label><label class="checkbox-label"><input type="checkbox" id="profile-enabled"> Profiel activeren voor de scheduler</label><button type="submit" class="primary">Profiel opslaan</button><button type="button" class="ghost" id="profile-new">Nieuw profiel</button></form></article>
+      </div>
+    </section>
+    <section data-view="settings" class="page">
+      <div class="section-intro"><h2>Instellingen</h2><p>Alle bestaande instelsleutels van de MSI zijn beschikbaar, met behoud van dezelfde validatie en database. Gevoelige waarden worden nooit teruggestuurd.</p></div>
+      <div class="panel settings-panel"><div class="toolbar"><label class="compact-label">Instellingen voor <select id="settings-profile"><option value="">Globaal (Serve-Emu)</option></select></label><input type="search" id="settings-search" placeholder="Zoek instelling…" ><select id="settings-type"><option value="">Alle soorten</option><option value="Boolean">Schakelaars</option><option value="Integer">Getallen</option><option value="String">Tekst</option></select></div><div id="settings-list" class="settings-list"></div></div>
+      <div class="panel credentials-panel"><div class="panel-heading"><h3>Toegang beveiligen</h3></div><form id="password-form" class="panel-content form-grid"><p class="text-muted">Deze wijziging geldt alleen voor de SurvivalOps-webomgeving, niet voor het bestaande QA-dashboard.</p><label>Huidig wachtwoord<input type="password" id="password-current" required autocomplete="current-password"></label><label>Nieuw wachtwoord (minimaal 14 tekens)<input type="password" id="password-new" minlength="14" maxlength="128" required autocomplete="new-password"></label><label>Nieuw wachtwoord herhalen<input type="password" id="password-confirm" minlength="14" maxlength="128" required autocomplete="new-password"></label><button class="secondary" type="submit">Wachtwoord wijzigen</button></form></div>
+    </section>
+    <section data-view="logs" class="page"><div class="section-intro"><h2>Logboek</h2><p>De laatste berichten uit de server-side Java-engine.</p></div><div class="panel"><div class="panel-heading"><h3>Live runtime logs</h3><button id="logs-refresh" class="secondary small">↻ Verversen</button></div><pre id="logs-body" class="log-lines">Laden…</pre></div></section>
+    <section data-view="qa" class="page">
+      <div class="section-intro"><h2>Diagnostiek &amp; Task Coach</h2><p>De bestaande SurvivalOps-diagnostiek, de gedeelde QA-database en bewijsafbeeldingen worden hier rechtstreeks (alleen-lezen) getoond.</p></div>
+      <div class="qa-head"><div id="qa-stats" class="qa-stat-grid"></div><button id="qa-refresh" class="secondary small">↻ Diagnostiek verversen</button></div>
+      <div class="split-layout qa-overview"><article class="panel"><div class="panel-heading"><h3>Openstaande fouten</h3><span class="muted">Uit QA-tracker</span></div><div id="qa-issues" class="qa-scroll panel-content">Laden…</div></article><article class="panel"><div class="panel-heading"><h3>Recente evidence</h3><span class="muted">Log &amp; screenshots</span></div><div id="qa-diagnostics" class="qa-scroll panel-content">Laden…</div></article></div>
+      <div class="panel panel-content qa-extra"><h3>Gezamenlijke Task Coach &amp; QA-beoordeling</h3><p>Voor handmatig afvinken, regressiecontroles, herkenningstemplates en de volledige testronde blijft het bestaande gedeelde QA-dashboard beschikbaar. De webomgeving verandert deze verificatiestatussen niet automatisch.</p><a class="link-button" target="_blank" rel="noopener noreferrer" href="https://10.0.0.100:9097/">Volledig QA-dashboard openen ↗</a></div>
+    </section>
+    <dialog id="schedule-dialog" class="qa-dialog schedule-dialog"><div class="dialog-head"><h3>Taak plannen</h3><button id="schedule-dialog-close" class="ghost small" type="button">Sluiten ×</button></div><form id="schedule-form" class="form-grid"><p id="schedule-description" class="text-muted"></p><input id="schedule-task" type="hidden"><label>Datum en tijd<input id="schedule-when" type="datetime-local" required></label><div class="actions"><button class="primary" type="submit">Planning opslaan</button><button class="ghost" type="button" id="schedule-cancel">Annuleren</button></div></form></dialog>
+    <dialog id="qa-dialog" class="qa-dialog"><div class="dialog-head"><h3 id="qa-dialog-title">Diagnostiek</h3><button class="ghost small" id="qa-dialog-close">Sluiten ×</button></div><div id="qa-dialog-info" class="hint"></div><img id="qa-dialog-image" alt="Diagnostische screenshot" hidden><pre id="qa-dialog-logs" class="log-lines"></pre></dialog>
+    <footer class="footer">SurvivalOps Web · Original Java Engine · Serve-Emu only <span id="last-sync"></span></footer>
+  </main>
+</div><script src="/static/app.js" defer></script>
+</body></html>
