@@ -66,6 +66,29 @@ class DailyLabyrinthFrameTest {
         assertTrue(DailyLabyrinthFrame.nextStage(nextPressed).isFound());
         assertFalse(DailyLabyrinthFrame.cave(nextPressed));
     }
+    @Test void realDefeatIsPositiveAndMutuallyExclusiveWithVictory()throws Exception{
+        var lose=capture("defeat-current-redacted.png");
+        assertTrue(DailyLabyrinthFrame.defeat(lose),"Cave of Monsters silver Defeat with Retry must be recognized");
+        assertFalse(DailyLabyrinthFrame.victory(lose));
+        assertFalse(DailyLabyrinthFrame.cave(lose));
+        assertFalse(DailyLabyrinthFrame.challenge(lose).isFound());
+        assertFalse(DailyLabyrinthFrame.deploy(lose).isFound());
+    }
+    @Test void defeatDoesNotMatchVictoryCaveOrFormation()throws Exception{
+        assertFalse(DailyLabyrinthFrame.defeat(capture("victory-redacted.png")));
+        assertFalse(DailyLabyrinthFrame.defeat(capture("cave-ready-redacted.png")));
+        assertFalse(DailyLabyrinthFrame.defeat(capture("formation-redacted.png")));
+        assertFalse(DailyLabyrinthFrame.defeat(null));
+    }
+    @Test void neutralTapAfterDefeatShowsSafeCaveForExit()throws Exception{
+        var after=capture("cave-after-defeat-redacted.png");
+        assertTrue(DailyLabyrinthFrame.cave(after));
+        assertFalse(DailyLabyrinthFrame.defeat(after));
+        assertTrue(DailyLabyrinthFrame.challenge(after).isFound());
+    }
+    @Test void actualCityHUDVisibleAfterClosingCave()throws Exception{
+        assertTrue(DailyLabyrinthFrame.home(capture("home-after-defeat-redacted.png")));
+    }
     @Test void caveReappearsAfterVictoryWasDismissed()throws Exception{
         var after=capture("cave-after-victory-redacted.png");
         assertTrue(DailyLabyrinthFrame.cave(after));

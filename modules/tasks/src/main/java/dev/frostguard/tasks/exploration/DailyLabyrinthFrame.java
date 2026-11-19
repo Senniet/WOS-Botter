@@ -52,6 +52,14 @@ public final class DailyLabyrinthFrame {
         return find(f,TemplatesEnum.LABYRINTH_CURRENT_VICTORY,180,265,560,492,90).isFound()
             && find(f,TemplatesEnum.LABYRINTH_CURRENT_RESULT_NEXT,385,778,700,1004,89).isFound();
     }
+    /** Positive defeat state: BOTH the silver Defeat heading and its blue
+     * Retry CTA must be present. Retry is evidence ONLY, never a tap target.
+     * The dialog dismisses via a neutral area at (354,810), proven on ADB.
+     */
+    public static boolean defeat(RawImageData f){
+        return find(f,TemplatesEnum.LABYRINTH_CURRENT_DEFEAT,190,260,545,475,90).isFound()
+            && find(f,TemplatesEnum.LABYRINTH_CURRENT_DEFEAT_RETRY,380,905,690,1090,89).isFound();
+    }
     public static ImageSearchResultData nextStage(RawImageData f){
         if(!victory(f))return ImageSearchResultData.miss();
         return find(f,TemplatesEnum.LABYRINTH_CURRENT_RESULT_NEXT,385,778,700,1004,89);

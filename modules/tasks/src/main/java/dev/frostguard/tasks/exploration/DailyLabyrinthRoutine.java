@@ -25,8 +25,13 @@ public final class DailyLabyrinthRoutine extends DelayedTask {
     private static final PointData EXIT_CAVE = new PointData(680,36);
     private static final PointData BACK_OVERVIEW = new PointData(41,36);
     private static final PointData BACK_FORMATION = new PointData(41,36);
+    // Verified on a real 19 Nov 2026 silver Defeat overlay. This is outside
+    // both lower CTAs (Battle Report and Retry) and the Pet Power suggestions.
+    private static final PointData DEFEAT_NEUTRAL_DISMISS = new PointData(354,810);
     private static final int ENTRY_DELAY_MS=440;
     private boolean completedVerified;
+    private boolean defeatVerified;
+    private boolean defeatDismissAttempted;
 
     public DailyLabyrinthRoutine(AccountDescriptor profile,TpDailyTaskEnum type){super(profile,type);}
 
@@ -36,11 +41,27 @@ public final class DailyLabyrinthRoutine extends DelayedTask {
     @Override protected boolean acceptsInjections(){return false;}
     @Override protected void execute(){
         completedVerified=false;
+        defeatVerified=false;
+        defeatDismissAttempted=false;
         runExclusiveUiTransaction(this::runCaveOfMonsters);
     }
 
     private void runCaveOfMonsters(){
         try {
+            // A previous interrupted run can leave Cave Defeat on-screen.
+            // Recover it BEFORE navigation, otherwise the next attempt can
+            // become trapped trying to find Home behind the defeat overlay.
+            if(DailyLabyrinthFrame.defeat(emuManager.captureScreen(EMULATOR_NUMBER))){
+                defeatVerified=true;
+                logInfo("Labyrinth: pending Defeat from an earlier run detected; dismissing without Retry");
+                if(!dismissDefeatToCave()){
+                    defer("Pending Defeat could not be dismissed safely; Retry forbidden",90);
+                    return;
+                }
+                markWorkIncomplete("Labyrinth: previous Defeat recovered; no repeated challenge");
+                reschedule(GameTimeUtils.dailyResetTime());
+                return;
+            }
             navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME,this::checkPreemption);
             if(!navigationHelper.navigateToLabyrinth()){
                 defer("Labyrinth Daily sidebar destination not found",60);return;
@@ -84,11 +105,24 @@ public final class DailyLabyrinthRoutine extends DelayedTask {
             // One normal pet-stat battle, no resource/item/gem purchases.
             logInfo("Labyrinth Cave of Monsters: deploying one positively verified daily battle");
             tapNear(deploySecond.getPoint(),4);
-            RawImageData win=waitForVictory();
-            if(win==null){
-                defer("Cave battle was launched, but no Victory result verified; do not deploy twice",120);
+            RawImageData resultScreen=waitForBattleOutcome();
+            if(resultScreen==null){
+                defer("Cave battle launched but neither Victory nor Defeat was verified; no repeat Deploy",120);
                 return;
             }
+            if(DailyLabyrinthFrame.defeat(resultScreen)){
+                defeatVerified=true;
+                logInfo("Labyrinth Cave of Monsters: actual Defeat detected; never clicking Retry");
+                if(!dismissDefeatToCave()){
+                    defer("Defeat detected but Cave return is unverified; no Retry",90);
+                    return;
+                }
+                logInfo("Labyrinth: Defeat overlay dismissed; Cave stage map verified");
+                markWorkIncomplete("Labyrinth battle lost; Retry skipped; waiting for next reset");
+                reschedule(GameTimeUtils.dailyResetTime());
+                return;
+            }
+            RawImageData win=resultScreen;
             completedVerified=true;
             logInfo("Labyrinth Cave of Monsters: actual Victory result confirmed");
             // Next selects the next stage. It is not Auto-Challenge, which
@@ -127,6 +161,13 @@ public final class DailyLabyrinthRoutine extends DelayedTask {
             // Exit ONLY from a positively recognized game screen. Never tap
             // Back repeatedly on unknown battle dialogs or purchase prompts.
             RawImageData frame=emuManager.captureScreen(EMULATOR_NUMBER);
+            if(DailyLabyrinthFrame.defeat(frame) && !defeatDismissAttempted){
+                defeatVerified=true;
+                if(dismissDefeatToCave()){
+                    frame=emuManager.captureScreen(EMULATOR_NUMBER);
+                    logInfo("Labyrinth: left pending Defeat during safe final cleanup; no Retry");
+                }
+            }
             if(completedVerified && DailyLabyrinthFrame.victory(frame)){
                 // A prior Next may have progressed the stage without closing
                 // the overlay; this guarded exit does not start another fight.
@@ -147,9 +188,13 @@ public final class DailyLabyrinthRoutine extends DelayedTask {
                     tapNear(EXIT_CAVE,3);sleepTask(420);
                 }
             }
-            if(completedVerified && !DailyLabyrinthFrame.home(emuManager.captureScreen(EMULATOR_NUMBER))){
-                markWorkIncomplete("Labyrinth Victory verified, but City Home not yet confirmed after exit");
-                logWarning("Labyrinth Victory was earned; Home not confirmed (no repeat battle)");
+            if((completedVerified || defeatVerified)
+                    && !DailyLabyrinthFrame.home(emuManager.captureScreen(EMULATOR_NUMBER))){
+                markWorkIncomplete("Labyrinth result verified, but City Home not confirmed after safe exit");
+                logWarning("Labyrinth " + (defeatVerified?"Defeat":"Victory")
+                        + " was observed but Home is not confirmed (no repeated battle)");
+            }else if(defeatVerified){
+                logInfo("Labyrinth Defeat handled; City Home verified, Retry never pressed");
             }
         }
     }
@@ -172,14 +217,36 @@ public final class DailyLabyrinthRoutine extends DelayedTask {
         }
         return null;
     }
-    private RawImageData waitForVictory(){
+    private RawImageData waitForBattleOutcome(){
+        // Both outcomes come from the same frame. The old routine waited for
+        // Victory only and ignored actual Defeat for all 32 polling cycles.
         for(int n=0;n<32;n++){
             checkPreemption();
             sleepTask(n==0?750:300);
             RawImageData f=emuManager.captureScreen(EMULATOR_NUMBER);
-            if(DailyLabyrinthFrame.victory(f))return f;
+            if(DailyLabyrinthFrame.defeat(f)||DailyLabyrinthFrame.victory(f))return f;
         }
         return null;
+    }
+
+    /**
+     * The live Defeat overlay does not offer Return to City. A neutral tap at
+     * y=810 closes it, whereas the separate lower buttons open Battle Report
+     * or spend an attempt on Retry. Verified manually on real Serve-Emu:
+     * silver Defeat+Retry -> neutral tap -> Cave map -> header X -> Home.
+     * Requires a second positive frame before the only dismiss tap.
+     */
+    private boolean dismissDefeatToCave(){
+        if(defeatDismissAttempted)return false;
+        RawImageData first=emuManager.captureScreen(EMULATOR_NUMBER);
+        if(!DailyLabyrinthFrame.defeat(first))return false;
+        sleepTask(190);
+        RawImageData second=emuManager.captureScreen(EMULATOR_NUMBER);
+        if(!DailyLabyrinthFrame.defeat(second))return false;
+        defeatDismissAttempted=true;
+        tapNear(DEFEAT_NEUTRAL_DISMISS,3);
+        sleepTask(350);
+        return waitForCave()!=null;
     }
     private void defer(String reason,int retryMinutes){
         markWorkIncomplete("Labyrinth: "+reason);
