@@ -943,11 +943,23 @@ async function loadStatistics(){
  const id=$('statistics-profile').value||state.profileId;
  if(!id)return;
  try{
-  const report=await api('/api/statistics?profile='+encodeURIComponent(id));
+  const [report,tasks]=await Promise.all([
+   api('/api/statistics?profile='+encodeURIComponent(id)),
+   api('/api/tasks?profile='+encodeURIComponent(id))
+  ]);
   const all=report.routines||[],total=report.totalRuns||0;
   const ocr=all.reduce((a,t)=>a+t.ocrErrors,0),matches=all.reduce((a,t)=>a+t.matchErrors,0);
-  $('statistics-stats').innerHTML=[['Runs',total],['Distinct routines',all.length],['OCR errors',ocr],['Recognition errors',matches]].map(([k,v])=>'<article class="metric"><span>'+esc(k)+'</span><strong>'+esc(v)+'</strong></article>').join('');
-  $('statistics-routines').innerHTML=all.map(t=>'<div class="stats-row"><div><strong>'+esc(t.name||t.key)+'</strong><small>Latest: '+esc(t.last||'—')+'</small></div><div><strong>'+esc(t.runs)+'×</strong><small>Avg. '+(t.runs?Math.round(t.totalMs/t.runs/1000):0)+'s</small></div><div><span class="outcome '+(t.ocrErrors+t.matchErrors?'bad':'good')+'">'+esc(t.ocrErrors+t.matchErrors)+' errors</span></div></div>').join('')||'<p class="text-muted">No runs recorded for this profile.</p>';
+  // Stats aggregates count OCR/template search MISSES, including expected
+  // negative probes; they do not represent task failure counts. Task states
+  // below show only the latest result per task, not historical totals.
+  const recentFailed=tasks.filter(t=>t.outcome==='FAILED').length;
+  const recentDeferred=tasks.filter(t=>t.outcome==='DEFERRED').length;
+  $('statistics-stats').innerHTML=[
+   ['Recorded runs',total],['Tasks: latest failed',recentFailed],
+   ['Tasks: latest deferred',recentDeferred],['OCR read misses',ocr],
+   ['Template search misses',matches],['Routines tracked',all.length]
+  ].map(([k,v])=>'<article class="metric"><span>'+esc(k)+'</span><strong>'+esc(v)+'</strong></article>').join('');
+  $('statistics-routines').innerHTML=all.map(t=>'<div class="stats-row"><div><strong>'+esc(t.name||t.key)+'</strong><small>Latest execution: '+esc(t.last||'—')+'</small></div><div><strong>'+esc(t.runs)+'×</strong><small>Avg. '+(t.runs?Math.round(t.totalMs/t.runs/1000):0)+'s</small></div><div><small>'+esc(t.ocrErrors)+' OCR + '+esc(t.matchErrors)+' template misses</small></div></div>').join('')||'<p class="text-muted">No runs recorded for this profile.</p>';
   $('statistics-counters').innerHTML=Object.entries(report.counters||{}).map(([k,v])=>'<div class="detail-row"><span>'+esc(k)+'</span><strong>'+esc(v)+'</strong></div>').join('')||'<p class="text-muted">No additional counters.</p>';
  }catch(e){$('statistics-routines').textContent=e.message;}
 }

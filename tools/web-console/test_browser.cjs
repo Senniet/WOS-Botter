@@ -101,6 +101,17 @@ const {chromium}=require('playwright-core');
   for(const [route,label] of Object.entries(pageLabels)){
     await page.locator('.nav-btn[data-page="'+route+'"]').click();
     await page.locator('.page.active').getByText(label,{exact:false}).first().waitFor();
+    if(route==='statistics'){
+      await page.getByText('Template search misses',{exact:true}).waitFor({timeout:13000});
+      const labels=await page.locator('#statistics-stats .metric span').allInnerTexts();
+      for(const key of ['Recorded runs','Tasks: latest failed','Tasks: latest deferred',
+          'OCR read misses','Template search misses','Routines tracked'])
+        assert.ok(labels.includes(key),'Missing statistical distinction: '+key);
+      const metrics=await page.locator('#statistics-stats .metric strong').allInnerTexts();
+      assert.ok(metrics.every(text=>/^\d+$/.test(text.trim())));
+      assert.match(await page.locator('[data-view="statistics"]').innerText(),/not necessarily failed tasks/i);
+      assert.ok(await page.locator('.stats-row').count()>=10);
+    }
     if(route==='emulator'){
       const view=await page.locator('.emu-phone').boundingBox();
       assert.ok(view && view.y<190, 'Live emulator view should start high on the desktop, actual y='+view?.y);

@@ -391,11 +391,27 @@ private void logQueueSummaryFlow(List<UpgradeBuildingsRoutine.QueueReadout> queu
         }
     }
 
-private ProductionBlocker readBusyTrainingCamp(int constructionQueue) {
+private ProductionBlocker readBusyProductionBuilding(int constructionQueue) {
         diagnostics.stage("training-clock");
         String buildingName = readSelectedBuildingName();
         String clockText = readTrainingClock();
         diagnostics.observation("training name='" + buildingName + "' clock='" + clockText + "'");
+        // The recommended *Research Center* can be occupied by a running
+        // research. Its blue Research/Speedup/Finish controls must never be
+        // misinterpreted as an Upgrade. Treat a positively read active
+        // countdown as a production handoff instead of retrying every 5 min.
+        Duration researchTime = ResearchCenterBusyRead.positive(buildingName, clockText, false);
+        if (researchTime != null) {
+            LocalDateTime completionTime=LocalDateTime.now().plus(researchTime);
+            Set<ConstructionBlockerRegistry.Consumer> consumers =
+                    EnumSet.of(ConstructionBlockerRegistry.Consumer.RESEARCH);
+            logInfo(routineLogUpgradeBuildingsLine(
+                    "Research Center has active research ("+clockText+"); no building Upgrade control. "
+                    + "Deferring City Upgrade until the research completes at "+completionTime));
+            // Do not falsely reserve a construction queue for a *research*
+            // countdown: the independent Research task must remain eligible.
+            return new ProductionBlocker(consumers, constructionQueue, completionTime);
+        }
         TrainingCampBusyRead.Decision decision = TrainingCampBusyRead.positive(buildingName, clockText, false);
         if (decision == null) {
             return null;
@@ -1096,7 +1112,7 @@ private Attempt<QueueHandlingResult> handleQueueAttempt(QueueReadout queueResult
         if (isBuildButtonVisible()) {
             return buildingAttempt(startBuildingAction("build", null));
         }
-        ProductionBlocker training = readBusyTrainingCamp(queueResult.queueNumber());
+        ProductionBlocker training = readBusyProductionBuilding(queueResult.queueNumber());
         if (training != null) {
             return Attempt.completed(new QueueHandlingResult(false, training));
         }
