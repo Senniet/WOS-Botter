@@ -189,8 +189,19 @@ public ResearchRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
             logInfo(routineLogResearchLine("Research queue OCR status: '" + queueStatus + "'"));
 
             if (!ResearchQueueStatusPolicy.isExplicitlyIdle(queueStatus)) {
-
-
+                if (ResearchQueueStatusPolicy.isBareUpgrading(queueStatus)) {
+                    // The standalone orange "Upgrading" in Tech Research is
+                    // NOT a clock. The Research Center building itself may be
+                    // upgrading in either of the two City construction rows.
+                    // Requiring the exact construction title and a second
+                    // independent frame avoids mistaking a stale queue for
+                    // an active research, while never visiting premium UI.
+                    if (scheduleBuildingConstructionIfVerified()) return;
+                    scheduleUnknownQueueRetry(
+                            "Tech Research shows Upgrading without a timer; Research Center construction not confirmed",
+                            20);
+                    return;
+                }
                 logInfo(routineLogResearchLine("Research queue is busy. Attempting to read remaining time..."));
                 var busyTimeRead = durationHelper.attemptRecognitionDetailed(
                         queueArea.topLeft(),
@@ -297,8 +308,56 @@ public ResearchRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
         this.reschedule(LocalDateTime.now().plusMinutes(RESEARCH_TIMER_RETRY_MINUTES));
     }
 
+    /**
+     * Identify a Research Center BUILDING upgrade before any Tech Research
+     * duration OCR. This is a normal scheduling wait, not a failed research
+     * attempt, and may be shortened by game alliance help or speedups.
+     * The confirmed construction timer is a lower-bound check: recheck at
+     * half time so that an accelerated build cannot strand the next research.
+     */
+    private boolean scheduleBuildingConstructionIfVerified() {
+        try {
+            checkPreemption();
+            var first = ResearchCenterConstructionProbe.inspect(
+                    emuManager.captureScreen(EMULATOR_NUMBER));
+            if (first == null) return false;
+            sleepTask(180);
+            checkPreemption();
+            var second = ResearchCenterConstructionProbe.inspect(
+                    emuManager.captureScreen(EMULATOR_NUMBER));
+            if (!ResearchCenterConstructionProbe.agrees(first, second)) {
+                logInfo(routineLogResearchLine(
+                        "Research Center construction state changed across two frames; no inferred queue time"));
+                return false;
+            }
+            if (second.remaining() == null) {
+                logInfo(routineLogResearchLine(
+                        "Research Center construction verified, but construction clock unreadable"));
+                return false;
+            }
+            Duration untilNext=ResearchTimerPolicy.recheckDelay(second.remaining());
+            LocalDateTime next=LocalDateTime.now().plus(untilNext);
+            logInfo(routineLogResearchLine(
+                    "Research Center BUILDING upgrading in construction queue " + second.queue()
+                            + " (remaining=" + formatDuration(second.remaining())
+                            + "). No Tech Research timer exists; checking after "
+                            + formatDuration(untilNext) + " at " + next
+                            + " rather than repeating invalid OCR"));
+            reschedule(next);
+            return true;
+        } catch (IOException | OcrException ex) {
+            logWarning(routineLogResearchLine(
+                    "Research Center construction timer unreadable: " + ex.getClass().getSimpleName()));
+            return false;
+        }
+    }
+
     private void scheduleUnknownQueueRetry(String reason) {
-        LocalDateTime retryAt = LocalDateTime.now().plusMinutes(5);
+        scheduleUnknownQueueRetry(reason, 5);
+    }
+
+    private void scheduleUnknownQueueRetry(String reason, int retryMinutes) {
+        LocalDateTime retryAt = LocalDateTime.now().plusMinutes(retryMinutes);
         String snapshot = TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER, "research", "queue-ocr");
         markWorkIncomplete("Research queue unknown: " + reason);
         logWarning(routineLogResearchLine("Research queue state is unknown; " + reason

@@ -8,6 +8,17 @@ import org.junit.jupiter.api.Test;
 class ResearchQueueStatusPolicyTest {
 
     @Test
+    void standaloneUpgradingCannotBeParsedAsResearchTimerOrIdle() {
+        assertTrue(ResearchQueueStatusPolicy.isBareUpgrading("Upgrading"));
+        assertTrue(ResearchQueueStatusPolicy.isBareUpgrading(" UPGRADING! "));
+        assertFalse(ResearchQueueStatusPolicy.isBareUpgrading("00:15:44"));
+        assertFalse(ResearchQueueStatusPolicy.isBareUpgrading("Center Research Upgrading"));
+        assertFalse(ResearchQueueStatusPolicy.isBareUpgrading("Upgrading 07:33:10"));
+        assertFalse(ResearchQueueStatusPolicy.isBareUpgrading("Idle"));
+        assertFalse(ResearchQueueStatusPolicy.isBareUpgrading(null));
+    }
+
+    @Test
     void onlyExplicitIdleLabelConfirmsAnAvailableQueue() {
         assertTrue(ResearchQueueStatusPolicy.isExplicitlyIdle("Idle"));
         assertTrue(ResearchQueueStatusPolicy.isExplicitlyIdle("  IDLE!  "));
