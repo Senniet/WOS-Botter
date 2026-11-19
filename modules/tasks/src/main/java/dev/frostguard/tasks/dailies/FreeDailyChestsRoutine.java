@@ -21,6 +21,11 @@ import java.time.LocalDateTime;
 public class FreeDailyChestsRoutine extends DelayedTask {
     private static final PointData TABS_FROM=new PointData(630,143);
     private static final PointData TABS_TO=new PointData(145,143);
+    // The Top-up Center remembers the LAST selected tab across visits. A
+    // left-only scan gets stuck when the saved tab is already at the far
+    // right of the carousel; Daily Deals then lies to the LEFT. Never try
+    // to solve that by tapping an unverified paid pack.
+    private static final int TABS_PER_DIRECTION=7;
     private static final PointData BACK=new PointData(42,34);
     public FreeDailyChestsRoutine(AccountDescriptor profile,TpDailyTaskEnum task){super(profile,task);}
     @Override protected LaunchPoint getRequiredStartLocation(){return LaunchPoint.ANY;}
@@ -45,28 +50,21 @@ public class FreeDailyChestsRoutine extends DelayedTask {
                 opened=TopUpDailyDealsFrame.topUp(emuManager.captureScreen(EMULATOR_NUMBER));
                 if(!opened){retry("Top-up Center header not verified after cart tap");return;}
             }
-            // When the user enters the Top-up Center it can remember another
-            // tab. Search only the horizontal 90..195 menu, never offer cards.
-            for(int scan=0;scan<7;scan++){
-                checkPreemption();
-                frame=emuManager.captureScreen(EMULATOR_NUMBER);
-                if(TopUpDailyDealsFrame.dailyDeals(frame)){verified=true;break;}
-                ImageSearchResultData tab=TopUpDailyDealsFrame.dailyDealsTab(frame);
-                if(tab.isFound()){
-                    sleepTask(130);
-                    var second=TopUpDailyDealsFrame.dailyDealsTab(
-                            emuManager.captureScreen(EMULATOR_NUMBER));
-                    if(second.isFound() && tab.getPoint().manhattanDistanceTo(second.getPoint())<25){
-                        tapNear(second.getPoint(),4);
-                        sleepTask(360);
-                        verified=TopUpDailyDealsFrame.dailyDeals(emuManager.captureScreen(EMULATOR_NUMBER));
-                        if(verified)break;
-                    }
-                }
-                if(scan<6){swipe(TABS_FROM,TABS_TO,350);sleepTask(270);}
+            // Safe reversible search: Daily Deals is visible after two left
+            // swipes from the first tab in the Nov 19 client. Previously the
+            // scanner moved LEFT ONLY: after one missed run the carousel was
+            // already at its right end, so every later run also missed.
+            // Reverse direction after the first sweep; never touch pack rows.
+            verified=findVerifiedDailyDealsTab();
+            if(!verified){retry("Daily Deals not found after left/right tab scan; no paid pack tapped");return;}
+            // The tab title appears before the animated Daily Deals chest.
+            // Poll the same known FREE region briefly instead of deciding the
+            // whole page has no free chest on the first transitioning frame.
+            frame=waitForDailyDealsChestState();
+            if(frame==null){
+                retry("Daily Deals opened, but neither Free chest nor cooldown confirmed");
+                return;
             }
-            if(!verified){retry("Daily Deals tab not found/verified, no pack tapped");return;}
-            frame=emuManager.captureScreen(EMULATOR_NUMBER);
             if(TopUpDailyDealsFrame.openedFreeChestOnCooldown(frame)
                     || TopUpDailyDealsFrame.cooldownText(frame)){
                 logInfo("Free Daily Chests: Daily Deals free chest already collected; cooldown visible. "
@@ -81,25 +79,49 @@ public class FreeDailyChestsRoutine extends DelayedTask {
                     retry("Free chest was no longer ready on confirmation frame");return;
                 }
                 tapNear(new PointData(83,411),4);
-                sleepTask(470);
-                RawImageData after=emuManager.captureScreen(EMULATOR_NUMBER);
-                if(TopUpDailyDealsFrame.openedFreeChestOnCooldown(after)){
-                    logInfo("Free Daily Chests: free Daily Deals chest claimed; cooldown appeared");
-                }else{
-                    // Some clients show an additional Rewards receipt. No
-                    // follow-up tap unless the reward screen can be verified.
-                    logWarning("Free Daily Chests: tapped only verified free chest, "
-                            +"but no cooldown confirmation appeared; no second click");
-                    markWorkIncomplete("Free chest action did not verify claim completion");
+                boolean claimed=false;
+                for(int receiptPoll=0;receiptPoll<10;receiptPoll++){
+                    checkPreemption();
+                    sleepTask(receiptPoll==0?480:220);
+                    RawImageData after=emuManager.captureScreen(EMULATOR_NUMBER);
+                    if(TopUpDailyDealsFrame.claimedReceipt(after)){
+                        logInfo("Free Daily Chests: actual Claimed reward receipt verified; closing its safe footer");
+                        tapNear(new PointData(351,1188),3);
+                        sleepTask(460);
+                        RawImageData returned=emuManager.captureScreen(EMULATOR_NUMBER);
+                        if(TopUpDailyDealsFrame.topUp(returned)
+                                && !TopUpDailyDealsFrame.claimedReceipt(returned)){
+                            claimed=true;
+                            logInfo("Free Daily Chests: confirmed free reward received and receipt dismissed");
+                        }
+                        break;
+                    }
+                    if(TopUpDailyDealsFrame.openedFreeChestOnCooldown(after)
+                            || TopUpDailyDealsFrame.cooldownText(after)){
+                        claimed=true;
+                        logInfo("Free Daily Chests: free chest claimed; cooldown confirmed");
+                        break;
+                    }
+                }
+                if(!claimed){
+                    logWarning("Free Daily Chests: verified Free chest tapped but no stable receipt/cooldown; no repeat tap");
+                    markWorkIncomplete("Free chest action not yet confirmed after one tap");
                 }
             }else{
                 // OCR failures are not proof that a chest is free.
-                logInfo("Free Daily Chests: ready free chest not yet positively identified; "
-                        +"all paid purchase controls skipped");
+                retry("Free chest state not positively identified; all paid purchase controls skipped");
+                return;
             }
         }finally{
             if(opened){
                 RawImageData current=emuManager.captureScreen(EMULATOR_NUMBER);
+                if(TopUpDailyDealsFrame.claimedReceipt(current)){
+                    // Positive receipt is the only safe authorization to
+                    // dismiss this full-screen overlay. No blind Back.
+                    tapNear(new PointData(351,1188),3);
+                    sleepTask(430);
+                    current=emuManager.captureScreen(EMULATOR_NUMBER);
+                }
                 if(TopUpDailyDealsFrame.topUp(current)){
                     tapNear(BACK,4);sleepTask(430);
                 }
@@ -111,6 +133,76 @@ public class FreeDailyChestsRoutine extends DelayedTask {
         }
         reschedule(LocalDateTime.now().plusMinutes(interval));
     }
+    /** The free chest artwork glows/animates after the tab title appears. */
+    private RawImageData waitForDailyDealsChestState(){
+        for(int attempt=0;attempt<8;attempt++){
+            checkPreemption();
+            RawImageData frame=emuManager.captureScreen(EMULATOR_NUMBER);
+            if(TopUpDailyDealsFrame.dailyDeals(frame) &&
+                    (TopUpDailyDealsFrame.openedFreeChestOnCooldown(frame)
+                     || TopUpDailyDealsFrame.cooldownText(frame)
+                     || TopUpDailyDealsFrame.readyFreeChest(frame)))return frame;
+            if(attempt<7)sleepTask(220);
+        }
+        return null;
+    }
+
+    /** Search the verified horizontal tab strip in BOTH directions. */
+    private boolean findVerifiedDailyDealsTab(){
+        for(int pass=0;pass<2;pass++){
+            PointData from=pass==0?TABS_FROM:TABS_TO;
+            PointData to=pass==0?TABS_TO:TABS_FROM;
+            for(int scan=0;scan<TABS_PER_DIRECTION;scan++){
+                checkPreemption();
+                RawImageData frame=emuManager.captureScreen(EMULATOR_NUMBER);
+                if(TopUpDailyDealsFrame.dailyDeals(frame))return true;
+                if(!TopUpDailyDealsFrame.topUp(frame)){
+                    logWarning("Free Daily Chests: Top-up Center vanished during carousel search");
+                    return false;
+                }
+                var tab=TopUpDailyDealsFrame.dailyDealsTab(frame);
+                if(tab.isFound()){
+                    // The tab carousel continues gliding for a while AFTER
+                    // swipe(...) returns. Real video frames captured during
+                    // the Nov 19 bot scan had 99.2% Daily Deals matches in
+                    // frames 13 and 17, but their X positions shifted 39px.
+                    // Settle before checking a second fresh frame; never tap
+                    // a tab while the moving sprite does not agree.
+                    sleepTask(340);
+                    var second=TopUpDailyDealsFrame.dailyDealsTab(
+                            emuManager.captureScreen(EMULATOR_NUMBER));
+                    if(!second.isFound() || tab.getPoint().manhattanDistanceTo(second.getPoint())>=25){
+                        sleepTask(310);
+                        tab=TopUpDailyDealsFrame.dailyDealsTab(
+                                emuManager.captureScreen(EMULATOR_NUMBER));
+                        if(tab.isFound()){
+                            sleepTask(190);
+                            second=TopUpDailyDealsFrame.dailyDealsTab(
+                                    emuManager.captureScreen(EMULATOR_NUMBER));
+                        }
+                    }
+                    if(second.isFound() && tab.isFound()
+                            && tab.getPoint().manhattanDistanceTo(second.getPoint())<25){
+                        tapNear(second.getPoint(),3);
+                        sleepTask(580);
+                        RawImageData daily=emuManager.captureScreen(EMULATOR_NUMBER);
+                        if(TopUpDailyDealsFrame.dailyDeals(daily)){
+                            logInfo("Free Daily Chests: Daily Deals tab verified (pass="
+                                    +(pass==0?"left":"right")+", swipe="+scan+")");
+                            return true;
+                        }
+                        logWarning("Free Daily Chests: tab tap not confirmed after carousel settled; scanning safely");
+                    }
+                }
+                if(scan<TABS_PER_DIRECTION-1){
+                    swipe(from,to,350);
+                    sleepTask(590);
+                }
+            }
+        }
+        return false;
+    }
+
     private void retry(String reason){
         markWorkIncomplete("Free Daily Chests: "+reason);
         logWarning("Free Daily Chests: "+reason+"; "+TaskDiagnosticSnapshots.capture(

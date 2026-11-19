@@ -61,6 +61,9 @@ public class HeroRecruitmentRoutine extends DelayedTask {
 
     /** Retry delay when OCR or navigation fails (minutes) */
     private static final int OCR_FAILURE_RETRY_MINUTES = 5;
+    // With owned-key recruitment enabled, check reasonably often for newly
+    // earned keys, but not every 5 minutes through a 48-hour Epic cooldown.
+    private static final int OWNED_KEY_RECHECK_MINUTES = 20;
 
     /** Maximum OCR retry attempts for time extraction */
     private static final int MAX_OCR_RETRIES = 3;
@@ -69,6 +72,14 @@ public class HeroRecruitmentRoutine extends DelayedTask {
     private static final long OCR_RETRY_DELAY_MS = 200L;
     private static final Pattern MODERN_COOLDOWN = Pattern.compile(
             "(?<![0-9])([0-9]{1,2}):([0-9]{2}):([0-9]{2})(?![0-9])");
+    private static final Pattern MODERN_DAYS = Pattern.compile(
+            "(?<![0-9])([0-3])d([0-9]{1,2}):([0-9]{2}):([0-9]{2})(?![0-9])",
+            Pattern.CASE_INSENSITIVE);
+    // Current 19-Nov OCR with numeric-only whitelist sometimes erases 'd':
+    // screenshot 1d23:26:18 was read ':123:26:18'. The leading colon and
+    // single day + exactly two hour digits make this distinct from HH:MM:SS.
+    private static final Pattern MODERN_DAYS_OCR_FUSED = Pattern.compile(
+            "(?<![0-9]):([0-3])([0-9]{2}):([0-9]{2}):([0-9]{2})(?![0-9])");
 
     // Navigation coordinates
     private static final PointData NAV_TAP_1_MIN = new PointData(160, 1190);
@@ -249,7 +260,7 @@ public class HeroRecruitmentRoutine extends DelayedTask {
                     AreaData.of(40, 801, 350, 904),
                     TemplatesEnum.SERVE_EMU_HERO_ADVANCED_KEY_ONCE,
                     AreaData.of(45, 792, 350, 903),
-                    new PointData(224, 89), new PointData(267, 127),
+                    new PointData(238, 24), new PointData(279, 64),
                     advancedFree, advancedKeys);
             complete &= advancedOk;
             if (!advancedOk && !currentHeroRecruitmentVisible()) {
@@ -264,7 +275,7 @@ public class HeroRecruitmentRoutine extends DelayedTask {
                     AreaData.of(40, 1150, 350, 1262),
                     TemplatesEnum.SERVE_EMU_HERO_EPIC_KEY_ONCE,
                     AreaData.of(45, 1147, 350, 1270),
-                    new PointData(418, 89), new PointData(461, 127),
+                    new PointData(422, 24), new PointData(464, 64),
                     epicFree, epicKeys);
             complete &= epicOk;
             if (!epicOk && !currentHeroRecruitmentVisible()) {
@@ -343,7 +354,26 @@ public class HeroRecruitmentRoutine extends DelayedTask {
 
     static Duration parseModernCooldown(String raw) {
         if (raw == null) return null;
-        Matcher matcher = MODERN_COOLDOWN.matcher(raw);
+        // Free Epic recruitment may be more than 24 hours away. The game
+        // displays e.g. '1d 23:26:18', and numeric-only OCR sometimes returned
+        // ':123:26:18'. Parse these before plain HH:MM:SS, never truncate the
+        // day or treat 123 as a 123-hour digit sequence.
+        String normalized = raw.replaceAll("\\s+", "").trim();
+        for(Pattern pattern:new Pattern[]{MODERN_DAYS,MODERN_DAYS_OCR_FUSED}){
+            Matcher matcher=pattern.matcher(normalized);
+            while(matcher.find()){
+                int days=Integer.parseInt(matcher.group(1));
+                int hours=Integer.parseInt(matcher.group(2));
+                int minutes=Integer.parseInt(matcher.group(3));
+                int seconds=Integer.parseInt(matcher.group(4));
+                if(hours<24 && minutes<60 && seconds<60){
+                    Duration duration=Duration.ofDays(days).plusHours(hours)
+                            .plusMinutes(minutes).plusSeconds(seconds);
+                    if(!duration.isZero())return duration;
+                }
+            }
+        }
+        Matcher matcher = MODERN_COOLDOWN.matcher(normalized);
         while (matcher.find()) {
             String timer = matcher.group();
             if (GameTimeUtils.isAcceptedFormat(timer)) {
@@ -358,11 +388,13 @@ public class HeroRecruitmentRoutine extends DelayedTask {
     static LocalDateTime nextModernCheck(LocalDateTime now, Duration advanced,
             Duration epic, boolean advancedEnabled, boolean epicEnabled,
             boolean savedKeysEnabled) {
-        LocalDateTime fallback = now.plusMinutes(OCR_FAILURE_RETRY_MINUTES);
-        // Preserve the existing key cadence when paid-with-owned-keys mode is
-        // explicitly enabled. The Free timers cannot predict available keys.
-        if (savedKeysEnabled || (advancedEnabled && advanced == null)
-                || (epicEnabled && epic == null)) return fallback;
+        LocalDateTime fallback = now.plusMinutes(
+                savedKeysEnabled?OWNED_KEY_RECHECK_MINUTES:OCR_FAILURE_RETRY_MINUTES);
+        // Owned keys can arrive independently from free-cooldown clocks.
+        // Check at a bounded 20-minute cadence instead of every five minutes,
+        // but NEVER delay the next known Free timer beyond its due date.
+        if (!savedKeysEnabled && ((advancedEnabled && advanced == null)
+                || (epicEnabled && epic == null))) return fallback;
         LocalDateTime next = null;
         if (advancedEnabled && advanced != null) next = now.plus(advanced).plusSeconds(12);
         if (epicEnabled && epic != null) {
@@ -370,6 +402,7 @@ public class HeroRecruitmentRoutine extends DelayedTask {
             if (next == null || candidate.isBefore(next)) next = candidate;
         }
         if (next == null) return fallback;
+        if(savedKeysEnabled && fallback.isBefore(next))return fallback;
         return next.isBefore(now.plusSeconds(30)) ? now.plusSeconds(30) : next;
     }
 
@@ -378,7 +411,7 @@ public class HeroRecruitmentRoutine extends DelayedTask {
             String ocr = emuManager.readText(EMULATOR_NUMBER, topLeft, bottomRight,
                     OcrSettingsData.configurator()
                             .textLayout(OcrSettingsData.TextLayout.SINGLE_LINE)
-                            .allowedGlyphs("0123456789:").build(), false);
+                            .allowedGlyphs("0123456789:dD").build(), false);
             Duration countdown = parseModernCooldown(ocr);
             if (countdown != null) {
                 logInfo(category + " free recruitment cooldown: " + countdown);
@@ -531,7 +564,7 @@ public class HeroRecruitmentRoutine extends DelayedTask {
         try {
             String text = emuManager.readText(EMULATOR_NUMBER, topLeft, bottomRight,
                     OcrSettingsData.configurator()
-                            .textLayout(OcrSettingsData.TextLayout.SINGLE_LINE)
+                            .textLayout(OcrSettingsData.TextLayout.SINGLE_WORD)
                             .allowedGlyphs("0123456789")
                             .build(), false);
             return HeroRecruitmentKeyPolicy.countFromOcr(text);
@@ -554,9 +587,7 @@ public class HeroRecruitmentRoutine extends DelayedTask {
                     TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
                             .withThreshold(92).withArea(AreaData.of(230,215,500,355)).build());
             if (!title.isFound()) continue;
-            var exit = templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_HERO_REWARDS_EXIT,
-                    TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
-                            .withThreshold(90).withArea(AreaData.of(190,1150,525,1240)).build());
+            var exit = locateModernRewardExit();
             if (exit.isFound()) {ready = true;break;}
         }
         if (!ready || !dismissVerifiedRecruitmentRewards()) return false;
@@ -807,14 +838,21 @@ public class HeroRecruitmentRoutine extends DelayedTask {
     /** A successful free recruitment displays a Rewards page with a second
      * orange "Recruit once" button that consumes a key. Only dismiss the
      * verified Rewards overlay by tapping the empty area, never that button. */
+    private ImageSearchResultData locateModernRewardExit(){
+        var config=TemplateSearchHelper.SearchConfig.builder()
+                .withMaxAttempts(1).withDelay(0).withThreshold(89)
+                .withArea(AreaData.of(190,1125,525,1240)).build();
+        // New live footer plus old 2026 fallback: each is a unique textual
+        // exit anchor, never the orange key-consuming Recruit once button.
+        return templateSearchHelper.locateAction(
+                TemplatesEnum.SERVE_EMU_HERO_REWARDS_EXIT_LIVE_NOV_2026,
+                config,TemplatesEnum.SERVE_EMU_HERO_REWARDS_EXIT);
+    }
+
     private boolean dismissVerifiedRecruitmentRewards() {
-        var exitArea = TemplateSearchHelper.SearchConfig.builder()
-                .withMaxAttempts(2).withDelay(120).withThreshold(90)
-                .withCoordinates(new PointData(190, 1150), new PointData(525, 1240)).build();
         ImageSearchResultData exitHint = ImageSearchResultData.miss();
         for (int attempt = 0; attempt < 4; attempt++) {
-            exitHint = templateSearchHelper.locateAction(
-                    TemplatesEnum.SERVE_EMU_HERO_REWARDS_EXIT, exitArea);
+            exitHint = locateModernRewardExit();
             if (exitHint.isFound()) break;
             if (attempt < 3) sleepTask(250);
         }
@@ -835,8 +873,7 @@ public class HeroRecruitmentRoutine extends DelayedTask {
         }
         tapInside(new PointData(320, 912), new PointData(422, 1000));
         sleepTask(300);
-        if (templateSearchHelper.locatePattern(
-                TemplatesEnum.SERVE_EMU_HERO_REWARDS_EXIT, exitArea).isFound()) {
+        if (locateModernRewardExit().isFound()) {
             logWarning("Hero recruitment Rewards overlay did not close after one safe tap; no second action");
             return false;
         }

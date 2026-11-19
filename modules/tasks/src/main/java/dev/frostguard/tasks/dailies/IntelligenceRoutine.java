@@ -1404,19 +1404,60 @@ private void handleSurvivorExclusive(ImageSearchResultData result) {
         }
 
         tapInside(rescue);
-        // Never count a Rescue unless the action has visibly left its modal.
-        if (!awaitIntelActionAcknowledged(TemplatesEnum.INTEL_RESCUE_BUTTON_MODERN,
-                INTEL_SURVIVOR_ACTION_SEARCH, 1700,
+        // The Nov 19 Rescue could leave the original button rendered while
+        // Squad Settings is opening. Previously only button disappearance
+        // could acknowledge it; a real formation transition was ignored.
+        boolean acknowledged=awaitIntelActionAcknowledged(TemplatesEnum.INTEL_RESCUE_BUTTON_MODERN,
+                INTEL_SURVIVOR_ACTION_SEARCH, 2600,
                 TemplatesEnum.SERVE_EMU_INTEL_SURVIVOR_RESCUE,
-                TemplatesEnum.INTEL_RESCUE)) {
-            deferIntelMissingAction("Survivor", "Rescue tap not acknowledged", "survivor-rescue-still-visible");
+                TemplatesEnum.INTEL_RESCUE);
+        ImageSearchResultData form=findIntelDeploy();
+        IntelRescueStagePolicy.Decision stage=IntelRescueStagePolicy.decide(acknowledged,form.isFound());
+        if(stage==IntelRescueStagePolicy.Decision.DEFER_UNKNOWN){
+            deferIntelMissingAction("Survivor", "Rescue transition unknown (no World/formation proof)",
+                    "survivor-rescue-transition-unverified");
             return;
+        }
+        if(stage==IntelRescueStagePolicy.Decision.VERIFY_DEPLOY){
+            if(!deployIntelSurvivorRescue(form)){
+                deferIntelMissingAction("Survivor", "formation Deploy not positively completed",
+                        "survivor-rescue-deploy-unverified");
+                return;
+            }
         }
         intelScreenHelper.returnToIntelFromWilderness();
 		survivorMissionsSincePause++;
 		StaminaService.getServices().subtractStamina(profile.getId(), SURVIVOR_STAMINA_COST_VALUE);
 		StatisticsService.obtain().addToCounter(profile, "Intel Survivor Camps", 1);
 	}
+
+/** Send a Rescue formation only after TWO exact Deploy matches and a safe
+ * preflight, then verify the World transition before deducting stamina. */
+private boolean deployIntelSurvivorRescue(ImageSearchResultData first){
+    if(first==null||!first.isFound())return false;
+    sleepTask(190);
+    ImageSearchResultData second=findIntelDeploy();
+    if(!second.isFound() || first.getPoint()==null || second.getPoint()==null
+            || first.getPoint().manhattanDistanceTo(second.getPoint())>22)return false;
+    if(deploymentHelper.isMarchQueueFull()||deploymentHelper.hasNoDeployableTroops()
+            || deploymentHelper.isDeployCostRed())return false;
+    var deployment=deploymentHelper.readScreen(DeploymentHelper.MAX_ATTACK_STAMINA_COST);
+    if(!IntelDeploymentPreflight.assess(deployment.travelTimeSeconds()).allowed())return false;
+    logInfo(routineLogIntelligenceLine("Survivor Rescue: Squad Deploy positively confirmed on two frames; launching"));
+    tapInside(second);
+    sleepTask(900);
+    if(deploymentHelper.isMarchQueueFull())return false;
+    // Do not count a rescue if we remained on the same formation screen.
+    if(templateSearchHelper.locatePattern(TemplatesEnum.INTEL_DEPLOY_BUTTON_MODERN,
+            SearchConfig.builder().withMaxAttempts(1).withThreshold(90)
+                    .withArea(AreaData.of(425,1135,710,1279)).build()).isFound())return false;
+    var world=templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_WORLD_ANCHOR_CURRENT,
+            SearchConfig.builder().withMaxAttempts(3).withDelay(300)
+                    .withThreshold(90).withArea(AreaData.of(590,1145,715,1275)).build());
+    if(!world.isFound())return false;
+    logInfo(routineLogIntelligenceLine("Survivor Rescue Deploy verified on World; no blind duplicate action"));
+    return true;
+}
 
 private void handleJourney(ImageSearchResultData result) {
     runExclusiveUiTransaction(() -> handleJourneyExclusive(result));

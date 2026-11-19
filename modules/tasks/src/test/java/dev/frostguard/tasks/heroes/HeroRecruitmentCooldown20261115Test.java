@@ -20,12 +20,19 @@ class HeroRecruitmentCooldown20261115Test {
         assertEquals(now.plus(advanced).plusSeconds(12),
                 HeroRecruitmentRoutine.nextModernCheck(now, advanced, epic,
                         true, true, false));
-        assertEquals(now.plusMinutes(5),
+        assertEquals(now.plusMinutes(20),
                 HeroRecruitmentRoutine.nextModernCheck(now, advanced, epic,
                         true, true, true));
         assertEquals(now.plusMinutes(5),
                 HeroRecruitmentRoutine.nextModernCheck(now, null, epic,
                         true, true, false));
+        assertEquals(Duration.ofDays(1).plusHours(23).plusMinutes(26).plusSeconds(18),
+                HeroRecruitmentRoutine.parseModernCooldown(":1d23:26:18"));
+        assertEquals(Duration.ofDays(1).plusHours(23).plusMinutes(37).plusSeconds(47),
+                HeroRecruitmentRoutine.parseModernCooldown(":123:37:47"));
+        assertEquals(Duration.ofDays(1).plusHours(23).plusMinutes(26).plusSeconds(18),
+                HeroRecruitmentRoutine.parseModernCooldown("Next free 1d 23:26:18"));
+        assertNull(HeroRecruitmentRoutine.parseModernCooldown(":199:99:99"));
         assertNull(HeroRecruitmentRoutine.parseModernCooldown("Next Free: unavailable"));
         assertNull(HeroRecruitmentRoutine.parseModernCooldown("99:99:99"));
     }

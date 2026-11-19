@@ -114,6 +114,10 @@ public class StorehouseChestRoutine extends DelayedTask {
     private StorehouseVisitFlow.VisitState visitState = StorehouseVisitFlow.VisitState.READY;
     private StorehouseVisitFlow.ActivityPhase activityPhase = StorehouseVisitFlow.ActivityPhase.RESCHEDULING;
     private Integer pendingAgnesStamina;
+    // This task instance persists across scheduled visits. On the modern
+    // Storehouse a full stamina cap can leave Claim visible; retrying it every
+    // 30 minutes produces repeated refusals while chest collection succeeds.
+    private LocalDateTime staminaClaimDeferredUntil;
     private boolean confirmedDailyMissionProgress;
 
     public StorehouseChestRoutine(AccountDescriptor profile, TpDailyTaskEnum tpDailyTask) {
@@ -298,6 +302,12 @@ public class StorehouseChestRoutine extends DelayedTask {
         @Override
         public StorehouseVisitFlow.CollectionState collectStamina(
                 StorehouseBubbleDetector.Candidate candidate) {
+            if (StorehouseStaminaRetryPolicy.shouldSkip(
+                    LocalDateTime.now(), staminaClaimDeferredUntil)) {
+                logInfo("Storehouse: recent unaccepted stamina Claim is on cooldown until "
+                        +staminaClaimDeferredUntil+"; skipping stamina tap while still checking normal chests");
+                return StorehouseVisitFlow.CollectionState.BLOCKED_CAPACITY;
+            }
             logInfo("Stamina bubble found. Opening its claim dialog.");
             tapInside(candidate.center(), candidate.center());
             ImageSearchResultData claimButton = awaitStaminaClaimButton();
@@ -320,6 +330,7 @@ public class StorehouseChestRoutine extends DelayedTask {
                     captureInterfaceFailure("stamina-full-dialog-close-unverified");
                     return StorehouseVisitFlow.CollectionState.UNKNOWN;
                 }
+                staminaClaimDeferredUntil=StorehouseStaminaRetryPolicy.nextClaimAfterRefusal(LocalDateTime.now());
                 return StorehouseVisitFlow.CollectionState.BLOCKED_CAPACITY;
             }
             // Reuse the existing verified 2026 close control even when the
@@ -368,6 +379,8 @@ public class StorehouseChestRoutine extends DelayedTask {
                 // When Claim remains visible, the game refused the action.
                 // A full stamina bar can cause this without a recognizable
                 // max-capacity toast. Never count or immediately reattempt it.
+                if(rejection==StorehouseStaminaClaimRecovery.Outcome.DISMISSED)
+                    staminaClaimDeferredUntil=StorehouseStaminaRetryPolicy.nextClaimAfterRefusal(LocalDateTime.now());
                 return rejection == StorehouseStaminaClaimRecovery.Outcome.DISMISSED
                         ? StorehouseVisitFlow.CollectionState.DEFERRED_UNACCEPTED
                         : StorehouseVisitFlow.CollectionState.UNKNOWN;
@@ -375,6 +388,7 @@ public class StorehouseChestRoutine extends DelayedTask {
             StorehouseVisitFlow.CollectionState confirmation = confirmBubbleDisappeared(
                     candidate, StorehouseBubbleDetector.Kind.STAMINA);
             if (confirmation == StorehouseVisitFlow.CollectionState.CONFIRMED) {
+                staminaClaimDeferredUntil=null;
                 StaminaService.getServices().addExternalStamina(profile.getId(), BASE_STOREHOUSE_STAMINA);
                 if (pendingAgnesStamina != null && pendingAgnesStamina > 0) {
                     StaminaService.getServices().addExternalStamina(profile.getId(), pendingAgnesStamina);

@@ -57,11 +57,25 @@ final class TopUpDailyDealsFrame {
         catch(RuntimeException unexpected){TaskControlSignals.rethrowControlSignal(unexpected);return false;}
     }
     /** Strict free chest readiness; generic blue paid packs never match this ROI. */
+    static boolean claimedReceipt(RawImageData f){
+        // The reward receipt blurs the entire Top-up Center: its header and
+        // timer cannot be matched until the overlay is dismissed. This mode
+        // is checked ONLY after a positively identified Free chest was tapped.
+        return match(f,TemplatesEnum.TOP_UP_DAILY_CLAIMED_BANNER_2026,
+                170,240,560,430,91).isFound()
+            && match(f,TemplatesEnum.TOP_UP_DAILY_CLAIMED_EXIT_2026,
+                150,1110,560,1250,90).isFound();
+    }
     static boolean readyFreeChest(RawImageData f){
         if(!dailyDeals(f)||openedFreeChestOnCooldown(f)||cooldownText(f))return false;
         // Recognize a *closed* Daily Deals chest near the known free icon.
         // The closed artwork was observed in the Daily Deals tab; the first
         // ready body frame remains to be validated on the next daily reset.
+        // New Nov 19 artwork contains the complete unopened chest and its
+        // white "Free" label, unlike the older cropped close-up. It lives
+        // only above y=500; paid pack buttons start below y=600.
+        if(match(f,TemplatesEnum.TOP_UP_DAILY_READY_CHEST_2026,
+                18,338,175,485,90).isFound())return true;
         return OpenCvPatternLocator.locatePatternMultiScale(f,
                 TemplatesEnum.TOP_UP_DAILY_CLOSED_CHEST_2026.getTemplate(),
                 new PointData(18,343),new PointData(170,467),90).isFound();
