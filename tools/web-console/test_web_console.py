@@ -6,10 +6,14 @@ import json
 from pathlib import Path
 import secrets
 import ssl
+import sys
 import unittest
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+# The gateway imports the local H.264 live-stream module alongside server.py.
+# Spec-based loading does not automatically add the source directory to sys.path.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 SPEC = importlib.util.spec_from_file_location("survivalops_web", Path(__file__).with_name("server.py"))
 WEB = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(WEB)
