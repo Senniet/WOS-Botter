@@ -1,9 +1,11 @@
 /*
- * iPhone/iPad Serve-Emu player. The native scrcpy player requires worker
- * OffscreenCanvas + WebCodecs; iOS Safari does not reliably render that
- * third-party, separately certified iframe. Use only the authenticated,
- * same-origin screenshot + guarded input endpoints already present in the
- * web console. Other browsers retain the native low-latency WebSocket player.
+ * Live iPhone/iPad Serve-Emu player. Native scrcpy requires worker
+ * OffscreenCanvas + WebCodecs; iOS Safari cannot reliably render the
+ * third-party separately certified iframe. Instead we play an uninterrupted
+ * MJPEG stream repackaged from the SAME native scrcpy H.264 WebSocket source.
+ * It is not an ADB screenshot loop: one image request continuously receives
+ * new frames (18fps) without reloads. Input uses the guarded same-origin API.
+ * Other browsers retain the native low-latency WebSocket player.
  */
 (() => {
   'use strict';
@@ -26,9 +28,9 @@
   native.removeAttribute('src');
   phone.classList.add('emu-mobile-fallback');
   view.hidden = false;
-  let scheduled = null;
-  let inflight = false;
   let firstFrame = false;
+  let streamActive = false;
+  let reconnect = null;
   let pointer = null;
 
   function active() {
@@ -43,37 +45,39 @@
     message.textContent = text;
     message.hidden = !text;
   }
-  function plan(delay) {
-    clearTimeout(scheduled);
-    scheduled = null;
-    if (active()) scheduled = setTimeout(refresh, delay);
+  function openLiveStream() {
+    if (!active() || streamActive) return;
+    streamActive = true;
+    clearTimeout(reconnect);
+    reconnect = null;
+    // This URL is requested ONCE per open viewing session. The HTTP
+    // connection stays open, delivering 18 real frames/second using the same
+    // scrcpy feed as the desktop. No timestamp query, interval or reload.
+    frame.src = '/api/emulator/live';
   }
-  function refresh() {
-    if (!active() || inflight) return;
-    inflight = true;
-    // Every successful load schedules the next image, so slow screenshots
-    // cannot pile up concurrent ADB processes or stall the web UI.
-    frame.onload = () => {
-      inflight = false;
-      firstFrame = true;
-      setMessage('');
-      plan(1300);
-    };
-    frame.onerror = () => {
-      inflight = false;
-      setMessage(firstFrame ? 'Connection interrupted · retrying…'
-        : 'Connecting to emulator · retrying…');
-      plan(2500);
-    };
-    frame.src = '/api/emulator/frame?mobile=' + Date.now();
-  }
+  frame.onload = () => {
+    firstFrame = true;
+    setMessage('');
+  };
+  frame.onerror = () => {
+    streamActive = false;
+    if (!active()) return;
+    setMessage(firstFrame ? 'Live video disconnected · reconnecting…'
+      : 'Connecting to live video · retrying…');
+    clearTimeout(reconnect);
+    reconnect = setTimeout(() => {reconnect=null;openLiveStream();}, 2500);
+  };
   function sync() {
     if (!active()) {
-      clearTimeout(scheduled);
-      scheduled = null;
+      clearTimeout(reconnect);
+      reconnect = null;
+      if (streamActive) {
+        streamActive = false;
+        frame.removeAttribute('src'); // Disconnect video, free FFmpeg/WS.
+      }
       return;
     }
-    if (!inflight && !scheduled) refresh();
+    openLiveStream();
   }
   const observer = new MutationObserver(sync);
   observer.observe(document.body, {attributes:true,attributeFilter:['class']});
@@ -89,7 +93,7 @@
       y: Math.max(0, Math.min(1279, Math.round(y * 1279)))};
   }
   frame.addEventListener('pointerdown', event => {
-    if (!active() || !firstFrame || busy() || !event.isPrimary) return;
+    if (!active() || !frame.naturalWidth || busy() || !event.isPrimary) return;
     const point = coordinates(event);
     if (!point) return;
     event.preventDefault();
@@ -122,8 +126,8 @@
         const problem = await result.json().catch(() => ({}));
         setMessage(problem.error || 'Manual control unavailable');
       } else {
-        // Show the result promptly after the single confirmed input.
-        if (!inflight) plan(250);
+        // No image refresh needed: the *continuous* video immediately shows
+        // the game response to this single confirmed tap/swipe.
       }
     } catch (_) {setMessage('Input unavailable · check connection');}
   });

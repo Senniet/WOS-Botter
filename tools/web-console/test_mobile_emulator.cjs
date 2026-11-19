@@ -14,6 +14,8 @@ const path = require('node:path');
       viewport:{width:390,height:844},deviceScaleFactor:3,isMobile:true,
       hasTouch:true,userAgent:'Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1'});
     const page = await context.newPage();
+    let videoConnections=0;
+    page.on('request',r=>{if(new URL(r.url()).pathname==='/api/emulator/live')videoConnections++});
     const errors=[];
     page.on('pageerror',e=>errors.push(String(e)));
     const origin=process.env.SURVIVALOPS_WEB_BASE||'https://10.0.0.100:9098/';
@@ -41,6 +43,14 @@ const path = require('node:path');
     assert.equal(await page.locator('#emu-mobile-message').isVisible(),false,
       'successful screenshot hides connecting/error message');
     await page.screenshot({path:path.join(os.homedir(),'.cache/survivalops-iphone-emulator-fix.png')});
+    const firstVideoFrame=await img.screenshot();
+    await page.waitForTimeout(1900);
+    const secondVideoFrame=await img.screenshot();
+    assert.notDeepEqual(firstVideoFrame,secondVideoFrame,
+      'Continuous live video must update image pixels while keeping one HTTP connection');
+    assert.equal(videoConnections,1,
+      'True live stream: one continuous multipart request, NOT a screenshot refresh timer');
+    assert.match(await img.getAttribute('src'),/\/api\/emulator\/live$/);
 
     // The actual scheduler keeps running during this browser-only test; use
     // an intercepted stopped-state response only in the test page.
@@ -87,8 +97,13 @@ const path = require('node:path');
     assert.equal(requests[1].action,'swipe');
     assert.ok(requests[1].toX>requests[1].x&&requests[1].toY>requests[1].y);
     await page.unroute('**/api/emulator/input');
+    await page.locator('#mobile-menu').click();
+    await page.locator('.nav-btn[data-page="dashboard"]').click();
+    await page.waitForTimeout(200);
+    assert.equal(await img.getAttribute('src'),null,
+      'Leaving Emulator disconnects continuous video and frees its decoder');
     assert.deepEqual(errors,[], 'Mobile browser script errors');
-    console.log('MOBILE EMULATOR PASS: 720x1280 actual image, no third-party iframe, bot shield, touch tap/swipe coordinate mapping; native game input untouched.');
+    console.log('LIVE MOBILE EMULATOR PASS: 720×1280, changing video pixels, 1 continuous stream connection, guarded tap/swipe, no real game input.');
     console.log('Screenshot ~/.cache/survivalops-iphone-emulator-fix.png');
   } finally {await browser.close();}
 })().catch(e=>{console.error(e.stack||e);process.exitCode=1});

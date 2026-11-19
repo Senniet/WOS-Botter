@@ -26,6 +26,7 @@ import subprocess
 import threading
 import time
 from urllib.parse import urlparse, parse_qs
+from emulator_live import BOUNDARY, CLIENT_LIMIT, live_jpegs
 
 ROOT = Path(__file__).resolve().parent
 AUTH_PATH = Path.home() / ".config/survivalops-web/auth.json"
@@ -319,6 +320,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.json(503, {"error": "Diagnostic unavailable"})
         elif path == "/api/emulator/frame":
             self.frame()
+        elif path == "/api/emulator/live":
+            self.live_stream()
         elif path == "/api/emulator/state":
             self.device_state()
         elif path == "/api/logs":
@@ -445,6 +448,41 @@ class Handler(BaseHTTPRequestHandler):
             self.send(200, png, "image/png")
         except (RuntimeError, subprocess.TimeoutExpired) as error:
             self.json(503, {"error": str(error)})
+
+    def live_stream(self):
+        """Send real *continuous* frames from the same scrcpy H.264 source.
+
+        One authenticated GET holds a multipart stream open until navigation
+        or disconnect. It does not poll ADB or refresh the <img> every N secs.
+        Input is separately guarded through /api/emulator/input.
+        """
+        if not CLIENT_LIMIT.acquire(blocking=False):
+            self.json(429, {"error": "Mobile live video is already in use"})
+            return
+        stop = threading.Event()
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=" + BOUNDARY.decode())
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("X-Frame-Options", "DENY")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.close_connection = True
+            for jpeg in live_jpegs(stop):
+                self.wfile.write(b"--" + BOUNDARY + b"\r\n")
+                self.wfile.write(b"Content-Type: image/jpeg\r\n")
+                self.wfile.write(b"Content-Length: " + str(len(jpeg)).encode() + b"\r\n\r\n")
+                self.wfile.write(jpeg + b"\r\n")
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError, ValueError, RuntimeError) as error:
+            # Browser navigated away, network changed, or Serve-Emu restarted.
+            # Deliberately do not print cookie, input or frame data into logs.
+            print("Mobile video session ended: " + type(error).__name__, flush=True)
+        finally:
+            stop.set()
+            CLIENT_LIMIT.release()
 
     def emulator_input(self):
         try:
