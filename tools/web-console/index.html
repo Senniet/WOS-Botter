@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SurvivalOps Web</title><link rel="stylesheet" href="/static/style.css"><link rel="stylesheet" href="/static/operations.css">
+<title>SurvivalOps Web</title><link rel="stylesheet" href="/static/style.css"><link rel="stylesheet" href="/static/operations.css"><link rel="stylesheet" href="/static/emulator-mobile.css">
 </head><body>
 <div id="app" class="app">
   <aside class="sidebar">
@@ -79,6 +79,7 @@
         <div class="emu-player-area">
           <div class="emu-phone" id="emu-phone">
             <iframe id="emu-live" src="https://192.168.1.20:8448/embed.html" title="Interactive live Serve-Emu screen" loading="lazy" referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin" aria-label="Interactive Whiteout Survival screen" tabindex="0"></iframe>
+            <div class="emu-mobile-view" id="emu-mobile-view" hidden aria-label="Live emulator screen for mobile devices"><img id="emu-mobile-frame" alt="Live 720 by 1280 emulator screen. Tap and swipe to control while automation is stopped." draggable="false"><span class="emu-mobile-message" id="emu-mobile-message" role="status">Connecting to emulator…</span></div>
             <div class="emu-input-shield" id="emu-input-shield" hidden role="status" aria-live="polite"><span class="emu-shield-icon" aria-hidden="true">◉</span><strong>Bot is controlling the emulator</strong><span>Stop automation to use the screen here.</span></div>
           </div>
         </div>
@@ -108,5 +109,5 @@
     <dialog id="qa-dialog" class="qa-dialog"><div class="dialog-head"><h3 id="qa-dialog-title">Diagnostics</h3><button class="ghost small" id="qa-dialog-close">Close ×</button></div><div id="qa-dialog-info" class="hint"></div><img id="qa-dialog-image" alt="Diagnostic screenshot" hidden><pre id="qa-dialog-logs" class="log-lines"></pre></dialog>
     <footer class="footer">SurvivalOps Web · Original Java Engine · Serve-Emu only <span id="last-sync"></span></footer>
   </main>
-</div><script src="/static/app.js" defer></script>
+</div><script src="/static/app.js" defer></script><script src="/static/emulator-mobile.js" defer></script>
 </body></html>

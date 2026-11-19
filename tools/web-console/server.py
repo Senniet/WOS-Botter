@@ -278,10 +278,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/":
             path = "/index.html"
         if path not in ("/index.html", "/static/app.js", "/static/style.css",
-                        "/api/session", "/static/login.js", "/static/operations.css") and not path.startswith("/api/"):
+                        "/api/session", "/static/login.js", "/static/operations.css",
+                        "/static/emulator-mobile.js", "/static/emulator-mobile.css") and not path.startswith("/api/"):
             self.json(404, {"error": "Not found"})
             return
-        if not self.authenticated() and path not in ("/static/login.js", "/static/style.css", "/static/operations.css"):
+        if not self.authenticated() and path not in ("/static/login.js", "/static/style.css", "/static/operations.css", "/static/emulator-mobile.css"):
             if path == "/api/session" or path.startswith("/api/"):
                 self.json(401, {"error": "Login required"})
             elif path == "/index.html":

@@ -1,0 +1,20 @@
+/* Mobile Safari must show a live screen even without worker WebCodecs or
+   permission to load the separately certified Serve-Emu iframe. */
+.emu-mobile-view[hidden]{display:none!important}
+.emu-phone.emu-mobile-fallback>iframe{display:none!important}
+.emu-phone.emu-mobile-fallback .emu-mobile-view{
+ position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+ background:#03070d;color:#c5d1e1;overflow:hidden;
+}
+.emu-mobile-view img{
+ display:block;width:100%;height:100%;object-fit:fill;
+ user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;
+ touch-action:none;cursor:crosshair;
+}
+.emu-mobile-message{
+ position:absolute;left:12px;right:12px;top:50%;transform:translateY(-50%);
+ background:#101a2be8;border:1px solid #40536f;border-radius:8px;
+ padding:12px;text-align:center;font-size:12px;line-height:1.5;
+ pointer-events:none;
+}
+.emu-mobile-message[hidden]{display:none!important}
