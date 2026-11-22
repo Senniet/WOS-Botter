@@ -17,7 +17,7 @@ import java.util.function.Supplier;
  */
 final class KnownGameScreenResume {
     enum Page {
-        HERO_RECRUITMENT, HEROES, SQUAD_SETTINGS, DAILY, EXPLORATION, MAIL, VIP, ARENA, RESEARCH, ALLIANCE, ALLIANCE_TECH, CITY_BONUS
+        HERO_RECRUITMENT, HEROES, SQUAD_SETTINGS, DAILY, EXPLORATION, MAIL, VIP, ARENA, RESEARCH, INTEL, EVENTS, PET_ADVENTURE, ALLIANCE, ALLIANCE_TECH, CITY_BONUS
     }
 
     record PagePattern(Page page, TemplatesEnum template, PointData topLeft, PointData bottomRight) { }
@@ -59,6 +59,41 @@ final class KnownGameScreenResume {
     static Page findSafeBackPage(RawImageData frame) {
         if (frame == null || !frame.isValid() || frame.getWidth() != 720 || frame.getHeight() != 1280) {
             return null;
+        }
+        // A previous Pet Adventure run can leave the adventure map open.
+        // Its title+top-left arrow authorizes exactly one safe Back.
+        if (matches(frame, TemplatesEnum.PET_ADVENTURE_MAP_TITLE_NOV_2026,
+                new PointData(75, 0), new PointData(368, 87))
+                && matches(frame, TemplatesEnum.PET_ADVENTURE_MAP_BACK_NOV_2026,
+                        new PointData(0, 0), new PointData(105, 95))) {
+            return Page.PET_ADVENTURE;
+        }
+        // Live Intel Claim All(0/1) is a legitimate in-game page and the
+        // previous routine often leaves it open. The blue Back arrow is at
+        // y0..75, outside the old 65..155 ROI. Confirm BOTH the unique Intel
+        // title and its actual arrow before authorizing a bounded Back.
+        if (matches(frame, TemplatesEnum.SERVE_EMU_INTEL_HEADER_TITLE_NOV_2026,
+                new PointData(75, 8), new PointData(215, 90))
+                && matches(frame, TemplatesEnum.SERVE_EMU_HEADER_BACK_INTEL_2026,
+                        new PointData(0, 0), new PointData(108, 95))) {
+            return Page.INTEL;
+        }
+        // Current Heroes uses a top-left title at y26, not the historical
+        // title ROI y70..160. Recruitment Back lands here, so recognize the
+        // title and a real blue arrow before allowing the second Back.
+        if (matches(frame, TemplatesEnum.SERVE_EMU_HEROES_TOP_TITLE_NOV_2026,
+                new PointData(80, 0), new PointData(280, 90))
+                && matches(frame, TemplatesEnum.SERVE_EMU_HEROES_TOP_BACK_NOV_2026,
+                        new PointData(0, 0), new PointData(108, 95))) {
+            return Page.HEROES;
+        }
+        // Mercenary/Event task can leave this standard Events page open;
+        // require the unique title and the top-left arrow before one Back.
+        if (matches(frame, TemplatesEnum.SERVE_EMU_EVENTS_HEADER_TITLE_NOV_2026,
+                new PointData(78, 8), new PointData(280, 95))
+                && matches(frame, TemplatesEnum.SERVE_EMU_HEADER_BACK_EVENTS_2026,
+                        new PointData(0, 0), new PointData(110, 95))) {
+            return Page.EVENTS;
         }
         // City Bonus was mistakenly opened by the old "stamina HUD arrow".
         // It uses the upper-left back, outside the legacy y65..155 ROI.

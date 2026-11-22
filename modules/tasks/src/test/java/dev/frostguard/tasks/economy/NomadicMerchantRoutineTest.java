@@ -596,6 +596,9 @@ class NomadicMerchantRoutineTest {
             super(new AccountDescriptor(6L, "VipTest", "6", true, 1L, 30L),
                     TpDailyTaskEnum.NOMADIC_MERCHANT);
             profile.setConfig(ConfigurationKeyEnum.BOOL_NOMADIC_MERCHANT_VIP_POINTS, true);
+            // Opt in explicitly: a legacy VIP purchase flag alone is not
+            // allowed to spend gems after TaskGemSpendPolicy was introduced.
+            profile.setConfig(ConfigurationKeyEnum.NOMADIC_MERCHANT_ALLOW_GEM_SPENDING_BOOL, true);
             templateSearchHelper = new TemplateSearchHelper(null, "6", profile) {
                 @Override
                 public ImageSearchResultData locatePattern(TemplatesEnum template, SearchConfig config) {

@@ -237,6 +237,11 @@ public class GatherSpeedRoutine extends DelayedTask {
             logWarning("Obtain dialog product or 250-gem price not verified; no purchase");
             return false;
         }
+        if (!dev.frostguard.tasks.security.TaskGemSpendPolicy.allowed(
+                profile, TpDailyTaskEnum.GATHER_BOOST)) {
+            logInfo("Gather Speed: no owned boost available; task diamond spending is OFF; purchase skipped");
+            return false;
+        }
         if (!reservePurchaseWindow()) {
             logInfo("8h gem spending cooldown is active; purchase skipped");
             rescheduleForBoostDuration();
@@ -278,6 +283,11 @@ public class GatherSpeedRoutine extends DelayedTask {
 	 * @return true if dialog was handled or didn't appear, false if error occurred
 	 */
     private boolean handlePurchaseConfirmation() {
+        if (!dev.frostguard.tasks.security.TaskGemSpendPolicy.allowed(
+                profile, TpDailyTaskEnum.GATHER_BOOST)) {
+            logWarning("Gather Speed: diamond permission revoked; purchase confirmation refused");
+            return false;
+        }
         // Buying may immediately apply the boost, or show a confirmation.
         // Never press an unverified confirmation or accept a higher price.
         String confirmation=readStringValue(new PointData(185, 400),

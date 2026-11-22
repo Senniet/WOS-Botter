@@ -7,9 +7,17 @@ import java.util.function.LongSupplier;
 /** Coordinates bounded Storehouse reward collection and the final cooldown decision. */
 final class StorehouseVisitFlow<T> {
 
-    static final Duration COOLDOWN_VISIT_CAP = Duration.ofHours(1);
+    // A valid 1h47 timer previously got truncated to 1h, causing unnecessary
+    // repeated Storehouse/Claim visits while the game was still on cooldown.
+    // Keep a 2h safety cap to revisit independently available stamina rewards.
+    static final Duration COOLDOWN_VISIT_CAP = Duration.ofHours(2);
+    // Only valid OCR can justify a longer delay. Unknown countdowns retain a
+    // one-hour conservative recheck so we do not miss real chest claims.
+    static final Duration UNKNOWN_COOLDOWN_RETRY = Duration.ofHours(1);
     static final Duration ERROR_RETRY_DELAY = Duration.ofMinutes(5);
-    static final Duration CAPACITY_RETRY_DELAY = Duration.ofMinutes(30);
+    // Match the 75-minute retry policy used when a stamina Claim was refused.
+    // A shorter overall retry would repeatedly reopen the same full-capacity popup.
+    static final Duration CAPACITY_RETRY_DELAY = Duration.ofMinutes(75);
     static final Duration VISIT_TIME_LIMIT = Duration.ofSeconds(90);
     static final int MAX_COLLECTIONS_PER_VISIT = 4;
 
@@ -210,7 +218,7 @@ final class StorehouseVisitFlow<T> {
                 return retry("Storehouse visit time limit reached while reading cooldown.");
             }
             if (cooldown.state() != CooldownState.VALID) {
-                return waiting(COOLDOWN_VISIT_CAP,
+                return waiting(UNKNOWN_COOLDOWN_RETRY,
                         "Cooldown " + cooldown.state().name().toLowerCase() + ": " + cooldown.detail());
             }
             Duration boundedDelay = cooldown.duration().compareTo(COOLDOWN_VISIT_CAP) > 0
@@ -218,7 +226,7 @@ final class StorehouseVisitFlow<T> {
                     : cooldown.duration();
             String reason = boundedDelay.equals(cooldown.duration())
                     ? "Cooldown recognized"
-                    : "Cooldown recognized and capped at one hour";
+                    : "Cooldown recognized and capped at two hours";
             return waiting(boundedDelay, reason);
         }
 

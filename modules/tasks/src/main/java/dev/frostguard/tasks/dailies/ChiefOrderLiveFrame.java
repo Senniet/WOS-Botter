@@ -74,6 +74,14 @@ public final class ChiefOrderLiveFrame {
         return classifyList(label, status, timer, expectedOrder);
     }
 
+    /**
+     * A paid Enact often returns to the Chief Order list, where the exact
+     * tile shows "Active" rather than a shared Rewards overlay.
+     */
+    public static boolean isActiveForOrder(RawImageData frame, String expectedOrder) {
+        return inspectList(frame, expectedOrder).state() == ListState.ACTIVE;
+    }
+
     public static Long availableOrderPoints(RawImageData frame) {
         if (!isChiefOrderList(frame)) return null;
         return parseOrderPoints(read(frame, 584, 15, 675, 67, TEXT));

@@ -9,6 +9,8 @@ import dev.frostguard.api.domain.ImageSearchResultData;
 import dev.frostguard.api.domain.MarchResourceType;
 import dev.frostguard.api.domain.MarchSlotState;
 import dev.frostguard.api.domain.PointData;
+import dev.frostguard.api.domain.RawImageData;
+import dev.frostguard.engine.helper.RecognitionConsensus;
 import dev.frostguard.api.domain.TaskStateData;
 import dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig;
 import dev.frostguard.engine.helper.DeploymentHelper;
@@ -299,7 +301,20 @@ public IntelligenceRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask) {
 					+ TaskDiagnosticSnapshots.capture(emuManager, EMULATOR_NUMBER,
 							"intel", "mission-markers-missing")));
 			markWorkIncomplete("Intel: enabled mission markers not verified");
-			tryRescheduleFromCooldownFlow();
+            // A green Daily Intel badge is independent evidence of pending
+            // work. The cooldown banner can show the NEXT batch's UTC reset
+            // even while unprocessed current missions still exist. A missing
+            // OCR/template marker must not postpone them for several hours.
+            if (dailyIntelAvailable) {
+                redeemCompletedMissions();
+                LocalDateTime retryAt = IntelCyclePolicy.retryAfterUnknownMarkers(LocalDateTime.now());
+                logWarning(routineLogIntelligenceLine(
+                        "Daily Intel is green but missions are unrecognized; retrying at "
+                        + retryAt.format(DATETIME_FORMATTER) + " rather than the next UTC reset."));
+                reschedule(retryAt);
+            } else {
+                tryRescheduleFromCooldownFlow();
+            }
 			processingTask = false;
 			return;
 		}
@@ -438,6 +453,19 @@ private boolean hasEnabledIntelMissionType() {
 	}
 
 private boolean hasVisibleIntelMissionFlow() {
+    if (emuManager.getSelectedEmulatorType()
+            == dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU) {
+        // Scan every enabled mission variant against ONE immutable frame.
+        // If no markers appear during a transition, repeat the whole sweep
+        // once after 180ms, never retry every absent variant separately.
+        for (int pass=0; pass<2; pass++) {
+            checkPreemption();
+            if (hasVisibleIntelMarkerOnFrame(
+                    emuManager.captureScreen(EMULATOR_NUMBER))) return true;
+            if (pass==0) sleepTask(180);
+        }
+        return false;
+    }
 
 		if (fireBeastsEnabled && locateIntelPatternMono(
 				TemplatesEnum.INTEL_FIRE_BEAST, SearchConfigConstants.DEFAULT_SINGLE)
@@ -471,6 +499,30 @@ private boolean hasVisibleIntelMissionFlow() {
 
 		return false;
 	}
+
+private boolean hasVisibleIntelMarkerOnFrame(RawImageData frame) {
+    if (frame == null || !frame.isValid()) return false;
+    java.util.ArrayList<TemplatesEnum> enabled = new java.util.ArrayList<>();
+    if (fireBeastsEnabled) enabled.add(TemplatesEnum.INTEL_FIRE_BEAST);
+    if (beastsEnabled) java.util.Collections.addAll(enabled, beastTemplates());
+    if (survivorCampsEnabled) java.util.Collections.addAll(enabled, survivorTemplates());
+    if (explorationsEnabled) java.util.Collections.addAll(enabled, journeyTemplates());
+    for (TemplatesEnum template : enabled) {
+        ImageSearchResultData first = IntelMarkerProbe.find(
+                frame, template, SearchConfigConstants.DEFAULT_SINGLE);
+        if (first == null || !first.isFound()) continue;
+        checkPreemption();
+        sleepTask(140);
+        ImageSearchResultData fresh = IntelMarkerProbe.find(
+                emuManager.captureScreen(EMULATOR_NUMBER),
+                template, SearchConfigConstants.DEFAULT_SINGLE);
+        if (RecognitionConsensus.agrees(first, fresh, 18)) {
+            intelPatternPreference.recordMatch(template);
+            return true;
+        }
+    }
+    return false;
+}
 
 private TemplatesEnum[] beastTemplates() {
 		return intelPatternPreference.order(TemplatesEnum.INTEL_BEAST_GRAYSCALE,
@@ -1337,9 +1389,36 @@ private void manageRescheduling(boolean anyIntelProcessed, boolean nonBeastIntel
 		return false;
 	}
 
-	private ImageSearchResultData locateIntelPatternMono(TemplatesEnum template, SearchConfig config) {
-		ImageSearchResultData result = templateSearchHelper.locatePatternMono(template, config);
-		if (result.isFound() && intelPatternPreference.recordMatch(template)) {
+    private ImageSearchResultData locateIntelPatternMono(TemplatesEnum template, SearchConfig config) {
+        ImageSearchResultData result;
+        if (emuManager.getSelectedEmulatorType()
+                == dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU) {
+            // Mission-type ABSENCE is expected (and constituted most of Intel's
+            // 614 cumulative template misses). Two bounded observations at
+            // most, without retrying every sprite variant three times.
+            // A positive candidate still needs two agreeing FRESH frames
+            // before any subsequent handler can interact with its marker.
+            result = ImageSearchResultData.miss();
+            int attempts = Math.min(2, Math.max(1, config.getMaxAttempts()));
+            for (int attempt=0; attempt<attempts; attempt++) {
+                checkPreemption();
+                ImageSearchResultData candidate = IntelMarkerProbe.find(
+                        emuManager.captureScreen(EMULATOR_NUMBER), template, config);
+                if (candidate != null && candidate.isFound()) {
+                    sleepTask(150);
+                    ImageSearchResultData confirm = IntelMarkerProbe.find(
+                            emuManager.captureScreen(EMULATOR_NUMBER), template, config);
+                    if (RecognitionConsensus.agrees(candidate, confirm, 18)) {
+                        result = confirm;
+                        break;
+                    }
+                }
+                if (attempt+1 < attempts) sleepTask(config.getDelayBetweenAttempts());
+            }
+        } else {
+            result = templateSearchHelper.locatePatternMono(template, config);
+        }
+        if (result.isFound() && intelPatternPreference.recordMatch(template)) {
 			logInfo(routineLogIntelligenceLine("Fire Crystal Intel marker confirmed by " + template
 					+ ". Prioritizing Fire Crystal marker variants for the rest of this run."));
 		}
@@ -1459,6 +1538,30 @@ private boolean deployIntelSurvivorRescue(ImageSearchResultData first){
     return true;
 }
 
+/**
+ * Observe the stage that follows Explore, not the absence of Explore.
+ * A named Squad Settings title and the green Fight art must both be visible
+ * in two independent fresh frames at the same coordinates. No blind taps.
+ */
+private ImageSearchResultData awaitVerifiedJourneyFight(long timeoutMillis) {
+    long deadline = System.nanoTime() + timeoutMillis * 1_000_000L;
+    do {
+        ImageSearchResultData first = IntelJourneyFightStageFrame.verifiedFight(
+                emuManager.captureScreen(EMULATOR_NUMBER));
+        if (first.isFound()) {
+            sleepTask(190);
+            ImageSearchResultData confirmed = IntelJourneyFightStageFrame.verifiedFight(
+                    emuManager.captureScreen(EMULATOR_NUMBER));
+            if (dev.frostguard.engine.helper.RecognitionConsensus.agrees(first, confirmed, 12)) {
+                return confirmed;
+            }
+        }
+        if (System.nanoTime() >= deadline) break;
+        sleepTask(180);
+    } while (true);
+    return ImageSearchResultData.miss();
+}
+
 private void handleJourney(ImageSearchResultData result) {
     runExclusiveUiTransaction(() -> handleJourneyExclusive(result));
 }
@@ -1487,27 +1590,21 @@ private void handleJourneyExclusive(ImageSearchResultData result) {
         }
 
         tapInside(explore);
-        if (!awaitIntelActionAcknowledged(TemplatesEnum.INTEL_EXPLORE_BUTTON_MODERN,
-                INTEL_JOURNEY_ACTION_SEARCH, 1700,
-                TemplatesEnum.SERVE_EMU_INTEL_JOURNEY_EXPLORE,
-                TemplatesEnum.INTEL_EXPLORE)) {
-            deferIntelMissingAction("Journey", "Explore tap not acknowledged", "journey-explore-still-visible");
-            return;
-        }
-        // Modern Journey opens Squad Settings after Explore. The old flow
-        // skipped Fight entirely, then waited 30 seconds for a victory that
-        // could not happen. Never tap the formation screen without confirming
-        // the green Fight action on two fresh frames.
-        ImageSearchResultData fight = awaitIntelAction(TemplatesEnum.INTEL_JOURNEY_FIGHT_LIVE,
-                INTEL_JOURNEY_FIGHT_ACTION_SEARCH, 4000);
+        // The 20 Nov live trace shows Explore opened Squad Settings and Fight
+        // was visible at (530,1202), yet the generic "Explore disappeared"
+        // check incorrectly rejected that successful transition. Recognize
+        // the NEXT screen instead; the two-frame Fight result is the proof.
+        ImageSearchResultData fight = awaitVerifiedJourneyFight(6500);
         if (fight.isFound()) {
+            logInfo(routineLogIntelligenceLine(
+                    "Journey Squad Settings verified after Explore; green Fight confirmed twice at "
+                    + fight.getPoint() + "."));
             tapInside(fight);
-            logInfo(routineLogIntelligenceLine("Journey Fight tapped after verified Squad Settings action"));
+            logInfo(routineLogIntelligenceLine("Journey Fight tapped on verified Squad Settings"));
         } else if (!templateSearchHelper.locatePattern(TemplatesEnum.EXPLORATION_VICTORY,
                 SearchConfigConstants.DEFAULT_SINGLE).isFound()) {
-            // Older builds can jump directly to Victory after Explore.
-            // Only skip Fight when the actual victory artwork is confirmed.
-            deferIntelMissingAction("Journey", "Fight/Victory", "journey-fight-missing");
+            deferIntelMissingAction("Journey", "Squad Settings / Fight transition not confirmed",
+                    "journey-fight-missing");
             return;
         } else {
             logInfo(routineLogIntelligenceLine("Journey already at verified Victory; no Fight tap required"));

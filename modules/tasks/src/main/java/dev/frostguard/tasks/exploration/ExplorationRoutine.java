@@ -411,7 +411,7 @@ public class ExplorationRoutine extends DelayedTask {
     private void rescheduleFromConfiguredOffset(ExplorationClaimOutcome outcome) {
         Integer minutes = profile.getConfig(ConfigurationKeyEnum.INT_EXPLORATION_CHEST_OFFSET, Integer.class);
         LocalDateTime nextSchedule = ExplorationSchedulePolicy.nextRun(LocalDateTime.now(),
-                minutes == null ? 240 : minutes, UNKNOWN_RETRY_MINUTES, outcome);
+                minutes == null ? 120 : minutes, UNKNOWN_RETRY_MINUTES, outcome);
         reschedule(nextSchedule);
         logInfo(routineLogExplorationLine("Next execution scheduled at: "
                 + nextSchedule.format(DATETIME_FORMATTER) + "; outcome=" + outcome));

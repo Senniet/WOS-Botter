@@ -35,8 +35,11 @@ public class MercenaryEventRoutine extends DelayedTask {
     private int attackAttempts = 0;
     private int flagNumber = 0;
     private boolean useFlag = false;
-    private final int refreshStaminaLevel = 100;
     private final int minStaminaLevel = 40;
+    // Only wait until the minimum safe stamina reserve has regenerated.
+    // Waiting until 100 previously deferred a 17-stamina Phaethon hunt for
+    // ~6h55 instead of ~1h55. The 40 reserve still covers scout + rally.
+    private final int refreshStaminaLevel = minStaminaLevel;
     private boolean scout = false;
     private final EventMenuRetryState menuRetry = new EventMenuRetryState();
 
@@ -63,8 +66,16 @@ public class MercenaryEventRoutine extends DelayedTask {
             }
         }
 
-        // Verify if there's enough stamina to hunt, if not, reschedule the task
-        if (!staminaHelper.checkStaminaAndMarchesOrReschedule(minStaminaLevel, refreshStaminaLevel, this))
+        // Reload unknown/low tracked stamina from the positively verified HUD
+        // when possible. After a Java engine restart, the in-memory stamina
+        // starts at zero even if the game has regenerated while the bot slept.
+        // This read never clicks unless both the World/City anchor and the
+        // actual stamina bar are confirmed.
+        if (staminaHelper.getCurrentStamina() < minStaminaLevel) {
+            staminaHelper.updateStaminaFromHud();
+        }
+        if (!staminaHelper.checkStaminaAndMarchesOrReschedule(
+                minStaminaLevel, refreshStaminaLevel, this))
             return;
 
         boolean tabWasAbsent = false;
@@ -90,13 +101,20 @@ public class MercenaryEventRoutine extends DelayedTask {
 
     private void handleMercenaryEvent() {
         try {
-            // Select a mercenary event level if needed
-            if (!selectMercenaryEventLevel()) {
-                return; // If level selection failed, exit the task
-            }
-
-            // Check for scout or challenge buttons
+            // During an active Mercenary Prestige hunt the Scout/Challenge control
+            // is already visible. Searching all six initiation tab templates costs
+            // ~24s on Serve-Emu and adds no value for the next Phaethon.
+            // Only open the difficulty selector when no hunt control is present.
             ImageSearchResultData eventButton = findMercenaryEventButton();
+            if (eventButton == null) {
+                logInfo("No active hunt button; checking whether difficulty selection is required.");
+                if (!selectMercenaryEventLevel()) {
+                    return;
+                }
+                eventButton = findMercenaryEventButton();
+            } else {
+                logInfo("Mercenary hunt already active; skipping difficulty/tab selection.");
+            }
 
             if (eventButton == null) {
                 respondToOpenedScreen(false);
@@ -261,7 +279,9 @@ public class MercenaryEventRoutine extends DelayedTask {
             return opened;
         }
 
-        sleepTask(2000);
+        // The navigation helper already waited for the selected event tab.
+        // The first hunt-button recognition additionally confirms the panel.
+        sleepTask(400);
         return opened;
     }
 
@@ -379,25 +399,25 @@ public class MercenaryEventRoutine extends DelayedTask {
             return;
         }
 
-        // Click on the button (whether it's scout or challenge)
+        // Click Scout/Challenge, then wait for the actual map attack control.
+        // Previous fixed sleep(4000) was paid even if the screen was ready sooner.
         tapInside(eventButton);
-        sleepTask(4000); // Wait to travel to mercenary location on map
 
-        // Determine whether to rally or attack
-        boolean rally = false;
+        boolean rally = attackAttempts > 3;
+        if (rally) {
+            logWarning("Repeated unchanged mercenary levels; trying Rally instead of Attack.");
+        }
+        TemplatesEnum nextControl = rally ? TemplatesEnum.RALLY_BUTTON
+                : TemplatesEnum.MERCENARY_ATTACK_BUTTON;
         ImageSearchResultData attackOrRallyButton = null;
-
-        if (attackAttempts > 3) {
-            logWarning(
-                    "Multiple consecutive attack attempts detected without level change. Rallying the mercenary instead of normal attack.");
+        for (int poll = 0; poll < 6; poll++) {
+            sleepTask(poll == 0 ? 700 : 600);
             attackOrRallyButton = templateSearchHelper.locatePattern(
-                    TemplatesEnum.RALLY_BUTTON,
-                    SearchConfigConstants.SINGLE_WITH_RETRIES);
-            rally = true;
-        } else {
-            attackOrRallyButton = templateSearchHelper.locatePattern(
-                    TemplatesEnum.MERCENARY_ATTACK_BUTTON,
-                    SearchConfigConstants.SINGLE_WITH_RETRIES);
+                    nextControl, SearchConfigConstants.DEFAULT_SINGLE);
+            if (attackOrRallyButton.isFound()) {
+                logDebug("Mercenary attack screen ready at poll " + (poll + 1));
+                break;
+            }
         }
 
         if (attackOrRallyButton == null || !attackOrRallyButton.isFound()) {

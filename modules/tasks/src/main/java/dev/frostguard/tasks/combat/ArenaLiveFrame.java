@@ -25,9 +25,15 @@ final class ArenaLiveFrame {
     }
 
     static ImageSearchResultData equalize(RawImageData frame) {
-        return !formation(frame) ? ImageSearchResultData.miss()
-                : match(frame,TemplatesEnum.SERVE_EMU_ARENA_EQUALIZE_2026,
-                        220,1125,375,1275,89);
+        if (!formation(frame)) return ImageSearchResultData.miss();
+        // 20 Nov: Balance is a THIRD button, and Equalize has moved left.
+        // Previous x220..375 ROI could never contain its complete label.
+        ImageSearchResultData current = match(frame,
+                TemplatesEnum.SERVE_EMU_ARENA_EQUALIZE_NOV20_CURRENT,
+                130,1115,295,1275,90);
+        return current.isFound() ? current : match(frame,
+                TemplatesEnum.SERVE_EMU_ARENA_EQUALIZE_2026,
+                220,1125,375,1275,89);
     }
 
     static ImageSearchResultData fight(RawImageData frame) {
@@ -67,8 +73,14 @@ final class ArenaLiveFrame {
     }
 
     static boolean arenaHome(RawImageData frame) {
-        return valid(frame) && match(frame,TemplatesEnum.SERVE_EMU_ARENA_TITLE,
-                70,0,470,105,90).isFound();
+        // The current live title reads "Arena of Expedition"; the older
+        // template from a former layout scores below threshold on it.
+        // Prefer the exact new live screenshot crop before legacy fallback.
+        return valid(frame)
+                && (match(frame, TemplatesEnum.SERVE_EMU_ARENA_HOME_TITLE_NOV_2026,
+                        70,0,490,115,90).isFound()
+                    || match(frame,TemplatesEnum.SERVE_EMU_ARENA_TITLE,
+                        70,0,470,105,90).isFound());
     }
 
     static boolean cityOrWorld(RawImageData frame) {
@@ -84,8 +96,11 @@ final class ArenaLiveFrame {
     }
 
     static boolean challengeList(RawImageData frame) {
-        return valid(frame) && match(frame,TemplatesEnum.SERVE_EMU_ARENA_LIST_TITLE,
-                220,140,530,260,90).isFound();
+        return valid(frame)
+                && (match(frame, TemplatesEnum.SERVE_EMU_ARENA_LIST_TITLE_NOV20_CURRENT,
+                        220,125,535,270,90).isFound()
+                    || match(frame,TemplatesEnum.SERVE_EMU_ARENA_LIST_TITLE,
+                        220,140,530,260,90).isFound());
     }
 
     private static ImageSearchResultData match(RawImageData frame,TemplatesEnum t,

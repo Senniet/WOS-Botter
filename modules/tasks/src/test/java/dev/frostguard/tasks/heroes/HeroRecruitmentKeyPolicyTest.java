@@ -22,6 +22,18 @@ class HeroRecruitmentKeyPolicyTest {
         assertFalse(HeroRecruitmentKeyPolicy.mayRecruitWithKey(true,0,0,true));
     }
 
+    @Test void unknownKeyCountSchedulesBoundedRetryWithoutHidingUpcomingFreeClaim() {
+        java.time.LocalDateTime now = java.time.LocalDateTime.of(2026, 11, 19, 22, 30);
+        assertEquals(now.plusMinutes(20), HeroRecruitmentRoutine.nextUnknownKeyCheck(
+                now, java.time.Duration.ofHours(2), java.time.Duration.ofDays(1), true, true));
+        assertEquals(now.plusMinutes(4).plusSeconds(12),
+                HeroRecruitmentRoutine.nextUnknownKeyCheck(
+                        now, java.time.Duration.ofMinutes(4), java.time.Duration.ofDays(1),
+                        true, true));
+        assertEquals(now.plusMinutes(20), HeroRecruitmentRoutine.nextUnknownKeyCheck(
+                now, null, null, true, true));
+    }
+
     @Test void verifiedSingleKeyConsumptionExcludesDoubleOrGemExpense() {
         assertTrue(HeroRecruitmentKeyPolicy.verifiedSingleKeySpent(2,1));
         assertTrue(HeroRecruitmentKeyPolicy.verifiedSingleKeySpent(1,0));

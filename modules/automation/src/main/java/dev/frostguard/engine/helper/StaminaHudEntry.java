@@ -25,6 +25,11 @@ final class StaminaHudEntry {
             int r=(c>>16)&255, g=(c>>8)&255, b=c&255;
             if(g>=105 && g>r*1.30 && g>b*1.20)green++;
         }
-        return green>=220?BAR_CENTER:null;
+        // Current 2026 City HUD can render the stamina indicator as a narrow
+        // green ring around the icon. The actual 46-stamina frame yields 49
+        // qualifying pixels in this ROI, not the 95 once required for the
+        // older wide bar. A separate City/World anchor and two-frame agreement
+        // still guard the one HUD tap; City Bonus and modal frames lack it.
+        return green >= 35 ? BAR_CENTER : null;
     }
 }

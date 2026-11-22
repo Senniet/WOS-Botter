@@ -24,7 +24,7 @@ public class OnlineRewardsRoutine extends DelayedTask {
 
     @Override protected void execute(){
         Integer raw=profile.getConfig(ConfigurationKeyEnum.ONLINE_REWARDS_CHECK_INTERVAL_INT,Integer.class);
-        int minutes=raw==null?90:Math.clamp(raw,30,1440);
+        int minutes=raw==null?120:Math.clamp(raw,30,1440);
         boolean sidebar=false, entered=false;
         try{
             sidebar=navigationHelper.openSidebarSection(SidebarSection.DAILY);

@@ -30,7 +30,7 @@ public class SmartDailyOverviewRoutine extends DelayedTask {
 
     @Override protected void execute(){
         Integer raw=profile.getConfig(ConfigurationKeyEnum.SMART_DAILY_OVERVIEW_INTERVAL_INT,Integer.class);
-        int minutes=raw==null?90:Math.clamp(raw,30,1440);
+        int minutes=raw==null?120:Math.clamp(raw,30,1440);
         boolean opened=false;
         boolean closed=false;
         Set<TpDailyTaskEnum> ready=Set.of();
@@ -92,6 +92,14 @@ public class SmartDailyOverviewRoutine extends DelayedTask {
             ConfigurationKeyEnum key=type.getConfigKey();
             if(key==null || !Boolean.TRUE.equals(profile.getConfig(key,Boolean.class))){
                 logInfo("Smart Daily Overview: "+type+" disabled, respecting current profile");
+                continue;
+            }
+            if (type == TpDailyTaskEnum.PET_ADVENTURE
+                    && dev.frostguard.tasks.pets.PetAdventureAttemptsGate.blockedUntilReset(
+                            profile.getConfig(ConfigurationKeyEnum.PET_ADVENTURE_ATTEMPTS_EXHAUSTED_UNTIL_STRING,
+                                    String.class), now)) {
+                logInfo("Smart Daily Overview: Pet Adventure exhausted until game reset; "
+                        + "ignoring green sidebar badge instead of overriding its reset schedule");
                 continue;
             }
             // The actual task takes over UI only AFTER we have exited Home.

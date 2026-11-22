@@ -13,6 +13,16 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
 class IntelCyclePolicyTest {
+    @org.junit.jupiter.api.Test
+    void confirmedGreenIntelWithUnrecognizedMarkersRetriesBeforeReset() {
+        var late = java.time.LocalDateTime.of(2026, 11, 19, 20, 9);
+        org.junit.jupiter.api.Assertions.assertEquals(late.plusMinutes(15),
+                IntelCyclePolicy.retryAfterUnknownMarkers(late));
+        org.junit.jupiter.api.Assertions.assertTrue(
+                IntelCyclePolicy.retryAfterUnknownMarkers(late).isBefore(
+                        IntelCyclePolicy.nextRefresh(late, java.time.ZoneId.of("Europe/Amsterdam"))));
+    }
+
 
     private static final ZoneId BERLIN = ZoneId.of("Europe/Berlin");
 

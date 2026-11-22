@@ -59,6 +59,7 @@ private static final int ERROR_RETRY_MINUTES_VALUE = 10;
 private final ChiefOrderType chiefOrderType;
 private boolean enactDeferred;
 private boolean returnedHomeDirectly;
+private Long confirmedPointBalanceFirst, confirmedPointBalanceSecond;
 
 private enum OrderSelection { SELECTED, ALREADY_USED, UNKNOWN }
     enum OrderGate { ALREADY_USED, TRY_ICON, UNKNOWN }
@@ -91,6 +92,8 @@ public ChiefOrderRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask, Chie
     private void executeChiefOrderWork() {
         enactDeferred = false;
         returnedHomeDirectly = false;
+        confirmedPointBalanceFirst = null;
+        confirmedPointBalanceSecond = null;
         logInfo(routineLogChiefOrderLine("Starting " + chiefOrderType.getDescription()));
 
         if (!openUpChiefOrderMenu()) {
@@ -107,12 +110,22 @@ public ChiefOrderRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask, Chie
             if (!enactDeferred) manageTaskFailure("Enact did not produce a verified transition");
             return;
         }
-        // An Enact button disappearing is not proof of a reward/activation.
-        if (!returnedHomeDirectly && !dismissVerifiedChiefOrderReward()) {
-            manageTaskFailure("Rewards not verified or could not be dismissed");
+        // A points-based Enact may return to the Chief Orders LIST, with the
+        // exact tile glowing ACTIVE and no generic Rewards overlay at all.
+        // Verify that named tile twice before treating the order as complete.
+        // Never retry Enact based on a disappearing button alone.
+        if (returnedHomeDirectly || confirmActiveOrderAfterEnact()) {
+            queueNextRun();
             return;
         }
-        queueNextRun();
+        if (expectsRewards(chiefOrderType) && dismissVerifiedChiefOrderReward()) {
+            queueNextRun();
+            return;
+        }
+        manageTaskFailure(chiefOrderType == ChiefOrderType.RUSH_JOB
+                ? "Neither verified Active state nor Rush Job Rewards completion"
+                : "Order activation not verified Active or back at City Home; no Rewards expected");
+        return;
     }
 
     private void returnHomeAfterChiefOrderIfVisible() {
@@ -135,6 +148,28 @@ public ChiefOrderRoutine(AccountDescriptor profile, TpDailyTaskEnum tpTask, Chie
             markWorkIncomplete("Chief Order: Home not verified");
             logWarning(routineLogChiefOrderLine("Failed to verify Home: " + missing.getMessage()));
         }
+    }
+
+    private boolean confirmActiveOrderAfterEnact() {
+        var first=emuManager.captureScreen(EMULATOR_NUMBER);
+        if (!ChiefOrderLiveFrame.isActiveForOrder(
+                first, chiefOrderType.getDescription())) return false;
+        sleepTask(240);
+        var second=emuManager.captureScreen(EMULATOR_NUMBER);
+        if (!ChiefOrderLiveFrame.isActiveForOrder(
+                second, chiefOrderType.getDescription())) {
+            logWarning(routineLogChiefOrderLine("Post-Enact Active status unstable; "
+                    + "no second Enact"));
+            return false;
+        }
+        logInfo(routineLogChiefOrderLine(chiefOrderType.getDescription()
+                + " verified ACTIVE on two Chief Order list frames; "
+                + "no Rewards screen required"));
+        return true;
+    }
+
+    static boolean expectsRewards(ChiefOrderType type) {
+        return type == ChiefOrderType.RUSH_JOB;
     }
 
     static boolean completedWithVerifiedRewards(ChiefOrderRewardFrame.Exit exit) {
@@ -196,16 +231,17 @@ private void manageTaskFailure(String reason) {
 
 private OrderSelection chooseOrderType() {
         if (emuManager.getSelectedEmulatorType() == EmulatorType.SERVE_EMU) {
-            var list = ChiefOrderLiveFrame.inspectList(
-                    emuManager.captureScreen(EMULATOR_NUMBER), chiefOrderType.getDescription());
+            var initialFrame = emuManager.captureScreen(EMULATOR_NUMBER);
+            var list = ChiefOrderLiveFrame.inspectList(initialFrame, chiefOrderType.getDescription());
             OrderGate gate = orderGate(list.state());
-            if (gate == OrderGate.ALREADY_USED) {
-                sleepTask(210);
-                var second = ChiefOrderLiveFrame.inspectList(
-                        emuManager.captureScreen(EMULATOR_NUMBER), chiefOrderType.getDescription());
-                if (orderGate(second.state()) != OrderGate.ALREADY_USED) {
-                    logWarning(routineLogChiefOrderLine("Order status changed or unreadable; "
-                            + "no claim attempted: " + list.state() + " -> " + second.state()));
+            sleepTask(200);
+            var secondFrame = emuManager.captureScreen(EMULATOR_NUMBER);
+            var second = ChiefOrderLiveFrame.inspectList(secondFrame, chiefOrderType.getDescription());
+            OrderGate secondGate = orderGate(second.state());
+            if (gate == OrderGate.ALREADY_USED || secondGate == OrderGate.ALREADY_USED) {
+                if (gate != OrderGate.ALREADY_USED || secondGate != OrderGate.ALREADY_USED) {
+                    logWarning(routineLogChiefOrderLine("Order status unstable "
+                            + list.state() + " -> " + second.state() + "; no action"));
                     return OrderSelection.UNKNOWN;
                 }
                 Duration verifiedRemaining = confirmedCountdown(list.remaining(), second.remaining());
@@ -217,9 +253,22 @@ private OrderSelection chooseOrderType() {
                         + "); no Enact/Claim action; next check " + next));
                 return OrderSelection.ALREADY_USED;
             }
-            if (gate != OrderGate.TRY_ICON) {
-                logWarning(routineLogChiefOrderLine("Cannot verify order list state: " + list));
+            // Tiny status text can OCR as UNKNOWN, even on an available
+            // full-size tile. The distinctive ICON plus two confirmed board
+            // frames and the exact order book later are sufficient to OPEN
+            // a preview. This fallback never authorizes spending.
+            if (!ChiefOrderLiveFrame.isChiefOrderList(initialFrame)
+                    || !ChiefOrderLiveFrame.isChiefOrderList(secondFrame)
+                    || !eligibleForIconSelection(gate, secondGate)) {
+                logWarning(routineLogChiefOrderLine("Cannot verify order list state: "
+                        + list + " -> " + second));
                 return OrderSelection.UNKNOWN;
+            }
+            confirmedPointBalanceFirst = ChiefOrderLiveFrame.availableOrderPoints(initialFrame);
+            confirmedPointBalanceSecond = ChiefOrderLiveFrame.availableOrderPoints(secondFrame);
+            if (gate == OrderGate.UNKNOWN || secondGate == OrderGate.UNKNOWN) {
+                logInfo(routineLogChiefOrderLine("Order status OCR uncertain; "
+                        + "opening only the verified unique tile for exact book confirmation"));
             }
         }
 
@@ -228,6 +277,15 @@ private OrderSelection chooseOrderType() {
         if (!orderButton.isFound()) {
             logWarning(routineLogChiefOrderLine("Available order icon not positively matched"));
             return OrderSelection.UNKNOWN;
+        }
+        if (emuManager.getSelectedEmulatorType() == EmulatorType.SERVE_EMU) {
+            sleepTask(190);
+            var reconfirm = templateSearchHelper.locatePattern(
+                    chiefOrderType.getTemplate(), SearchConfigConstants.DEFAULT_SINGLE);
+            if (!RecognitionConsensus.agrees(orderButton, reconfirm, 14)) {
+                logWarning(routineLogChiefOrderLine("Order tile icon unstable; no preview tap"));
+                return OrderSelection.UNKNOWN;
+            }
         }
         tapInside(orderButton);
         sleepTask(580);
@@ -239,6 +297,12 @@ private OrderSelection chooseOrderType() {
             return OrderSelection.UNKNOWN;
         }
         return OrderSelection.SELECTED;
+    }
+
+    static boolean eligibleForIconSelection(OrderGate first, OrderGate second) {
+        // UNKNOWN status may OPEN the book only after distinct icon
+        // confirmation. ACTIVATED / ON_COOLDOWN never do.
+        return first != OrderGate.ALREADY_USED && second != OrderGate.ALREADY_USED;
     }
 
     static OrderGate orderGate(ChiefOrderLiveFrame.ListState state) {
@@ -263,28 +327,36 @@ private OrderSelection chooseOrderType() {
     }
 
 private boolean enactOrderFlow() {
-        // Chief Order Enact is not a free button: the live Productivity Day
-        // offer consumes 50,000 order points. The old routine clicked Enact
-        // solely from a blue button template, without looking at price.
-        // Serve-EMU is restricted to explicitly FREE actions.
+        // Chief Order points are an earned resource, not diamonds, and have
+        // no arbitrary spending cap. Require the EXACT order
+        // title, explicit Enact price and stable available balance twice.
+        // Unknown price/identity or insufficient points is a safe defer.
         if (emuManager.getSelectedEmulatorType() == EmulatorType.SERVE_EMU) {
-            ChiefOrderLiveFrame.Inspection inspection = ChiefOrderLiveFrame.inspect(
+            ChiefOrderLiveFrame.Inspection first = ChiefOrderLiveFrame.inspect(
                     emuManager.captureScreen(EMULATOR_NUMBER),
                     chiefOrderType.getDescription());
-            if (inspection.action() != ChiefOrderLiveFrame.Action.FREE) {
+            sleepTask(220);
+            ChiefOrderLiveFrame.Inspection second = ChiefOrderLiveFrame.inspect(
+                    emuManager.captureScreen(EMULATOR_NUMBER),
+                    chiefOrderType.getDescription());
+            if (!ChiefOrderSpendPolicy.allowed(first, second,
+                    chiefOrderType.getDescription(),
+                    confirmedPointBalanceFirst, confirmedPointBalanceSecond)) {
                 enactDeferred = true;
-                String why = inspection.action() == ChiefOrderLiveFrame.Action.COSTS_POINTS
-                        ? "Costs " + inspection.cost() + " Chief Order points; paid Enact blocked"
-                        : "Enact price or order identity could not be verified free";
+                String why = "Chief Order not authorized: first=" + first.action()
+                        + " cost=" + first.cost() + ", second=" + second.action()
+                        + " cost=" + second.cost() + ", balances="
+                        + confirmedPointBalanceFirst + "/" + confirmedPointBalanceSecond
+                        + "; identity, price or available points not verified";
                 markWorkIncomplete("Chief Order: " + why);
-                LocalDateTime retry = inspection.action() == ChiefOrderLiveFrame.Action.COSTS_POINTS
-                        ? LocalDateTime.now().plusHours(chiefOrderType.getCooldownHours())
-                        : LocalDateTime.now().plusMinutes(ERROR_RETRY_MINUTES_VALUE);
+                LocalDateTime retry = LocalDateTime.now().plusMinutes(ERROR_RETRY_MINUTES_VALUE);
                 reschedule(retry);
-                logWarning(routineLogChiefOrderLine(why + "; next check " + retry
-                        + "; no Enact tap or resource consumption"));
+                logWarning(routineLogChiefOrderLine(why + "; no Enact tap"));
                 return false;
             }
+            logInfo(routineLogChiefOrderLine("Chief Order Enact authorized: "
+                    + second.order() + ", points=" + second.cost()
+                    + " (balance verified); no diamonds"));
         }
 		logInfo(routineLogChiefOrderLine("Scanning for Chief Order Enact button"));
 
@@ -306,7 +378,7 @@ private boolean enactOrderFlow() {
             sleepTask(400);
             if (ChiefOrderLiveFrame.isCityHome(emuManager.captureScreen(EMULATOR_NUMBER))) {
                 returnedHomeDirectly = true;
-                logInfo(routineLogChiefOrderLine("Free action returned directly to verified City Home"));
+                logInfo(routineLogChiefOrderLine("Enact returned directly to verified City Home"));
                 return true;
             }
         }

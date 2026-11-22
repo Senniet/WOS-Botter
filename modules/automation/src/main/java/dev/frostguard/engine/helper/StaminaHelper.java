@@ -99,7 +99,10 @@ public class StaminaHelper {
                     throw new IllegalStateException(
                             "Stamina bar changed before tap; refusing unverified HUD click");
                 }
-                taps.tapInside(AreaData.of(29,103,56,110),1,settleMs);
+                // Keep the tap on the actual narrow green fill. The text
+                // above/right of it is not a reliable touch target at low
+                // stamina levels on Serve-Emu 720x1280.
+                taps.tapInside(AreaData.of(28,103,38,110),1,settleMs);
             }
 
             @Override
@@ -139,9 +142,41 @@ public class StaminaHelper {
 
             @Override
             public void cleanup() {
-                device.pressBack(deviceSlot);
+                // Back may leave the modal open, or navigate away from a
+                // changed screen. The actual X is verified on two frames.
+                closeVerifiedObtainMore();
             }
         };
+    }
+
+    /**
+     * Close only the confirmed Chief Stamina Obtain more modal, not a random
+     * popup or game screen. This is safe even when the earlier title poll
+     * failed due to a delayed animation: the final capture is authoritative.
+     */
+    private boolean closeVerifiedObtainMore() {
+        var first=ObtainMoreStaminaOverlayFrame.verifiedClose(
+                device.captureScreen(deviceSlot));
+        if (!first.isFound()) return false;
+        pause(160);
+        var second=ObtainMoreStaminaOverlayFrame.verifiedClose(
+                device.captureScreen(deviceSlot));
+        if (!RecognitionConsensus.agrees(first, second, 12)) {
+            emitWarn("Chief Stamina Obtain more title/X not stable; refusing cleanup tap");
+            return false;
+        }
+        var x=second.getPoint();
+        taps.tapInside(AreaData.of(x.col()-3,x.row()-3,
+                x.col()+3,x.row()+3),1,300);
+        pause(400);
+        if (ObtainMoreStaminaOverlayFrame.verifiedClose(
+                device.captureScreen(deviceSlot)).isFound()) {
+            emitWarn("Chief Stamina Obtain more remained open after verified X; "
+                    + "no repeated tap");
+            return false;
+        }
+        emitInfo("Chief Stamina Obtain more closed via verified X");
+        return true;
     }
 
     StaminaHelper(StaminaService persistence, Long accountKey, HudStaminaUi hudStaminaUi) {
@@ -199,8 +234,11 @@ public class StaminaHelper {
             emitWarn("Stamina update error: " + ex.getMessage());
         } finally {
             // An unexpected screen might be Chief Profile or a mission page.
-            // Only close a positively identified Obtain-more dialog here.
-            if (dialogVerified) {
+            // A slow dialog transition can cause both initial title polls
+            // to fail even though Obtain more DID open. The real emulator
+            // must always get one safe cleanup opportunity in that case;
+            // closeVerifiedObtainMore itself never taps without proof.
+            if (dialogVerified || device != null) {
                 try {
                     hudStaminaUi.cleanup();
                 } catch (Exception ex) {
@@ -249,13 +287,33 @@ public class StaminaHelper {
      * @param itemReserve number of items never to spend
      */
     public StaminaTopUpResult topUpFromHud(int targetStamina, int itemReserve) {
-        taps.tapInside(CommonGameAreas.HUD_STAMINA_ENTRY, 1, 200);
-        pause(1000);
-
-        StaminaTopUpResult result = useItemsInOpenDialog(targetStamina, itemReserve);
-        device.pressBack(deviceSlot);
-        pause(500);
-        return result;
+        if (!verifiedStaminaHudAvailable()) {
+            emitWarn("Stamina top-up: not at verified City/World HUD; no blind entry tap");
+            return StaminaTopUpResult.uiNotFound();
+        }
+        try {
+            hudStaminaUi.openStaminaDialog(STAMINA_DIALOG_SETTLE_MS);
+            if (!hudStaminaUi.isStaminaDialogVisible()) {
+                pause(300);
+                if (!hudStaminaUi.isStaminaDialogVisible()) {
+                    emitWarn("Stamina top-up: Obtain more not confirmed; no item/premium tap");
+                    return StaminaTopUpResult.uiNotFound();
+                }
+            }
+            return useItemsInOpenDialog(targetStamina, itemReserve);
+        } catch (Exception ex) {
+            propagateControlFailure(ex);
+            emitWarn("Stamina top-up could not open/verify dialog: "+ex.getMessage());
+            return StaminaTopUpResult.uiNotFound();
+        } finally {
+            // Also attempt verified cleanup when a delayed dialog appeared
+            // after an earlier negative title check.
+            try { hudStaminaUi.cleanup(); }
+            catch (Exception ex) {
+                propagateControlFailure(ex);
+                emitWarn("Stamina top-up verified cleanup unavailable: "+ex.getMessage());
+            }
+        }
     }
 
     RawImageData captureStaminaDiagnosticFrame() {
@@ -291,11 +349,23 @@ public class StaminaHelper {
 
     /** Same, but for the dialog the game opens itself when a red deploy cost is pressed. */
     public StaminaTopUpResult refillFromOpenDialog(int targetStamina, int itemReserve) {
-        StaminaTopUpResult result = useItemsInOpenDialog(targetStamina, itemReserve);
-        emitInfo("Closing obtain-more dialog");
-        taps.tapNear(CommonGameAreas.STAMINA_DIALOG_CLOSE, TapJitterPolicy.DEFAULT_POINT_JITTER_RADIUS);
-        pause(800);
-        return result;
+        try {
+            if (!hudStaminaUi.isStaminaDialogVisible()) {
+                emitWarn("Stamina refill: Obtain more title unverified; no item/premium tap");
+                return StaminaTopUpResult.uiNotFound();
+            }
+            return useItemsInOpenDialog(targetStamina, itemReserve);
+        } catch (Exception ex) {
+            propagateControlFailure(ex);
+            emitWarn("Stamina refill screen validation failed: "+ex.getMessage());
+            return StaminaTopUpResult.uiNotFound();
+        } finally {
+            try { hudStaminaUi.cleanup(); }
+            catch (Exception ex) {
+                propagateControlFailure(ex);
+                emitWarn("Stamina refill verified cleanup unavailable: "+ex.getMessage());
+            }
+        }
     }
 
     private StaminaTopUpResult useItemsInOpenDialog(int targetStamina, int itemReserve) {

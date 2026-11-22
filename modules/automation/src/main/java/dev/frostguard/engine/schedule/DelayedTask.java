@@ -453,6 +453,7 @@ public abstract class DelayedTask implements Runnable, Delayed, StaminaWaitSched
     public void attachToken(PreemptionToken token) { this.preemptionToken = token; }
 
     protected void checkPreemption() {
+        TaskExecutionPauseGate.checkpoint();
         if (Thread.currentThread().isInterrupted()) {
             throw new StopExecutionException("Task interrupted by user request");
         }

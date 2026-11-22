@@ -63,7 +63,8 @@ public class HeroRecruitmentRoutine extends DelayedTask {
     private static final int OCR_FAILURE_RETRY_MINUTES = 5;
     // With owned-key recruitment enabled, check reasonably often for newly
     // earned keys, but not every 5 minutes through a 48-hour Epic cooldown.
-    private static final int OWNED_KEY_RECHECK_MINUTES = 20;
+    private static final int OWNED_KEY_RECHECK_MINUTES = 10;
+    private static final int MAX_KEY_CLAIMS_PER_CATEGORY = 5;
 
     /** Maximum OCR retry attempts for time extraction */
     private static final int MAX_OCR_RETRIES = 3;
@@ -112,6 +113,11 @@ public class HeroRecruitmentRoutine extends DelayedTask {
 
     private boolean confirmedDailyMissionProgress;
     private boolean unknownClaimOutcome;
+    // An unreadable owned-key counter is NOT an unverified purchase.
+    // Track it separately so the routine can safely exit City and defer,
+    // rather than throwing before cleanup and creating five-minute loops.
+    private boolean ownedKeyEvidenceMissing;
+    private boolean recruitmentClaimTransitionUnknown;
 
     // ===============================
     // CONSTRUCTOR
@@ -154,7 +160,29 @@ public class HeroRecruitmentRoutine extends DelayedTask {
 
         confirmedDailyMissionProgress = false;
         unknownClaimOutcome = false;
+        ownedKeyEvidenceMissing = false;
+        recruitmentClaimTransitionUnknown = false;
         if (currentHeroRecruitmentVisible()) {
+            processCurrentFreeRecruitment();
+            return;
+        }
+        // If Java restarted or a previous attempt timed out on the already
+        // awarded hero card / Rewards overlay, resume the verified dismissal
+        // before trying navigation. There is no Recruit click in this path.
+        // The two-frame exit checks are the same ones used after a fresh Free.
+        if (emuManager.getSelectedEmulatorType()
+                == dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU
+                && (HeroRecruitmentRevealFrame.alreadyOwned(
+                        emuManager.captureScreen(EMULATOR_NUMBER))
+                    || locateFreeRewardExit().isFound())) {
+            logInfo("Hero Recruitment found unfinished awarded reward overlay; "
+                    + "resuming safe exit without recruiting again");
+            if (!waitForFreeRewardsAndReturn()) {
+                reschedule(LocalDateTime.now().plusMinutes(OCR_FAILURE_RETRY_MINUTES));
+                throw new TaskOutcomeUnknownException(
+                        "Previous free reward exit unverified; no extra claim attempted");
+            }
+            confirmedDailyMissionProgress = true;
             processCurrentFreeRecruitment();
             return;
         }
@@ -263,6 +291,11 @@ public class HeroRecruitmentRoutine extends DelayedTask {
                     new PointData(238, 24), new PointData(279, 64),
                     advancedFree, advancedKeys);
             complete &= advancedOk;
+            if (!advancedOk && recruitmentClaimTransitionUnknown) {
+                reschedule(LocalDateTime.now().plusMinutes(OCR_FAILURE_RETRY_MINUTES));
+                throw new TaskOutcomeUnknownException(
+                        "Advanced claim or reward transition unverified; later recruitment blocked");
+            }
             if (!advancedOk && !currentHeroRecruitmentVisible()) {
                 logWarning("Advanced transition unknown; later recruitment taps blocked");
                 reschedule(LocalDateTime.now().plusMinutes(OCR_FAILURE_RETRY_MINUTES));
@@ -278,6 +311,11 @@ public class HeroRecruitmentRoutine extends DelayedTask {
                     new PointData(422, 24), new PointData(464, 64),
                     epicFree, epicKeys);
             complete &= epicOk;
+            if (!epicOk && recruitmentClaimTransitionUnknown) {
+                reschedule(LocalDateTime.now().plusMinutes(OCR_FAILURE_RETRY_MINUTES));
+                throw new TaskOutcomeUnknownException(
+                        "Epic claim or reward transition unverified; later recruitment blocked");
+            }
             if (!epicOk && !currentHeroRecruitmentVisible()) {
                 logWarning("Epic transition unknown; Points Chest tap blocked");
                 reschedule(LocalDateTime.now().plusMinutes(OCR_FAILURE_RETRY_MINUTES));
@@ -288,9 +326,26 @@ public class HeroRecruitmentRoutine extends DelayedTask {
         if (points && currentHeroRecruitmentVisible()) {
             claimReadyPointsChest();
         }
+        if (!complete && ownedKeyEvidenceMissing && !recruitmentClaimTransitionUnknown) {
+            // No recruitment button was tapped: this is simply unreadable
+            // inventory, not an uncertain claim. A bounded retry must not
+            // leave the next task stuck on the Hero Recruitment screen.
+            Duration advancedWait = advancedFree ? readModernCooldown(
+                    "Advanced", ADVANCED_OCR_TOP_LEFT, ADVANCED_OCR_BOTTOM_RIGHT) : null;
+            Duration epicWait = epicFree ? readModernCooldown(
+                    "Epic", EPIC_OCR_TOP_LEFT, EPIC_OCR_BOTTOM_RIGHT) : null;
+            LocalDateTime next = nextUnknownKeyCheck(LocalDateTime.now(),
+                    advancedWait, epicWait, advancedFree, epicFree);
+            markWorkIncomplete("Hero Recruitment: owned-key inventory/action not verified; no keys spent");
+            reschedule(next);
+            logWarning("Hero Recruitment HUD unreadable; returning to City before "
+                    + "next safe check at " + next.format(DATETIME_FORMATTER));
+            returnFromRecruitmentToCity();
+            return;
+        }
         if (!complete) {
             reschedule(LocalDateTime.now().plusMinutes(OCR_FAILURE_RETRY_MINUTES));
-            throw new TaskOutcomeUnknownException("Hero Recruitment outcome uncertain; "
+            throw new TaskOutcomeUnknownException("Hero Recruitment claim transition uncertain; "
                     + "no second tap or later stage; retry scheduled");
         }
         // A missing green Free button with a visible Next Free timer is a
@@ -312,29 +367,50 @@ public class HeroRecruitmentRoutine extends DelayedTask {
         returnFromRecruitmentToCity();
     }
 
+    static LocalDateTime nextUnknownKeyCheck(LocalDateTime now,
+            Duration advanced, Duration epic, boolean advancedEnabled, boolean epicEnabled) {
+        // An unknown counter must not produce 5-minute error retries. Do not
+        // delay a verified Free timer beyond when its claim becomes available.
+        LocalDateTime next = now.plusMinutes(20);
+        if (advancedEnabled && advanced != null && !advanced.isNegative()) {
+            LocalDateTime free = now.plus(advanced).plusSeconds(12);
+            if (free.isBefore(next)) next = free;
+        }
+        if (epicEnabled && epic != null && !epic.isNegative()) {
+            LocalDateTime free = now.plus(epic).plusSeconds(12);
+            if (free.isBefore(next)) next = free;
+        }
+        return next;
+    }
+
     private void returnFromRecruitmentToCity() {
-        // Prefer the two known header backs over the expensive global
-        // unknown-screen recovery sweep recorded in the 20:49 Task Coach run.
-        for (int step=0; step<2; step++) {
-            RawImageData frame=emuManager.captureScreen(EMULATOR_NUMBER);
-            if (cityHudVisible(frame)) {
-                logInfo("Hero Recruitment returned to City via direct header navigation");
+        // Two direct, known pages: Recruitment -> Heroes -> City.
+        // Previously this used the generic ANY/Home recovery for each arrow,
+        // spending 60+ seconds probing unrelated screens while the task blocked
+        // all other automation. Each click is still verified on TWO frames.
+        for(int step=0;step<3;step++) {
+            RawImageData first=emuManager.captureScreen(EMULATOR_NUMBER);
+            if(cityHudVisible(first)) {
+                logInfo("Hero Recruitment returned to City using verified header navigation");
                 return;
             }
-            if (!currentHeroRecruitmentVisible() && !heroPageVisible(frame)) break;
-            var arrow=OpenCvPatternLocator.locatePattern(frame,
-                    TemplatesEnum.GAME_HEADER_BACK_ARROW_CURRENT.getTemplate(),
-                    new PointData(0,0),new PointData(110,105),90);
-            if (!arrow.isFound()) break;
+            var arrow=HeroRecruitmentExitFrame.back(first);
+            if(!arrow.isFound())break;
             sleepTask(130);
-            RawImageData check=emuManager.captureScreen(EMULATOR_NUMBER);
-            var confirmed=OpenCvPatternLocator.locatePattern(check,
-                    TemplatesEnum.GAME_HEADER_BACK_ARROW_CURRENT.getTemplate(),
-                    new PointData(0,0),new PointData(110,105),90);
-            if (!RecognitionConsensus.agrees(arrow,confirmed,12)) break;
-            tapInside(confirmed);
-            sleepTask(450);
+            var check=HeroRecruitmentExitFrame.back(
+                    emuManager.captureScreen(EMULATOR_NUMBER));
+            if(!RecognitionConsensus.agrees(arrow,check,12))break;
+            tapInside(check);
+            sleepTask(500);
+            logInfo("Hero Recruitment verified direct Back arrow step " + (step+1));
         }
+        if(cityHudVisible(emuManager.captureScreen(EMULATOR_NUMBER))) {
+            logInfo("Hero Recruitment City confirmed after final direct Back");
+            return;
+        }
+        // Unrecognized screens must never receive guessed taps.
+        logWarning("Hero Recruitment direct City return not confirmed; "
+                + "using bounded normal Home navigator");
         navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME);
     }
 
@@ -435,13 +511,38 @@ public class HeroRecruitmentRoutine extends DelayedTask {
             boolean freeEnabled, boolean keysEnabled) {
         if (!currentHeroRecruitmentVisible()) return false;
         if (freeEnabled) {
-            var free = templateSearchHelper.locateAction(TemplatesEnum.SERVE_EMU_HERO_FREE_BUTTON,
-                    TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(2)
-                            .withDelay(180).withThreshold(89).withArea(freeArea).build());
+            var freeConfig = TemplateSearchHelper.SearchConfig.builder()
+                    .withMaxAttempts(2).withDelay(180).withThreshold(89)
+                    .withArea(freeArea).build();
+            boolean freeMayBeReady = true;
+            if (emuManager.getSelectedEmulatorType()
+                    == dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU) {
+                // This is an expected "not present" condition while the Free
+                // cooldown runs. One passive image probe replaces repeated
+                // retries/fallbacks, but when the button might be ready the
+                // existing TWO-FRAME locateAction still authorizes any tap.
+                boolean visibleOnFirstFrame = templateSearchHelper.locatePatternFast(
+                        TemplatesEnum.SERVE_EMU_HERO_FREE_BUTTON, freeConfig).isFound();
+                if (!visibleOnFirstFrame) {
+                    Duration countdown = readModernCooldown(type,
+                            type.equals("Advanced") ? ADVANCED_OCR_TOP_LEFT : EPIC_OCR_TOP_LEFT,
+                            type.equals("Advanced") ? ADVANCED_OCR_BOTTOM_RIGHT : EPIC_OCR_BOTTOM_RIGHT);
+                    freeMayBeReady = shouldProbeFreeButtonAfterPassiveMiss(countdown);
+                    if (!freeMayBeReady) {
+                        logDebug(type + ": cooldown positively read as " + countdown
+                                + "; green Free is correctly absent, skipping redundant template retries");
+                    }
+                }
+            }
+            var free = freeMayBeReady
+                    ? templateSearchHelper.locateAction(
+                            TemplatesEnum.SERVE_EMU_HERO_FREE_BUTTON, freeConfig)
+                    : ImageSearchResultData.miss();
             if (free.isFound()) {
                 logInfo(type + ": free button verified; claiming free recruitment once");
                 tapInside(free);
                 if (!waitForFreeRewardsAndReturn()) {
+                    recruitmentClaimTransitionUnknown = true;
                     logWarning(type + ": free claim was not confirmed; no duplicate action");
                     return false;
                 }
@@ -455,48 +556,99 @@ public class HeroRecruitmentRoutine extends DelayedTask {
             return true;
         }
         if (!currentHeroRecruitmentVisible()) return false;
-        int before = readRecruitmentKeyCount(keyCountTopLeft, keyCountBottomRight);
-        sleepTask(190);
-        int confirmedBefore = readRecruitmentKeyCount(keyCountTopLeft, keyCountBottomRight);
-        if (before < 1 || before != confirmedBefore) {
-            logInfo(type + ": no two-frame confirmation of a positive owned-key count ("
-                    + before + "/" + confirmedBefore + "); no key spent");
-            return true;
+        for (int claim = 0; claim < MAX_KEY_CLAIMS_PER_CATEGORY; claim++) {
+            int before = readRecruitmentKeyCount(keyCountTopLeft, keyCountBottomRight);
+            if (before < 0) {
+                ownedKeyEvidenceMissing = true;
+                logWarning(type + ": owned-key counter unreadable on the first HUD frame; "
+                        + "skipping repeat OCR and refusing all key taps");
+                return false;
+            }
+            sleepTask(190);
+            int confirmedBefore = readRecruitmentKeyCount(keyCountTopLeft, keyCountBottomRight);
+            if (before != confirmedBefore) {
+                ownedKeyEvidenceMissing = true;
+                logWarning(type + ": owned-key counter unknown or unstable ("
+                        + before + "/" + confirmedBefore
+                        + "); no key spent; schedule a bounded retry after returning Home");
+                return false;
+            }
+            if (before == 0) {
+                logInfo(type + ": verified no owned keys remaining");
+                return true;
+            }
+            // Only the exact x1 key artwork is authorized. Never press x10,
+            // diamonds, or a generic yellow purchase control.
+            var keyOnce = templateSearchHelper.locateAction(keyButton,
+                    TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(2)
+                            .withDelay(160).withThreshold(96).withArea(keyArea).build());
+            if (!HeroRecruitmentKeyPolicy.mayRecruitWithKey(keysEnabled, before,
+                    confirmedBefore, keyOnce.isFound())) {
+                ownedKeyEvidenceMissing = true;
+                logWarning(type + ": positive owned-key count but verified x1 button absent; "
+                        + "refusing to spend; retry after leaving the Hero screen");
+                return false;
+            }
+            logInfo(type + ": spending one already-owned key ("
+                    + (claim + 1) + "/" + MAX_KEY_CLAIMS_PER_CATEGORY
+                    + ", confirmed remaining=" + before + ")");
+            tapInside(keyOnce);
+            if (!waitForModernRewardsAndReturn()) {
+                recruitmentClaimTransitionUnknown = true;
+                logWarning(type + ": key recruitment Rewards/exit unverified; stopping further key taps");
+                return false;
+            }
+            int after = readRecruitmentKeyCount(keyCountTopLeft, keyCountBottomRight);
+            sleepTask(140);
+            int confirmedAfter = readRecruitmentKeyCount(keyCountTopLeft, keyCountBottomRight);
+            if (after != confirmedAfter
+                    || !HeroRecruitmentKeyPolicy.verifiedSingleKeySpent(before, after)) {
+                recruitmentClaimTransitionUnknown = true;
+                logWarning(type + ": spent key did not have a verified one-key decrement: "
+                        + before + " -> " + after + "/" + confirmedAfter);
+                return false;
+            }
+            confirmedDailyMissionProgress = true;
+            logInfo(type + ": key claim verified; remaining=" + after);
+            if (after == 0) return true;
         }
-        // Only the exact x1 key artwork is authorized, never the right-side
-        // multi-recruit button, red x10 cost, gems or a generic yellow button.
-        var keyOnce = templateSearchHelper.locateAction(keyButton,
-                TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(2)
-                        .withDelay(160).withThreshold(96).withArea(keyArea).build());
-        if (!HeroRecruitmentKeyPolicy.mayRecruitWithKey(keysEnabled, before,
-                confirmedBefore, keyOnce.isFound())) {
-            logWarning(type + ": verified x1 key button absent; refusing to spend");
-            return true;
-        }
-        logInfo(type + ": spending one owned key (confirmed count " + before + ")");
-        tapInside(keyOnce);
-        if (!waitForModernRewardsAndReturn()) {
-            logWarning(type + ": key recruitment Rewards/exit unverified; never repeating key tap");
-            return false;
-        }
-        int after = readRecruitmentKeyCount(keyCountTopLeft, keyCountBottomRight);
-        sleepTask(140);
-        int confirmedAfter = readRecruitmentKeyCount(keyCountTopLeft, keyCountBottomRight);
-        if (after != confirmedAfter || !HeroRecruitmentKeyPolicy.verifiedSingleKeySpent(before, after)) {
-            logWarning(type + ": claimed key did not have verified one-key decrement: "
-                    + before + " -> " + after + "/" + confirmedAfter);
-            return false;
-        }
-        confirmedDailyMissionProgress = true;
-        logInfo(type + ": one saved-key recruitment confirmed; remaining keys=" + after);
+        logInfo(type + ": per-visit safety limit reached; other tasks may execute before remaining keys");
         return true;
+    }
+
+    static boolean shouldProbeFreeButtonAfterPassiveMiss(Duration cooldown) {
+        // A missing or near-expiring timer must NEVER suppress a possible
+        // free claim. Only an independently readable, stable future timer
+        // can justify skipping the expected-absent Free template.
+        return cooldown == null || cooldown.isNegative()
+                || cooldown.compareTo(Duration.ofSeconds(60)) <= 0;
     }
 
     /** Preserve the established green-Free reward flow independently of key rewards. */
     private boolean waitForFreeRewardsAndReturn() {
         boolean chestAdvanced = false;
-        for (int attempt = 0; attempt < 16; attempt++) {
+        boolean duplicateRevealAdvanced = false;
+        for (int attempt = 0; attempt < 20; attempt++) {
             sleepTask(250);
+            // The November 21 Epic free claim produced an already-owned
+            // Charlie hero card (converted to 10 shards), not the Rewards
+            // panel. Wait for two confirmed live frames, then tap a safe
+            // empty area once. The next screen is the normal Rewards panel,
+            // whose independently verified exit is handled below.
+            if (!duplicateRevealAdvanced
+                    && HeroRecruitmentRevealFrame.alreadyOwned(
+                            emuManager.captureScreen(EMULATOR_NUMBER))) {
+                sleepTask(160);
+                if (HeroRecruitmentRevealFrame.alreadyOwned(
+                        emuManager.captureScreen(EMULATOR_NUMBER))) {
+                    logInfo("Free recruitment: duplicate hero converted into shards; "
+                            + "advancing the verified hero reveal once");
+                    tapInside(new PointData(63, 885), new PointData(83, 907));
+                    duplicateRevealAdvanced = true;
+                    sleepTask(400);
+                    continue;
+                }
+            }
             // The 14:05 diagnostic captured a full-screen blue chest in the
             // snowy Hero Recruitment cutscene. This is a post-Free-claim
             // animation, not the Rewards exit overlay. Advance it once only
@@ -534,17 +686,31 @@ public class HeroRecruitmentRoutine extends DelayedTask {
             if (frame==null || !frame.isValid() || frame.getWidth()!=720 || frame.getHeight()!=1280)
                 return ImageSearchResultData.miss();
             PointData start=new PointData(190,1135),end=new PointData(530,1240);
-            ImageSearchResultData live=OpenCvPatternLocator.locatePattern(frame,
-                    TemplatesEnum.SERVE_EMU_HERO_REWARD_EXIT_LIVE_2026.getTemplate(),start,end,89);
-            return live.isFound() ? live : OpenCvPatternLocator.locatePattern(frame,
-                    TemplatesEnum.SERVE_EMU_HERO_REWARD_EXIT.getTemplate(),start,end,89);
+            // Newer reward screens use the distinct November "Tap anywhere
+            // to exit" artwork. A positive footer match, not the orange
+            // Recruit once/key purchase button, authorizes dismissal.
+            for (TemplatesEnum template : new TemplatesEnum[] {
+                    TemplatesEnum.SERVE_EMU_HERO_REWARD_EXIT_LIVE_2026,
+                    TemplatesEnum.SERVE_EMU_HERO_REWARDS_EXIT_LIVE_NOV_2026,
+                    TemplatesEnum.SERVE_EMU_HERO_REWARDS_EXIT,
+                    TemplatesEnum.SERVE_EMU_HERO_REWARD_EXIT }) {
+                ImageSearchResultData hit = OpenCvPatternLocator.locatePattern(frame,
+                        template.getTemplate(), start, end, 89);
+                if (hit.isFound()) return hit;
+            }
+            return ImageSearchResultData.miss();
         }
         var config = TemplateSearchHelper.SearchConfig.builder().withMaxAttempts(1)
                 .withThreshold(89).withArea(AreaData.of(190, 1135, 530, 1240)).build();
-        var live = templateSearchHelper.locatePattern(
-                TemplatesEnum.SERVE_EMU_HERO_REWARD_EXIT_LIVE_2026, config);
-        return live.isFound() ? live : templateSearchHelper.locatePattern(
-                TemplatesEnum.SERVE_EMU_HERO_REWARD_EXIT, config);
+        for (TemplatesEnum template : new TemplatesEnum[] {
+                TemplatesEnum.SERVE_EMU_HERO_REWARD_EXIT_LIVE_2026,
+                TemplatesEnum.SERVE_EMU_HERO_REWARDS_EXIT_LIVE_NOV_2026,
+                TemplatesEnum.SERVE_EMU_HERO_REWARDS_EXIT,
+                TemplatesEnum.SERVE_EMU_HERO_REWARD_EXIT }) {
+            var hit = templateSearchHelper.locatePattern(template, config);
+            if (hit.isFound()) return hit;
+        }
+        return ImageSearchResultData.miss();
     }
 
     private boolean confirmFreeChestCutscene() {
@@ -562,12 +728,33 @@ public class HeroRecruitmentRoutine extends DelayedTask {
     /** Read only the numeric top-HUD slot; ambiguous OCR must never permit a key purchase. */
     private int readRecruitmentKeyCount(PointData topLeft, PointData bottomRight) {
         try {
-            String text = emuManager.readText(EMULATOR_NUMBER, topLeft, bottomRight,
-                    OcrSettingsData.configurator()
-                            .textLayout(OcrSettingsData.TextLayout.SINGLE_WORD)
-                            .allowedGlyphs("0123456789")
-                            .build(), false);
-            return HeroRecruitmentKeyPolicy.countFromOcr(text);
+            // Use the same full-frame OCR path as the redacted real-frame tests;
+            // fall back to a slightly larger crop if a small on-device HUD
+            // counter renders blurred or on a moving background.
+            RawImageData frame = emuManager.captureScreen(EMULATOR_NUMBER);
+            if (frame == null || !frame.isValid()) return -1;
+            // A strict white-ring zero on the native key slot is more reliable
+            // than Tesseract, which returns "" for both zero counters on the
+            // user's 2026-11-19 frame. No positive count is inferred here.
+            if (HeroRecruitmentZeroHud.isZero(frame, topLeft, bottomRight)) return 0;
+            OcrSettingsData numbers = OcrSettingsData.configurator()
+                    .textLayout(OcrSettingsData.TextLayout.SINGLE_WORD)
+                    .allowedGlyphs("0123456789").build();
+            int count = HeroRecruitmentKeyPolicy.countFromOcr(
+                    dev.frostguard.vision.ocr.OcrEngine.recognizeText(
+                            frame, topLeft, bottomRight, numbers));
+            if (count >= 0) return count;
+            PointData expandedTopLeft = new PointData(
+                    Math.max(0, topLeft.getX() - 8), Math.max(0, topLeft.getY() - 6));
+            PointData expandedBottomRight = new PointData(
+                    Math.min(frame.getWidth(), bottomRight.getX() + 8),
+                    Math.min(frame.getHeight(), bottomRight.getY() + 6));
+            return HeroRecruitmentKeyPolicy.countFromOcr(
+                    dev.frostguard.vision.ocr.OcrEngine.recognizeText(
+                            frame, expandedTopLeft, expandedBottomRight,
+                            OcrSettingsData.configurator()
+                                    .textLayout(OcrSettingsData.TextLayout.SINGLE_LINE)
+                                    .allowedGlyphs("0123456789").build()));
         } catch (Exception error) {
             if (Thread.currentThread().isInterrupted()) {
                 throw new java.util.concurrent.CancellationException("Recruitment counter OCR interrupted");

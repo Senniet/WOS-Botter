@@ -194,7 +194,7 @@ public class TriumphRoutine extends DelayedTask {
                 Integer.class);
         LocalDateTime next = TriumphClaimVerification.nextProgressReview(
                 LocalDateTime.now(), GameTimeUtils.dailyResetTime(),
-                configured == null ? 240 : configured);
+                configured == null ? 120 : configured);
         logInfo(line("Chest not unlocked; next progress review at " + next));
         reschedule(next);
     }

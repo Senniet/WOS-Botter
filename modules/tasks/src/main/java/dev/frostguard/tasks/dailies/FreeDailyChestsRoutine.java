@@ -32,7 +32,7 @@ public class FreeDailyChestsRoutine extends DelayedTask {
 
     @Override protected void execute(){
         Integer raw=profile.getConfig(ConfigurationKeyEnum.FREE_DAILY_CHESTS_INTERVAL_INT,Integer.class);
-        int interval=raw==null?120:Math.clamp(raw,30,1440);
+        int interval=raw==null?360:Math.clamp(raw,30,1440);
         boolean opened=false;
         boolean verified=false;
         try{

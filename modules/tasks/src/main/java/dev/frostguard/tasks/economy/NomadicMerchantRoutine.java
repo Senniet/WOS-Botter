@@ -267,7 +267,9 @@ public class NomadicMerchantRoutine extends DelayedTask {
                 ConfigurationKeyEnum.BOOL_NOMADIC_MERCHANT_VIP_POINTS, Boolean.class);
         boolean vipBuyEnabled = vipSpendingAllowed(
                 emuManager.getSelectedEmulatorType(), configuredVipPurchase);
-        if (!vipBuyEnabled) {
+        if (!vipBuyEnabled
+                || !dev.frostguard.tasks.security.TaskGemSpendPolicy.allowed(
+                        profile, TpDailyTaskEnum.NOMADIC_MERCHANT)) {
             return new ImageSearchResultData(false, null, 0);
         }
         logDebug("VIP purchase is enabled. Searching for VIP points to buy.");
@@ -287,12 +289,29 @@ public class NomadicMerchantRoutine extends DelayedTask {
 
     /** @return 1 when a VIP purchase is confirmed, -1 when it is unconfirmed */
     private int buyVip(ImageSearchResultData vipResult) {
+        if (!dev.frostguard.tasks.security.TaskGemSpendPolicy.allowed(
+                profile, TpDailyTaskEnum.NOMADIC_MERCHANT)
+                || !vipSpendingAllowed(emuManager.getSelectedEmulatorType(),
+                        profile.getConfig(ConfigurationKeyEnum.BOOL_NOMADIC_MERCHANT_VIP_POINTS, Boolean.class))) {
+            logInfo("Nomadic Merchant VIP purchase denied by diamond permission or emulator policy");
+            return -1;
+        }
         phase = NomadicMerchantPhase.BUYING_VIP;
         logInfo("Found VIP points. Purchasing with gems.");
         tapNear(new PointData(vipResult.getPoint().getX(), vipResult.getPoint().getY() + VIP_PURCHASE_OFFSET_Y));
         sleepTask(1000);
+        if (!dev.frostguard.tasks.security.TaskGemSpendPolicy.allowed(
+                profile, TpDailyTaskEnum.NOMADIC_MERCHANT)) {
+            logWarning("Nomadic Merchant diamond permission revoked before paid item button");
+            return -1;
+        }
         tapNear(VIP_BUY_WITH_GEMS);
         sleepTask(1000);
+        if (!dev.frostguard.tasks.security.TaskGemSpendPolicy.allowed(
+                profile, TpDailyTaskEnum.NOMADIC_MERCHANT)) {
+            logWarning("Nomadic Merchant diamond permission revoked before final confirmation");
+            return -1;
+        }
         tapNear(VIP_CONFIRM);
         sleepTask(1000);
 

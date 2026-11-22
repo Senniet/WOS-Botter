@@ -43,7 +43,7 @@ public enum TpDailyTaskEnum {
     /* ── city ── */
 
     CITY_SURVIVORS                      (71, "City Survivors",     ConfigurationKeyEnum.CITY_ACCEPT_NEW_SURVIVORS_BOOL,        RoutineCategory.CITY),
-    CITY_UPGRADE_FURNACE                (70, "City Upgrade Furnace", ConfigurationKeyEnum.CITY_UPGRADE_FURNACE_BOOL,           RoutineCategory.CITY),
+    CITY_UPGRADE_FURNACE                (70, "City Upgrade", ConfigurationKeyEnum.CITY_UPGRADE_FURNACE_BOOL,           RoutineCategory.CITY),
     CITY_UPGRADE_PRIORITISE_FURNACE     (72, "Prioritise Furnace", ConfigurationKeyEnum.CITY_UPGRADE_PRIORITISE_FURNACE_BOOL,  RoutineCategory.CITY),
     RESEARCH                            (73, "Research",           ConfigurationKeyEnum.RESEARCH_ENABLED_BOOL,                 RoutineCategory.CITY),
 
@@ -109,7 +109,7 @@ public enum TpDailyTaskEnum {
     HERO_RECRUITMENT       (1,   "Hero Recruitment",             ConfigurationKeyEnum.BOOL_HERO_RECRUITMENT,                  RoutineCategory.RESOURCE),
     LABYRINTH              (11,  "Labyrinth",                    ConfigurationKeyEnum.DAILY_LABYRINTH_BOOL,                   RoutineCategory.RESOURCE),
     LIFE_ESSENCE           (9,   "Life Essence",                 ConfigurationKeyEnum.LIFE_ESSENCE_BOOL,                      RoutineCategory.RESOURCE),
-    LIFE_ESSENCE_CARING    (10,  "Life Essence Caring",          ConfigurationKeyEnum.ALLIANCE_LIFE_ESSENCE_BOOL,             RoutineCategory.RESOURCE),
+    LIFE_ESSENCE_CARING    (10,  "Alliance Life Essence",          ConfigurationKeyEnum.ALLIANCE_LIFE_ESSENCE_BOOL,             RoutineCategory.RESOURCE),
     NOMADIC_MERCHANT       (2,   "Nomadic Merchant",             ConfigurationKeyEnum.BOOL_NOMADIC_MERCHANT,                  RoutineCategory.RESOURCE),
     PET_ADVENTURE          (6,   "Pet Adventure",                ConfigurationKeyEnum.PET_PERSONAL_TREASURE_BOOL,             RoutineCategory.RESOURCE),
     TREK_AUTOMATION        (12,  "Tundra Trek Automation",       ConfigurationKeyEnum.TUNDRA_TREK_AUTOMATION_BOOL,            RoutineCategory.RESOURCE),

@@ -47,6 +47,18 @@ class ChiefOrderLiveFrameTest {
         assertTrue(inspection.button().contains("Enact"),inspection.toString());
     }
 
+    @Test void liveProductivityDayIsActiveAfterActualEnactWithoutRewardsPopup() throws Exception {
+        var active=resourceFrame("/chieforder/live-20261122/productivity-active-after-enact.png");
+        var inspection=ChiefOrderLiveFrame.inspectList(active, "Productivity Day");
+        assertEquals(ChiefOrderLiveFrame.ListState.ACTIVE, inspection.state(),
+                "Real emulator confirms successful 50k-point Enact, despite no Rewards popup: "
+                        + inspection);
+        assertTrue(ChiefOrderLiveFrame.isActiveForOrder(active,"Productivity Day"));
+        assertFalse(ChiefOrderLiveFrame.isActiveForOrder(active,"Urgent Mobilization"));
+        assertFalse(ChiefOrderLiveFrame.isActiveForOrder(frame("productivity-cost.png"),
+                "Productivity Day"));
+    }
+
     @Test void actualRushJobCooldownIsAlreadyUsedNotMissingIcon() throws Exception {
         var list = ChiefOrderLiveFrame.inspectList(frame("order-list.jpg"), "Rush Job");
         assertEquals(ChiefOrderLiveFrame.ListState.ON_COOLDOWN, list.state(), list.toString());

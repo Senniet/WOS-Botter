@@ -84,6 +84,16 @@ public class ScheduleService {
 	}
 
 	public synchronized void launchEngine() {
+		launchEngine(false);
+	}
+
+	/** Start with worker gates closed, so restoring a user pause after maintenance
+	 * cannot allow even one initializing tap or screenshot before Pause arrives. */
+	public synchronized void launchEnginePaused() {
+		launchEngine(true);
+	}
+
+	private void launchEngine(boolean pausedFromStart) {
 		if (dispatcher.hasManagedQueues()) {
 			log(TpMessageSeverityEnum.ERROR, "ScheduleService", "-",
 					"Engine launch blocked because a previous queue shutdown is incomplete");
@@ -110,10 +120,11 @@ public class ScheduleService {
 				.sorted(Comparator.comparing(AccountDescriptor::getPriority).reversed())
 				.forEach(account -> prepareQueue(account, globalConfig));
 
+		if (pausedFromStart) dispatcher.pauseAll();
 		dispatcher.startAll();
-		notifyQueueState(null, false);
+		notifyQueueState(null, pausedFromStart);
 		trackStart(enabled, globalConfig);
-		notifyBotState(true, false);
+		notifyBotState(true, pausedFromStart);
 	}
 
 	public void addEngineObserver(BotStateListener observer) {

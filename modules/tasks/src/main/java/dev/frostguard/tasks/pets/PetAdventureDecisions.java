@@ -31,6 +31,28 @@ final class PetAdventureDecisions {
     private PetAdventureDecisions() {
     }
 
+    /**
+     * The chest icon changes to a different badge once it is running.
+     * Verify the timer relative to its BEFORE-Start coordinate; don't
+     * require the original red/purple/blue sprite to still match.
+     */
+    /** A pet adventure runs for three hours; one extra quarter hour is a
+     * conservative allowance for animations, clock drift and server delay.
+     * An unverified Start must not block the player indefinitely after this.
+     */
+    static final java.time.Duration PENDING_MAX_AGE = java.time.Duration.ofHours(3)
+            .plusMinutes(15);
+
+    static boolean pendingHasExpired(java.time.Instant pendingStart, java.time.Instant now) {
+        return pendingStart != null && now != null
+                && !now.isBefore(pendingStart.plus(PENDING_MAX_AGE));
+    }
+
+    static boolean startedChestHasTimer(PointData originalChest,
+                                        List<ImageSearchResultData> timers) {
+        return occupiedByTimer(originalChest, timers);
+    }
+
     static boolean inAdventureOverlay(ImageSearchResultData overlay) {
         return overlay != null && overlay.isFound();
     }

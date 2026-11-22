@@ -72,9 +72,11 @@ public class PetAllianceTreasuresRoutine extends DelayedTask {
 	 * @return ANY - works from both home and world screens
 	 */
 	@Override
-	public LaunchPoint getRequiredStartLocation() {
-		return LaunchPoint.ANY;
-	}
+    public LaunchPoint getRequiredStartLocation() {
+        // The Daily sidebar requires a verified City/World root; ANY allows
+        // an unknown modal and triggered real navigation failures on Nov 20.
+        return LaunchPoint.HOME;
+    }
 
 	// ========================================================================
 	// MAIN EXECUTION
@@ -90,17 +92,52 @@ public class PetAllianceTreasuresRoutine extends DelayedTask {
 	@Override
 	protected void execute() {
 
-		if (!navigateToPetAdventure()) {
-			rescheduleForRetry();
-			return;
-		}
+        if (!navigateToPetAdventure()) {
+            markWorkIncomplete("Pet Alliance Treasure sidebar navigation failed");
+            rescheduleForRetry();
+            return;
+        }
 
-		if (!openAllyTreasureScreen()) {
-			rescheduleForRetry();
-			return;
-		}
-		claimTreasureIfAvailable();
-	}
+        if (!openAllyTreasureScreen()) {
+            markWorkIncomplete("Ally Treasure panel not opened");
+            rescheduleForRetry();
+            return;
+        }
+        try {
+            claimTreasureIfAvailable();
+        } finally {
+            // The Claim All action leaves an Ally Treasure modal open; on 20 Nov
+            // that blocked Chief Order and Initialize for minutes. Close only
+            // the positively identified panel X, never blind Back from unknown UI.
+            if (!closeVerifiedAllyTreasurePanel()) {
+                markWorkIncomplete("Ally Treasure panel could not be safely closed");
+                rescheduleForRetry();
+            }
+        }
+    }
+
+    private boolean closeVerifiedAllyTreasurePanel() {
+        var first = PetAllyTreasureExitFrame.verifiedClose(
+                emuManager.captureScreen(EMULATOR_NUMBER));
+        if (!first.isFound()) {
+            logWarning("Ally Treasure close not positively identified; no blind tap");
+            return false;
+        }
+        sleepTask(180);
+        var confirm = PetAllyTreasureExitFrame.verifiedClose(
+                emuManager.captureScreen(EMULATOR_NUMBER));
+        if (!RecognitionConsensus.agrees(first, confirm, 12)) {
+            logWarning("Ally Treasure X moved between screenshots; refusing tap");
+            return false;
+        }
+        tapInside(confirm);
+        sleepTask(350);
+        boolean gone = !PetAllyTreasureExitFrame.verifiedClose(
+                emuManager.captureScreen(EMULATOR_NUMBER)).isFound();
+        if (gone) logInfo("Ally Treasure modal closed using verified X; Pet Adventure map restored");
+        else logWarning("Ally Treasure modal X remained after close; marked incomplete");
+        return gone;
+    }
 
 	// ========================================================================
 	// NAVIGATION METHODS
@@ -175,7 +212,7 @@ public class PetAllianceTreasuresRoutine extends DelayedTask {
 	 */
     static boolean remainingClaimsExhausted(String text) {
         return text != null && text.replaceAll("\\s+", " ")
-                .matches("(?is).*remaining\\s*claims\\s*today\\s*:\\s*0\\b.*");
+                .matches("(?is).*remaining\\s*claims\\s*today\\s*:\\s*[0o]\\b.*");
     }
 
     private ImageSearchResultData detectClaimAll() {

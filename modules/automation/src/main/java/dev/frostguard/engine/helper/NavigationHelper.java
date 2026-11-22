@@ -544,6 +544,23 @@ public class NavigationHelper {
         taps.tapInside(evtBtn);
         interruptibleWait(2000);
 
+        // Serve-Emu 720x1280: the Mercenary Prestige tab is often partly
+        // visible at the far right edge after opening Events. A single tap
+        // there reached Phaethon Scout on the live November 21 event screen.
+        // Verify the actual mercenary hunt control before accepting this
+        // shortcut; otherwise continue with the standard visual tab scan.
+        if (event == EventMenu.MERCENARY) {
+            taps.tapInside(new AreaData(new PointData(647, 119), new PointData(677, 166)));
+            interruptibleWait(650L);
+            if (searcher.locatePattern(TemplatesEnum.MERCENARY_SCOUT_BUTTON,
+                    SearchConfigConstants.DEFAULT_SINGLE).isFound()
+                    || searcher.locatePattern(TemplatesEnum.MERCENARY_CHALLENGE_BUTTON,
+                            SearchConfigConstants.DEFAULT_SINGLE).isFound()) {
+                broadcastInfo("Reached MERCENARY via verified event-tab shortcut");
+                return EventMenuOpenResult.REACHED;
+            }
+        }
+
         // clear existing selection
         taps.tapInside(new AreaData(new PointData(529, 27), new PointData(635, 63)), 5, 300);
         interruptibleWait(300);
@@ -560,6 +577,17 @@ public class NavigationHelper {
         // The horizontal event strip continues moving after the swipe gesture returns. Searching during
         // that animation can miss even a 97% match, so settle fully and inspect only the header strip.
         ImageSearchResultData tab = locateEventTab(tpl);
+        // Mercenary Prestige is revisited after each short march. Its tab is
+        // often only one swipe away from the current event-strip position.
+        // Search forward first, but retain the original full reset/scan as a
+        // fallback whenever this shortcut cannot positively locate the tab.
+        if (!tab.isFound() && event == EventMenu.MERCENARY) {
+            for (int i = 0; i < 3 && !tab.isFound(); i++) {
+                emu.swipeScreen(device, EVENT_TAB_SCAN_FROM, EVENT_TAB_SCAN_TO);
+                interruptibleWait(EVENT_TAB_SETTLE_MS);
+                tab = locateEventTab(tpl);
+            }
+        }
         if (!tab.isFound()) {
             for (int i = 0; i < EVENT_TAB_RESET_SWIPES && !tab.isFound(); i++) {
                 emu.swipeScreen(device, EVENT_TAB_RESET_FROM, EVENT_TAB_RESET_TO);
@@ -664,6 +692,24 @@ public class NavigationHelper {
                     interruptibleWait(700);
                     if (findWorldAnchor().isFound()) return target;
                 }
+            }
+
+            // "Obtain more" Chief Stamina is not a claim screen. It may
+            // survive a task even though there are no free stamina items.
+            // A fresh task, including target ANY, must not inherit this
+            // modal: dismiss only its title+X on two agreeing frames.
+            if (!atHome && !atWorld && dismissVerifiedObtainMoreStamina(checkpoint)) {
+                pass++;
+                continue;
+            }
+
+            // Storehouse's "A Warm Welcome" stamina Claim is an overlay,
+            // not a city root. If it leaked from a prior reward attempt,
+            // only close its doubly-verified X; do not tap Claim again.
+            if (!atHome && !atWorld && target != LaunchPoint.ANY
+                    && dismissVerifiedWarmWelcomeStamina(checkpoint)) {
+                pass++;
+                continue;
             }
 
             // The offline-income dialog may appear after a promotion is closed,
@@ -774,6 +820,55 @@ public class NavigationHelper {
                     + "to protect against Quit game dialog");
         }
         throw new HomeNotFoundException("Home not found after " + budget + " verified recovery attempts");
+    }
+
+    /** Recover an abandoned Obtain more dialog without attempting a refill. */
+    private boolean dismissVerifiedObtainMoreStamina(Runnable checkpoint) {
+        var initial = ObtainMoreStaminaOverlayFrame.verifiedClose(emu.captureScreen(device));
+        if (!initial.isFound()) return false;
+        interruptibleWait(160);
+        var confirmed = ObtainMoreStaminaOverlayFrame.verifiedClose(emu.captureScreen(device));
+        if (!RecognitionConsensus.agrees(initial, confirmed, 12)) {
+            broadcastWarn("Obtain more title/X not stable; refusing blind close");
+            return false;
+        }
+        checkpoint.run();
+        var x=confirmed.getPoint();
+        taps.tapInside(AreaData.of(x.col()-3, x.row()-3, x.col()+3, x.row()+3));
+        interruptibleWait(550);
+        if (ObtainMoreStaminaOverlayFrame.verifiedClose(emu.captureScreen(device)).isFound()) {
+            throw new HomeNotFoundException("Obtain more remained open after its verified X; "
+                    + "refusing a second tap");
+        }
+        broadcastInfo("Closed stale Chief Stamina Obtain more dialog through verified X");
+        return true;
+    }
+
+    /**
+     * Recovery only: close an abandoned Storehouse stamina reward dialog
+     * when its full name and X are verified on two fresh frames.
+     * The Storehouse task itself remains the only owner of Claim actions.
+     */
+    private boolean dismissVerifiedWarmWelcomeStamina(Runnable checkpoint) {
+        var before = WarmWelcomeOverlayFrame.verifiedClose(emu.captureScreen(device));
+        if (!before.isFound()) return false;
+        interruptibleWait(160);
+        var after = WarmWelcomeOverlayFrame.verifiedClose(emu.captureScreen(device));
+        if (!RecognitionConsensus.agrees(before, after, 12)) {
+            broadcastWarn("A Warm Welcome title/X not stable; leaving reward overlay untouched");
+            return false;
+        }
+        checkpoint.run();
+        PointData x = after.getPoint();
+        taps.tapInside(AreaData.of(x.col() - 3, x.row() - 3,
+                x.col() + 3, x.row() + 3));
+        interruptibleWait(550);
+        if (WarmWelcomeOverlayFrame.verifiedClose(emu.captureScreen(device)).isFound()) {
+            throw new HomeNotFoundException("A Warm Welcome remained open after verified close; "
+                    + "refusing repeated taps");
+        }
+        broadcastInfo("Closed stale Storehouse A Warm Welcome overlay with verified X; no Claim tap");
+        return true;
     }
 
     /** Confirm the verified offline-income dialog; never act on an unrecognized green button. */

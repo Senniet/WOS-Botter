@@ -13,6 +13,12 @@ class ChiefOrderCompletionTest {
         assertEquals(now.plusMinutes(30), ChiefOrderRoutine.nextAvailableCheck(now, null));
     }
 
+    @Test void onlyRushJobNeedsARewardsScreen() {
+        assertTrue(ChiefOrderRoutine.expectsRewards(ChiefOrderRoutine.ChiefOrderType.RUSH_JOB));
+        assertFalse(ChiefOrderRoutine.expectsRewards(ChiefOrderRoutine.ChiefOrderType.URGENT_MOBILIZATION));
+        assertFalse(ChiefOrderRoutine.expectsRewards(ChiefOrderRoutine.ChiefOrderType.PRODUCTIVITY_DAY));
+    }
+
     @Test void successfulCooldownRequiresVisibleAndDismissedReward() {
         assertTrue(ChiefOrderRoutine.completedWithVerifiedRewards(
                 ChiefOrderRewardFrame.Exit.DISMISSED));

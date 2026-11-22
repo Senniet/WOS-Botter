@@ -470,6 +470,7 @@ public class TaskQueue {
 
     private void mainLoop() {
         try {
+            TaskExecutionPauseGate.bind(() -> statusModel.isUserPaused());
             acquireSlot();
             while (statusModel.isRunning() && !shuttingDown) {
                 runSchedulerTick();
@@ -489,6 +490,8 @@ public class TaskQueue {
                 logger.warn("Could not publish TaskQueue failure status", reportingFailure);
             }
         } finally {
+            // This gate must never leak to a subsequent queue worker.
+            TaskExecutionPauseGate.unbind();
             // Also release the device slot on an ordinary stop. Otherwise a
             // dead queue can hold the lease and block the next profile.
             statusModel.setRunning(false);
@@ -724,6 +727,13 @@ public class TaskQueue {
     // ---- task dispatch -----------------------------------------------------
 
     boolean executeTask(DelayedTask task) {
+        if (statusModel.isPaused()) {
+            // Pause may race the selection of an eligible task. Return the
+            // selected task to the backlog without marking an attempt or
+            // starting the routine; Resume will pick it up normally.
+            taskBacklog.offer(task);
+            return false;
+        }
         if (shuttingDown) {
             emitInfo("Skipping task execution during shutdown: " + task.getTaskName());
             return false;
@@ -954,6 +964,15 @@ public class TaskQueue {
             task.reschedule(retryAt);
         }
         if (task.isRecurring()) {
+            LocalDateTime preferred = TaskRepeatLimitPolicy.adjust(
+                    task.getTpTask(), profile, task.getScheduled(), LocalDateTime.now(),
+                    outcome == TaskStateData.ExecutionOutcome.PREEMPTED);
+            if (preferred != null && !preferred.equals(task.getScheduled())) {
+                emitInfoTask(task, "Per-task minimum repeat gap applied: "
+                        + task.getScheduled().format(TS_FMT) + " -> "
+                        + preferred.format(TS_FMT));
+                task.reschedule(preferred);
+            }
             emitInfoTask(task, "Next run in: " + GameTimeUtils.formatCountdown(task.getScheduled()));
             enqueue(task);
         } else {

@@ -85,7 +85,7 @@ class StorehouseVisitFlowTest {
         StorehouseVisitFlow.VisitDecision decision = run(actions);
 
         assertEquals(StorehouseVisitFlow.VisitState.WAITING_CAPACITY, decision.state());
-        assertEquals(Duration.ofMinutes(30), decision.delay());
+        assertEquals(Duration.ofMinutes(75), decision.delay());
         assertEquals(0, decision.confirmedChestCollections());
         assertEquals(0, decision.confirmedStaminaCollections());
         assertEquals(0, actions.cooldownReads);
@@ -114,7 +114,7 @@ class StorehouseVisitFlowTest {
                 .staminaCollections(StorehouseVisitFlow.CollectionState.DEFERRED_UNACCEPTED);
         StorehouseVisitFlow.VisitDecision decision = run(actions);
         assertEquals(StorehouseVisitFlow.VisitState.WAITING_CAPACITY, decision.state());
-        assertEquals(Duration.ofMinutes(30), decision.delay());
+        assertEquals(Duration.ofMinutes(75), decision.delay());
         assertEquals(1, decision.confirmedChestCollections());
         assertEquals(0, decision.confirmedStaminaCollections());
         assertEquals(0, actions.cooldownReads);
@@ -215,13 +215,14 @@ class StorehouseVisitFlowTest {
     }
 
     @Test
-    void capsValidCooldownLongerThanOneHourAtOneHour() {
-        assertValidCooldown(Duration.ofHours(1).plusMinutes(2), ONE_HOUR);
+    void honorsRealCooldownBetweenOneAndTwoHours() {
+        assertValidCooldown(Duration.ofHours(1).plusMinutes(47),
+                Duration.ofHours(1).plusMinutes(47));
     }
 
     @Test
-    void capsValidCooldownLongerThanTwoHoursAtOneHour() {
-        assertValidCooldown(Duration.ofHours(3).plusMinutes(15), ONE_HOUR);
+    void capsValidCooldownLongerThanTwoHoursAtTwoHours() {
+        assertValidCooldown(Duration.ofHours(3).plusMinutes(15), Duration.ofHours(2));
     }
 
     @Test

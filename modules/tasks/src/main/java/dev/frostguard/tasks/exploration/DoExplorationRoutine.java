@@ -79,6 +79,20 @@ public class DoExplorationRoutine extends DelayedTask {
         // dismissing the Defeat result, leaving every later task blocked.
         // Recover the exact Return to City button BEFORE the ordinary
         // Exploration entry / Quick Exploration probes.
+        // A prior run may have completed its battle but missed the shifted
+        // left-side Return to City button. Reconcile the already-earned
+        // Victory before ANY root navigation, Quick/Explore or Fight action.
+        if (ExplorationVictoryFrame.visible(initialFrame)) {
+            logInfo("Resuming pending Exploration Victory; returning to City");
+            if (handleVictory()) {
+                logInfo("Pending Exploration Victory closed and City verified");
+                rescheduleInOneHour();
+            } else {
+                markWorkIncomplete("Exploration Victory: Return to City not verified");
+                reschedule(LocalDateTime.now().plusMinutes(5));
+            }
+            return;
+        }
         if (ExplorationDefeatFrame.visible(initialFrame)) {
             logInfo("Resuming pending normal Exploration Defeat and restoring City");
             if (closeDefeatAndVerifyHome()) {

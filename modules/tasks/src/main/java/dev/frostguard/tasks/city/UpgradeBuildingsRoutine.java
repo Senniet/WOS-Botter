@@ -64,6 +64,7 @@ private static final int BUILDING_CONTROL_POLL_MS = 300;
 private static final int UPGRADE_CONFIRMATION_THRESHOLD = 90;
 
 private final CityUpgradeDiagnostics diagnostics = new CityUpgradeDiagnostics();
+private final boolean furnacePriority;
 private boolean doubleTimeAttempted;
 
 private static final int TEMPLATE_TAP_RADIUS = 8;
@@ -84,11 +85,18 @@ private static final SearchConfig REPLENISH_BUTTON_RECHECK = SearchConfig.builde
 private final List<AreaData> queues = new ArrayList<>(Arrays.asList(QUEUE_AREA_1_VALUE, QUEUE_AREA_2_VALUE));
 
 public UpgradeBuildingsRoutine(AccountDescriptor profile, TpDailyTaskEnum tpDailyTaskEnum) {
-        super(profile, tpDailyTaskEnum);
+        this(profile,tpDailyTaskEnum,false);
+    }
+
+protected UpgradeBuildingsRoutine(AccountDescriptor profile,
+        TpDailyTaskEnum tpDailyTaskEnum, boolean furnacePriority) {
+        super(profile,tpDailyTaskEnum);
+        this.furnacePriority=furnacePriority;
     }
 
 @Override
     protected void execute() {
+        try {
         CityUpgradeFlow.execute(this::executeQueues, new CityUpgradeFlow.Recovery() {
             @Override
             public void retainFailure(String type) {
@@ -97,6 +105,7 @@ public UpgradeBuildingsRoutine(AccountDescriptor profile, TpDailyTaskEnum tpDail
 
             @Override
             public void recoverRoot() {
+                closeVerifiedUpgradeBonusBeforeHome();
                 recoverLocation(LaunchPoint.ANY);
             }
 
@@ -108,6 +117,17 @@ public UpgradeBuildingsRoutine(AccountDescriptor profile, TpDailyTaskEnum tpDail
                                 : "; recoveryFailure=" + recoveryFailure.getMessage())));
             }
         });
+        } catch (CityUpgradeFlow.UnresolvedBuildingException shortage) {
+            if (shortage.reason() != CityUpgradeFlow.FailureReason.RESOURCES_NOT_OBTAINED) {
+                throw shortage;
+            }
+            LocalDateTime nextCheck = LocalDateTime.now().plusMinutes(45);
+            markWorkIncomplete("City Upgrade needs resources; no unverified Replenish All, VIP Shop, or premium taps");
+            reschedule(nextCheck);
+            logWarning(routineLogUpgradeBuildingsLine(
+                    "Resource shortage safely deferred until " + nextCheck.format(DATETIME_FORMATTER)
+                    + "; City was recovered, no VIP Shop navigation"));
+        }
     }
 
 private void executeQueues() {
@@ -123,18 +143,28 @@ private void executeQueues() {
         clearConstructionReservationWhenStarted(queueResults);
 
 
+        boolean reserveFirstQueue=FurnacePrioritySelectionPolicy.shouldReserveFirstQueue(
+                Boolean.TRUE.equals(profile.getConfig(
+                        ConfigurationKeyEnum.CITY_UPGRADE_PRIORITISE_FURNACE_BOOL,Boolean.class)),
+                !furnacePriority);
+        if (reserveFirstQueue) {
+            logInfo("City Upgrade: reserving first construction slot for enabled Furnace Priority; "
+                    + "ordinary buildings may use the second slot");
+        }
         boolean hasIdleQueue = queueResults.stream()
-                .anyMatch(result -> result.state.status == UpgradeBuildingsRoutine.QueueMood.IDLE ||
-                        result.state.status == UpgradeBuildingsRoutine.QueueMood.IDLE_TEMP);
+                .anyMatch(result -> (!reserveFirstQueue || result.queueNumber() != 1)
+                        && (result.state.status == UpgradeBuildingsRoutine.QueueMood.IDLE ||
+                            result.state.status == UpgradeBuildingsRoutine.QueueMood.IDLE_TEMP));
 
         if (hasIdleQueue) {
 
 
             List<ProductionBlocker> productionBlockers = new ArrayList<>();
             Set<Integer> attemptedQueues = new java.util.HashSet<>();
-
+            int nonPrioritySelections=0;
 
             for (UpgradeBuildingsRoutine.QueueReadout result : queueResults) {
+                if (!reserveFirstQueue || result.queueNumber()!=1) {
                 if (result.state.status == UpgradeBuildingsRoutine.QueueMood.IDLE ||
                         result.state.status == UpgradeBuildingsRoutine.QueueMood.IDLE_TEMP) {
                     logInfo(routineLogUpgradeBuildingsLine("Processing queue " + result.queueNumber + " (Status: " + result.state.status + ")"));
@@ -143,9 +173,11 @@ private void executeQueues() {
                     if (handlingResult.constructionAttempted()) {
                         attemptedQueues.add(result.queueNumber());
                     }
+                    if (handlingResult.skippedByFocus()) nonPrioritySelections++;
                     if (handlingResult.blocker() != null) {
                         productionBlockers.add(handlingResult.blocker());
                     }
+                }
                 }
             }
 
@@ -164,6 +196,17 @@ private void executeQueues() {
             clearConstructionReservationWhenStarted(updatedResults);
 
 
+            if (furnacePriority && nonPrioritySelections>0
+                    && attemptedQueues.isEmpty() && productionBlockers.isEmpty()) {
+                // A non-chain recommendation is not a failed upgrade: no
+                // hidden retries, no extra taps, no false construction success.
+                LocalDateTime next=LocalDateTime.now().plusMinutes(30);
+                markWorkIncomplete("Furnace Priority: recommended building was not "
+                        + "the Furnace or a verified chain prerequisite; no construction started");
+                reschedule(next);
+                marchHelper.closeLeftMenu();
+                return;
+            }
             if (!productionBlockers.isEmpty()) {
                 LocalDateTime now = LocalDateTime.now();
                 LocalDateTime trainingHandoff = productionBlockers.stream()
@@ -240,14 +283,328 @@ private record ProductionBlocker(Set<ConstructionBlockerRegistry.Consumer> consu
         int constructionQueue, LocalDateTime completionTime) {
     }
 
-private record QueueHandlingResult(boolean constructionAttempted, ProductionBlocker blocker) {
+private record QueueHandlingResult(boolean constructionAttempted,
+        ProductionBlocker blocker, boolean skippedByFocus) {
     }
 
 private String routineLogUpgradeBuildingsLine(String note) {
         return "UpgradeBuildingsRoutine | " + note;
     }
 
+static boolean mayAutomaticallyReplenish(dev.frostguard.engine.emulator.EmulatorType backend) {
+        // Same fail-closed policy as ResearchRoutine: on Serve-Emu the "Obtain more"
+        // dialog includes a VIP Shop Go action near the former hardcoded confirmation.
+        // A static tap at (511,1056) opened VIP Shop on 2026-11-20. No resources
+        // or purchases are authorized without a separately verified safe UI flow.
+        return backend != dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU;
+    }
+
+/**
+ * Serve-Emu only: honour the per-profile opt-in for owned resource packs.
+ * Never tap the old (511,1056) confirmation; this was VIP Shop on 20 Nov.
+ * An enabled BLUE/GREEN Replenish All is not yet proof of enough inventory,
+ * so require the precise Obtain More title, fresh-frame color agreement
+ * and OCR of the exact button label BEFORE a single attempt. No follow-up
+ * purchase/confirm click is authorized; unknown transitions are deferred.
+ */
+private boolean refillUsingOwnedPacksOnly() {
+    checkPreemption();
+    RawImageData current = emuManager.captureScreen(EMULATOR_NUMBER);
+    boolean obtainMore = CityOwnedResourceButtonFrame.isObtainMore(current);
+    ImageSearchResultData obtain = obtainMore ? ImageSearchResultData.miss()
+            : templateSearchHelper.locatePattern(
+                    GAME_HOME_SHORTCUTS_OBTAIN, SearchConfigConstants.DEFAULT_SINGLE);
+    if (!obtainMore && !obtain.isFound()) {
+        return true;
+    }
+
+    boolean useOwned = Boolean.TRUE.equals(profile.getConfig(
+            ConfigurationKeyEnum.CITY_UPGRADE_USE_OWNED_RESOURCE_ITEMS_BOOL, Boolean.class));
+    // Furnace Priority shares the owned-item option but never inherits
+    // paid City Upgrade authorization. Gem spending must remain explicit.
+    boolean useDiamonds = !furnacePriority
+            && dev.frostguard.tasks.security.TaskGemSpendPolicy.allowed(
+                    profile, TpDailyTaskEnum.CITY_UPGRADE_FURNACE);
+    if (!useOwned && !useDiamonds) {
+        logInfo(routineLogUpgradeBuildingsLine(
+                "Both owned resource items and diamond replenishment disabled: deferring"));
+        if (obtainMore) pressBack();
+        return false;
+    }
+    if (!obtainMore) {
+        if (!tapInside(obtain)) return false;
+        sleepTask(350);
+    }
+
+    RawImageData first = emuManager.captureScreen(EMULATOR_NUMBER);
+    if (!CityOwnedResourceButtonFrame.isObtainMore(first)) {
+        logWarning(routineLogUpgradeBuildingsLine(
+                "Obtain more page not confirmed: refusing any resource or shop tap"));
+        return false;
+    }
+    if (!CityOwnedResourceButtonFrame.hasEnabledResourceButton(first) || !useOwned) {
+        if (useDiamonds) {
+            return replenishMissingResourcesWithDiamonds(first);
+        }
+        logInfo(routineLogUpgradeBuildingsLine(
+                "Resource packs exhausted or item use disabled: Replenish All grey; "
+                        + "diamond spending OFF, no VIP Shop, or false consumption report"));
+        pressBack();
+        return false;
+    }
+    sleepTask(170);
+    RawImageData second = emuManager.captureScreen(EMULATOR_NUMBER);
+    if (!CityOwnedResourceButtonFrame.hasEnabledResourceButton(second)) {
+        logWarning(routineLogUpgradeBuildingsLine(
+                "Replenish button was not confirmed active on two frames; no tap"));
+        pressBack();
+        return false;
+    }
+
+    String text;
+    try {
+        text = emuManager.readText(EMULATOR_NUMBER,
+                new PointData(232, 1095), new PointData(500, 1168), WHITE_SETTINGS, false);
+    } catch (Exception recognitionError) {
+        CityUpgradeFlow.rethrowControlSignal(recognitionError);
+        logWarning(routineLogUpgradeBuildingsLine(
+                "Replenish All text OCR unavailable; no resource item used"));
+        pressBack();
+        return false;
+    }
+    if (!verifiedOwnedPackButtonText(text)) {
+        logWarning(routineLogUpgradeBuildingsLine(
+                "Enabled button not positively labelled Replenish All (OCR="
+                        + String.valueOf(text).replaceAll("[^a-zA-Z ]", "") + "); no tap"));
+        pressBack();
+        return false;
+    }
+
+    logInfo(routineLogUpgradeBuildingsLine(
+            "Verified available owned-item Replenish All; one tap only; "
+                    + "no gems and no blind confirmation"));
+    tapNear(new PointData(360, 1135));
+    sleepTask(600);
+    RawImageData after = emuManager.captureScreen(EMULATOR_NUMBER);
+    if (CityOwnedResourceButtonFrame.isObtainMore(after)) {
+        if (useDiamonds && !CityOwnedResourceButtonFrame.hasEnabledResourceButton(after)
+                && CityGemReplenishButtonFrame.hasGoldenBuyAndUse(after)) {
+            logInfo(routineLogUpgradeBuildingsLine(
+                    "Owned resource items applied, a shortage remains; checking consented diamond quote"));
+            return replenishMissingResourcesWithDiamonds(after);
+        }
+        logWarning(routineLogUpgradeBuildingsLine(
+                "Obtain more still visible after owned-item attempt; no other taps or "
+                        + "unverified resource success; deferring"));
+        pressBack();
+        return false;
+    }
+    // Never claim success without a verified building confirmation. The
+    // caller's confirmDetectedBuildingUpgrade checks the actual next action.
+    ImageSearchResultData upgrade = locateOnFrame(after, GAME_HOME_SHORTCUTS_UPGRADE_TEXT,
+            BUILDING_CONFIRM_UPGRADE_SEARCH_AREA_VALUE, UPGRADE_CONFIRMATION_THRESHOLD);
+    if (!upgrade.isFound()) {
+        logWarning(routineLogUpgradeBuildingsLine(
+                "No verified upgrade action after owned-resource attempt; "
+                        + "no payment confirmation, deferring"));
+        pressBack();
+        return false;
+    }
+    logInfo(routineLogUpgradeBuildingsLine(
+            "Owned-resource step returned to verified Upgrade control; proceeding"));
+    return true;
+}
+
+/**
+ * A guarded paid alternative to the disabled Replenish All control.
+ *
+ * On 20 November the 720x1280 Obtain more screen offered 10K secured Iron
+ * for 100 diamonds while displaying 14,597/21,000 Iron. Exactly one
+ * verified pack covers that 6,403 deficit. This path is opt-in only.
+ *
+ * Only the top resource card's GOLD Buy & Use may be tapped. VIP Shop is
+ * lower on the page, and the old blind (511,1056) is never reused. Every
+ * paid tap reserves its price DURABLY before dispatch, so unknown results
+ * cannot trigger repeated blind spending across scheduled retries.
+ */
+private boolean replenishMissingResourcesWithDiamonds(RawImageData initial) {
+    if (furnacePriority) {
+        logInfo("Furnace Priority: gem spending is not authorized; only owned items allowed");
+        pressBack();
+        return false;
+    }
+    if (!dev.frostguard.tasks.security.TaskGemSpendPolicy.allowed(
+            profile, TpDailyTaskEnum.CITY_UPGRADE_FURNACE)) {
+        pressBack();
+        return false;
+    }
+    Integer configuredLimit = profile.getConfig(
+            ConfigurationKeyEnum.CITY_UPGRADE_GEM_DAILY_LIMIT_INT, Integer.class);
+    int dailyLimit = configuredLimit == null ? 0 : configuredLimit;
+    if (dailyLimit < 1 || dailyLimit > 10_000) {
+        logInfo(routineLogUpgradeBuildingsLine("City diamonds require a valid daily limit (1..10000); no purchase"));
+        pressBack();
+        return false;
+    }
+    try {
+        int budgetRemaining = CityGemSpendLedger.remaining(profile.getId(), dailyLimit);
+        if (budgetRemaining < 1) {
+            logInfo(routineLogUpgradeBuildingsLine("City diamond budget exhausted; waiting for new day"));
+            pressBack();
+            return false;
+        }
+        for (int i = 0; i < MAX_RESOURCE_REPLENISHMENTS; i++) {
+            checkPreemption();
+            RawImageData before = i == 0 ? initial : emuManager.captureScreen(EMULATOR_NUMBER);
+            if (!CityGemReplenishButtonFrame.hasGoldenBuyAndUse(before)) {
+                logWarning(routineLogUpgradeBuildingsLine(
+                        "Gem offer must show the exact Obtain more title and gold Buy & Use, no tap"));
+                return false;
+            }
+            java.util.Optional<CityGemReplenishQuote.Quote> candidate =
+                    readVerifiedCityGemQuote(budgetRemaining);
+            if (candidate.isEmpty()) {
+                logWarning(routineLogUpgradeBuildingsLine(
+                        "Refusing gem purchase: inventory deficit, pack size, wallet, "
+                                + "price or Buy & Use label could not all be verified"));
+                pressBack();
+                return false;
+            }
+            CityGemReplenishQuote.Quote quote = candidate.get();
+            if (quote.packsNeeded() > MAX_RESOURCE_REPLENISHMENTS - i) {
+                logInfo(routineLogUpgradeBuildingsLine(
+                        "Missing resource needs more packs than this bounded run supports; no partial purchase"));
+                pressBack();
+                return false;
+            }
+            sleepTask(190);
+            RawImageData confirm = emuManager.captureScreen(EMULATOR_NUMBER);
+            if (!CityGemReplenishButtonFrame.hasGoldenBuyAndUse(confirm)
+                    || !sameCityGemQuote(quote, readVerifiedCityGemQuote(budgetRemaining))) {
+                logWarning(routineLogUpgradeBuildingsLine(
+                        "Diamond price/deficit offer changed between captures; refusing purchase"));
+                pressBack();
+                return false;
+            }
+            if (!dev.frostguard.tasks.security.TaskGemSpendPolicy.allowed(
+                    profile, TpDailyTaskEnum.CITY_UPGRADE_FURNACE)) {
+                logInfo(routineLogUpgradeBuildingsLine("Diamond permission disabled before final tap"));
+                pressBack();
+                return false;
+            }
+            if (!CityGemSpendLedger.reserve(profile.getId(), dailyLimit, quote.unitGems())) {
+                logWarning(routineLogUpgradeBuildingsLine(
+                        "Diamond reservation rejected by persistent daily budget; no purchase"));
+                pressBack();
+                return false;
+            }
+            logInfo(routineLogUpgradeBuildingsLine(
+                    "City owned packs unavailable; verified " + quote.resource()
+                            + " deficit=" + quote.deficit() + ", item=" + quote.packSize()
+                            + ", minimal packs=" + quote.packsNeeded()
+                            + ", price=" + quote.unitGems() + " diamonds each. "
+                            + "One gem purchase reserved, tapping top Buy & Use only"));
+            tapNear(new PointData(580, 382));
+            sleepTask(750);
+            RawImageData after = emuManager.captureScreen(EMULATOR_NUMBER);
+            if (CityOwnedResourceButtonFrame.isObtainMore(after)) {
+                // The purchase may stay on the source page. Verify that the
+                // *same* resource quantity increased before considering more.
+                String currentRatio = readCityGemText(280, 239, 495, 291,
+                        OcrSettingsData.builder().textLayout(OcrSettingsData.TextLayout.SINGLE_LINE)
+                                .allowedGlyphs("0123456789,/ ").build());
+                var progress = CityGemReplenishQuote.readProgress(currentRatio);
+                if (progress.isEmpty()
+                        || progress.get().have() < Math.min(quote.required(), quote.have() + quote.packSize())
+                        || progress.get().required() != quote.required()) {
+                    logWarning(routineLogUpgradeBuildingsLine(
+                            "Paid Buy & Use outcome not proven by updated resource count; "
+                                    + "reserved diamonds remain accounted, no further purchase"));
+                    pressBack();
+                    return false;
+                }
+                if (progress.get().have() >= quote.required()) {
+                    logInfo(routineLogUpgradeBuildingsLine(
+                            "Verified resource top-up covers current shortage; closing Obtain more"));
+                    pressBack();
+                    sleepTask(250);
+                    return true;
+                }
+                // Another pack is still genuinely required; new live quote and
+                // remaining day budget are revalidated on the next iteration.
+                budgetRemaining = CityGemSpendLedger.remaining(profile.getId(), dailyLimit);
+                continue;
+            }
+            // Some game versions immediately close Obtain more on Buy & Use.
+            // Only a verified Upgrade action is a safe postcondition.
+            ImageSearchResultData upgrade = locateOnFrame(after, GAME_HOME_SHORTCUTS_UPGRADE_TEXT,
+                    BUILDING_CONFIRM_UPGRADE_SEARCH_AREA_VALUE, UPGRADE_CONFIRMATION_THRESHOLD);
+            if (upgrade.isFound() && quote.packsNeeded() == 1) {
+                logInfo(routineLogUpgradeBuildingsLine(
+                        "Top-up returned to verified building Upgrade control; no further paid tap"));
+                return true;
+            }
+            logWarning(routineLogUpgradeBuildingsLine(
+                    "Buy & Use returned to an unverified page; cannot confirm resources or purchase, "
+                            + "no further taps. Daily reservation retained"));
+            return false;
+        }
+    } catch (java.io.IOException budgetProblem) {
+        logWarning(routineLogUpgradeBuildingsLine(
+                "City diamond ledger unavailable: " + budgetProblem.getMessage() + "; no purchase"));
+    } catch (Exception recognitionError) {
+        CityUpgradeFlow.rethrowControlSignal(recognitionError);
+        logWarning(routineLogUpgradeBuildingsLine(
+                "Paid resource quote not safely verified: " + recognitionError.getMessage()
+                        + "; no automatic confirmation or retry"));
+    }
+    return false;
+}
+
+private java.util.Optional<CityGemReplenishQuote.Quote> readVerifiedCityGemQuote(int budget) throws Exception {
+    String ratio = readCityGemText(280, 239, 495, 291,
+            OcrSettingsData.builder().textLayout(OcrSettingsData.TextLayout.SINGLE_LINE)
+                    .allowedGlyphs("0123456789,/ ").build());
+    String product = readCityGemText(161, 330, 465, 380,
+            OcrSettingsData.builder().textLayout(OcrSettingsData.TextLayout.SINGLE_LINE).build());
+    String gives = readCityGemText(162, 371, 480, 423,
+            OcrSettingsData.builder().textLayout(OcrSettingsData.TextLayout.SINGLE_LINE).build());
+    String button = readCityGemText(513, 348, 663, 401,
+            OcrSettingsData.builder().textLayout(OcrSettingsData.TextLayout.SINGLE_LINE)
+                    .allowedGlyphs("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ &").build());
+    String price = readCityGemText(573, 394, 653, 446,
+            OcrSettingsData.forNumberRecognition());
+    String wallet = readCityGemText(602, 7, 672, 57,
+            OcrSettingsData.forNumberRecognition());
+    return CityGemReplenishQuote.parse(ratio, product, gives, button, price, wallet, budget);
+}
+
+private String readCityGemText(int x1, int y1, int x2, int y2, OcrSettingsData settings) throws Exception {
+    String value = emuManager.readText(EMULATOR_NUMBER,
+            new PointData(x1, y1), new PointData(x2, y2), settings, false);
+    return value == null ? "" : value.trim();
+}
+
+private static boolean sameCityGemQuote(CityGemReplenishQuote.Quote first,
+                                         java.util.Optional<CityGemReplenishQuote.Quote> second) {
+    return second.isPresent() && first.resource().equals(second.get().resource())
+            && first.have() == second.get().have()
+            && first.required() == second.get().required()
+            && first.packSize() == second.get().packSize()
+            && first.unitGems() == second.get().unitGems()
+            && first.packsNeeded() == second.get().packsNeeded();
+}
+
+static boolean verifiedOwnedPackButtonText(String text) {
+    return text != null && text.toLowerCase(java.util.Locale.ROOT)
+            .replaceAll("[^a-z]", "").equals("replenishall");
+}
+
 private boolean refillResourcesIfNeededFlow() {
+        if (emuManager.getSelectedEmulatorType()
+                == dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU) {
+            return refillUsingOwnedPacksOnly();
+        }
         var result = RepeatedResourceReplenishmentFlow.run(
                 new RepeatedResourceReplenishmentFlow.Ui() {
                     @Override
@@ -842,13 +1199,17 @@ private void logQueueStateFlow(int queueIndex, UpgradeBuildingsRoutine.QueueSnap
 
 private UpgradeBuildingsRoutine.QueueSnapshot inspectQueueState(AreaData queueArea) {
         try {
-            ImageSearchResultData idle = templateSearchHelper.locatePattern(
-                    TemplatesEnum.MARCH_QUEUE_STATUS_IDLE,
-                    SearchConfig.builder()
-                            .withArea(queueArea)
-                            .withThreshold(88)
-                            .withMaxAttempts(1)
-                            .build());
+            SearchConfig idlePresence = SearchConfig.builder()
+                    .withArea(queueArea).withThreshold(88).withMaxAttempts(1).build();
+            // A busy construction queue correctly has NO Idle text; checking
+            // that optional marker is not an actionable error. On Serve-Emu
+            // use a single fast image probe before the authoritative OCR.
+            ImageSearchResultData idle = emuManager.getSelectedEmulatorType()
+                    == dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU
+                    ? templateSearchHelper.locatePatternFast(
+                            TemplatesEnum.MARCH_QUEUE_STATUS_IDLE, idlePresence)
+                    : templateSearchHelper.locatePattern(
+                            TemplatesEnum.MARCH_QUEUE_STATUS_IDLE, idlePresence);
             if (idle.isFound()) {
                 return new UpgradeBuildingsRoutine.QueueSnapshot(UpgradeBuildingsRoutine.QueueMood.IDLE, null);
             }
@@ -1005,6 +1366,22 @@ private void reachCityView() {
         }
     }
 
+private void closeVerifiedUpgradeBonusBeforeHome() {
+    if (emuManager.getSelectedEmulatorType()
+            != dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU) return;
+    RawImageData first=emuManager.captureScreen(EMULATOR_NUMBER);
+    ImageSearchResultData close=CityUpgradeBonusExitFrame.verifiedClose(first);
+    if(!close.isFound())return;
+    sleepTask(160);
+    ImageSearchResultData confirm=CityUpgradeBonusExitFrame.verifiedClose(
+            emuManager.captureScreen(EMULATOR_NUMBER));
+    if(!dev.frostguard.engine.helper.RecognitionConsensus.agrees(close,confirm,12))return;
+    logInfo(routineLogUpgradeBuildingsLine(
+            "Verified Upgrade Bonus close action; exiting direct to City before Home navigation"));
+    tapInside(confirm);
+    sleepTask(350);
+}
+
 private QueueHandlingResult handleQueue(QueueReadout queueResult) {
         return CityUpgradeFlow.handleQueue(queueResult.queueNumber(), new CityUpgradeFlow.QueueUi<>() {
             @Override
@@ -1027,6 +1404,7 @@ private QueueHandlingResult handleQueue(QueueReadout queueResult) {
 
             @Override
             public void recoverHome() {
+                closeVerifiedUpgradeBonusBeforeHome();
                 recoverLocation(LaunchPoint.HOME);
             }
         });
@@ -1047,6 +1425,40 @@ private Attempt<QueueHandlingResult> handleQueueAttempt(QueueReadout queueResult
             FurnacePanelDetector.Evidence furnace = FurnacePanelDetector.inspect(
                     (template, area, threshold) -> locateOnFrame(frame, template, area, threshold));
             diagnostics.decision(frame, furnace.toString());
+            if (furnacePriority && !furnace.panelVisible()) {
+                // The generic queue often recommends Iron Mine or Storehouse
+                // while Furnace is busy. A focus run may NEVER upgrade those.
+                // Two independent reads must identify a genuine furnace-chain
+                // prerequisite before ANY Upgrade/Build action is attempted.
+                String first=readSelectedBuildingName();
+                sleepTask(150);
+                String second=readSelectedBuildingName();
+                boolean twiceNamed=FurnacePrioritySelectionPolicy.mayUseRecommendedBuilding(
+                        false, first, second);
+                boolean twiceEmbassy=false;
+                if (!twiceNamed) {
+                    // Title template is an independent fallback for a selected
+                    // Embassy (real 15 Nov Serve-Emu reference), not a guess
+                    // based on building position or any freehand coordinate.
+                    RawImageData firstTitle=emuManager.captureScreen(EMULATOR_NUMBER);
+                    if(FurnacePrioritySelectedBuildingFrame.embassy(firstTitle)) {
+                        sleepTask(150);
+                        twiceEmbassy=FurnacePrioritySelectedBuildingFrame.embassy(
+                                emuManager.captureScreen(EMULATOR_NUMBER));
+                    }
+                }
+                if (!twiceNamed && !twiceEmbassy) {
+                    logInfo("Furnace Priority rejected recommended building; "
+                            + "first='" + first + "', second='" + second
+                            + "'. No upgrade/build button will be pressed.");
+                    diagnostics.observation("furnace-focus-nonchain "
+                            + FurnacePrioritySelectionPolicy.normalize(first));
+                    return Attempt.completed(new QueueHandlingResult(false,null,true));
+                }
+                logInfo("Furnace Priority confirmed chain prerequisite "
+                        + (twiceEmbassy ? "Embassy (dual-frame title)" :
+                            FurnacePrioritySelectionPolicy.normalize(second)));
+            }
             if (furnace.actionable()) {
                 logInfo(routineLogUpgradeBuildingsLine("Furnace entry recognized; " + furnace));
                 if (shouldPrepareDoubleTime(true)) {
@@ -1065,12 +1477,13 @@ private Attempt<QueueHandlingResult> handleQueueAttempt(QueueReadout queueResult
 
             ImageSearchResultData info = emuManager.locatePattern(EMULATOR_NUMBER, frame,
                     BUILDING_BUTTON_INFO, SearchConfigConstants.RESILIENT.getThreshold());
-            ImageSearchResultData upgrade = info.isFound() ? null : emuManager.locatePattern(EMULATOR_NUMBER, frame,
+            ImageSearchResultData upgrade = info.isFound() && !furnacePriority ? null
+                    : emuManager.locatePattern(EMULATOR_NUMBER, frame,
                     BUILDING_BUTTON_UPGRADE, SearchConfigConstants.RESILIENT.getThreshold());
             diagnostics.decision(frame, furnace + "; buildingControlThreshold="
                     + SearchConfigConstants.RESILIENT.getThreshold() + "; info=" + info + "; upgrade="
                     + (upgrade == null ? "not-searched" : upgrade));
-            if (info.isFound()) {
+            if (info.isFound() && !furnacePriority) {
                 diagnostics.stage("survivor-building");
                 tapNear(new PointData(info.getPoint().getX() + 100, info.getPoint().getY()));
                 return buildingAttempt(handleSurvivorBuilding());
@@ -1090,7 +1503,7 @@ private Attempt<QueueHandlingResult> handleQueueAttempt(QueueReadout queueResult
             // white Upgrade arrow, reducing template score below recognition.
             // Require both a precisely located Details control and the hand
             // pointing at its adjacent Upgrade before attempting this tap.
-            if (!info.isFound()) {
+            if (!info.isFound() || furnacePriority) {
                 CityUpgradeGuidanceDetector.Evidence guided = CityUpgradeGuidanceDetector.inspect(
                         (template, area, threshold) -> locateOnFrame(frame, template, area, threshold));
                 diagnostics.decision(frame, "tutorial-hand upgrade=" + guided);
@@ -1114,13 +1527,13 @@ private Attempt<QueueHandlingResult> handleQueueAttempt(QueueReadout queueResult
         }
         ProductionBlocker training = readBusyProductionBuilding(queueResult.queueNumber());
         if (training != null) {
-            return Attempt.completed(new QueueHandlingResult(false, training));
+            return Attempt.completed(new QueueHandlingResult(false, training, false));
         }
         diagnostics.stage("production-blocker");
         ProductionBlocker blocker = handleProductionBlocker(queueResult.queueNumber());
         return blocker == null
                 ? Attempt.unresolved(FailureReason.CONTROL_NOT_RECOGNIZED)
-                : Attempt.completed(new QueueHandlingResult(false, blocker));
+                : Attempt.completed(new QueueHandlingResult(false, blocker, false));
     }
 
 private boolean shouldPrepareDoubleTime(boolean furnaceConfirmed) {
@@ -1218,7 +1631,7 @@ private void prepareDoubleTimeBeforeFurnaceUpgrade() {
 }
 
 private Attempt<QueueHandlingResult> buildingAttempt(FailureReason failure) {
-        return failure == null ? Attempt.completed(new QueueHandlingResult(true, null))
+        return failure == null ? Attempt.completed(new QueueHandlingResult(true, null, false))
                 : Attempt.unresolved(failure);
     }
 

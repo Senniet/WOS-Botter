@@ -16,6 +16,7 @@ import dev.frostguard.engine.emulator.instance.*;
 import dev.frostguard.api.domain.*;
 import dev.frostguard.engine.input.TapInteractionService;
 import dev.frostguard.engine.schedule.QueuedEmulatorTask;
+import dev.frostguard.engine.schedule.TaskExecutionPauseGate;
 import dev.frostguard.engine.service.ConfigService;
 import dev.frostguard.engine.service.ProfileService;
 import dev.frostguard.vision.ocr.OcrException;
@@ -111,7 +112,7 @@ public class EmulatorController {
 
     // --- screen capture ---
 
-    public RawImageData captureScreen(String idx) { requireBackend(); return backend.captureScreenshot(idx); }
+    public RawImageData captureScreen(String idx) { TaskExecutionPauseGate.checkpoint(); requireBackend(); return backend.captureScreenshot(idx); }
 
     // --- input dispatch ---
 
@@ -124,6 +125,7 @@ public class EmulatorController {
     }
 
     private void dispatchTap(String idx, PointData pt) {
+        TaskExecutionPauseGate.checkpoint();
         requireBackend();
         LOG.info("{} tap ({},{}) dev {}", label(idx), pt.getX(), pt.getY(), idx);
         dev.frostguard.engine.diagnostics.TaskTemplateCoach.tapped(idx, pt);
@@ -131,20 +133,22 @@ public class EmulatorController {
     }
 
     public void swipeScreen(String idx, PointData from, PointData to) {
+        TaskExecutionPauseGate.checkpoint();
         requireBackend();
         LOG.info("{} swipe dev {}", label(idx), idx);
         backend.swipe(idx, from, to);
     }
 
     public void swipeScreen(String idx, PointData from, PointData to, int durationMs) {
+        TaskExecutionPauseGate.checkpoint();
         requireBackend();
         LOG.info("{} swipe duration={}ms dev {}", label(idx), durationMs, idx);
         backend.swipe(idx, from, to, durationMs);
     }
 
-    public void pressBack(String idx) { requireBackend(); LOG.info("{} back dev {}", label(idx), idx); backend.pressBackButton(idx); }
-    public void writeText(String idx, String t) { requireBackend(); LOG.info("{} text dev {}", label(idx), idx); backend.writeText(idx, t); }
-    public void clearText(String idx, int n)    { requireBackend(); LOG.info("{} erase {} dev {}", label(idx), n, idx); backend.clearText(idx, n); }
+    public void pressBack(String idx) { TaskExecutionPauseGate.checkpoint(); requireBackend(); LOG.info("{} back dev {}", label(idx), idx); backend.pressBackButton(idx); }
+    public void writeText(String idx, String t) { TaskExecutionPauseGate.checkpoint(); requireBackend(); LOG.info("{} text dev {}", label(idx), idx); backend.writeText(idx, t); }
+    public void clearText(String idx, int n)    { TaskExecutionPauseGate.checkpoint(); requireBackend(); LOG.info("{} erase {} dev {}", label(idx), n, idx); backend.clearText(idx, n); }
 
     // --- app management (direct delegates) ---
 
@@ -183,9 +187,9 @@ public class EmulatorController {
     }
 
     public void    closeEmulator(String i)                { requireBackend(); backend.closeEmulator(i); backend.invalidateAllCaches(i); }
-    public void    launchApp(String i, String pkg)        { requireBackend(); backend.launchApp(i, pkg); }
-    public void    forceStopApp(String i, String pkg)     { requireBackend(); backend.forceStopApp(i, pkg); }
-    public void    sendGameToBackground(String i)         { requireBackend(); backend.sendGameToBackground(i); }
+    public void    launchApp(String i, String pkg)        { TaskExecutionPauseGate.checkpoint(); requireBackend(); backend.launchApp(i, pkg); }
+    public void    forceStopApp(String i, String pkg)     { TaskExecutionPauseGate.checkpoint(); requireBackend(); backend.forceStopApp(i, pkg); }
+    public void    sendGameToBackground(String i)         { TaskExecutionPauseGate.checkpoint(); requireBackend(); backend.sendGameToBackground(i); }
     public boolean isRunning(String i)                    { requireBackend(); return backend.isRunning(i); }
     public boolean isPackageRunning(String i, String pkg) { requireBackend(); return backend.isPackageRunning(i, pkg); }
     public void    restartAdbServer()                     { requireBackend(); backend.restartAdb(); }
@@ -197,15 +201,15 @@ public class EmulatorController {
     // --- OCR ---
 
     public String readText(String idx, PointData a, PointData b) throws IOException, OcrException {
-        requireBackend(); return backend.readText(idx, a, b);
+        TaskExecutionPauseGate.checkpoint(); requireBackend(); return backend.readText(idx, a, b);
     }
     public String readText(String idx, PointData a, PointData b, OcrSettingsData c)
             throws IOException, OcrException {
-        requireBackend(); return backend.readText(idx, a, b, c);
+        TaskExecutionPauseGate.checkpoint(); requireBackend(); return backend.readText(idx, a, b, c);
     }
     public String readText(String idx, PointData a, PointData b, OcrSettingsData c, boolean reuseFrame)
             throws IOException, OcrException {
-        requireBackend(); return backend.readText(idx, a, b, c, reuseFrame);
+        TaskExecutionPauseGate.checkpoint(); requireBackend(); return backend.readText(idx, a, b, c, reuseFrame);
     }
 
     private boolean probeAllowed(TemplatesEnum template) {

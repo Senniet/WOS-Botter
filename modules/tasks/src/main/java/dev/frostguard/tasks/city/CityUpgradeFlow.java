@@ -46,6 +46,12 @@ final class CityUpgradeFlow {
                 return result.result();
             }
             ui.retainFailure(attempt, result.failure());
+            if (result.failure() == FailureReason.RESOURCES_NOT_OBTAINED) {
+                // Waiting for resources is not a recognition problem. Do not
+                // reopen Obtain More a second time in the same scheduled run.
+                ui.recoverHome();
+                throw new UnresolvedBuildingException(queue, attempt, result.failure());
+            }
             if (attempt == MAX_ATTEMPTS) {
                 throw new UnresolvedBuildingException(queue, attempt, result.failure());
             }
@@ -88,8 +94,11 @@ final class CityUpgradeFlow {
     }
 
     static final class UnresolvedBuildingException extends IllegalStateException {
+        private final FailureReason reason;
         UnresolvedBuildingException(int queue, int attempts, FailureReason reason) {
             super("City Upgrade unresolved: queue=" + queue + "; attempts=" + attempts + "; reason=" + reason);
+            this.reason = reason;
         }
+        FailureReason reason() { return reason; }
     }
 }

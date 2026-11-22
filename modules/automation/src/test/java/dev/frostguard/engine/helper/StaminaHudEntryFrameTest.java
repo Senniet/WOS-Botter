@@ -16,6 +16,35 @@ class StaminaHudEntryFrameTest {
             assertEquals(106,point.getY(),"City Bonus is y140 and must not be tapped");
         }
     }
+    @Test void currentHudRingWithFortySixStaminaIsStillDetected() throws Exception {
+        var point = StaminaHudEntry.verifiedTarget(frameAt(
+                "/stamina/live-hud-20261122/stamina-46-hud-only.png"));
+        assertNotNull(point, "2026 current HUD ring is narrower than old bar");
+        assertEquals(42, point.getX());
+        assertEquals(106, point.getY());
+    }
+
+    @Test void shortGreenHudAtLowerStaminaRemainsVerified() {
+        // Low-stamina bar has fewer green pixels than the old 220 threshold.
+        BufferedImage image = new BufferedImage(720, 1280, BufferedImage.TYPE_INT_ARGB);
+        for (int y = 101; y <= 112; y++) {
+            for (int x = 26; x <= 37; x++) {
+                image.setRGB(x, y, 0xff26bf16);
+            }
+        }
+        byte[] rgba = new byte[720 * 1280 * 4];
+        for (int y = 101; y <= 112; y++) {
+            for (int x = 26; x <= 37; x++) {
+                int i = (y * 720 + x) * 4;
+                rgba[i] = 0x26;
+                rgba[i+1] = (byte) 0xbf;
+                rgba[i+2] = 0x16;
+                rgba[i+3] = (byte) 255;
+            }
+        }
+        assertEquals(42, StaminaHudEntry.verifiedTarget(
+                RawImageData.capture(rgba, 720, 1280, 32)).getX());
+    }
     @Test void cityBonusOpenedByOldArrowCannotBeMistakenForStaminaHud() throws Exception {
         assertNull(StaminaHudEntry.verifiedTarget(
                 frameAt("/stamina/city-bonus-not-stamina-20261116.png")));

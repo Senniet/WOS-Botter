@@ -10,14 +10,23 @@ class TaskIntervalDefaultsTest {
 
     @Test
     void recurringTaskDefaultsReflectTheirIndividualCadence() {
-        assertMinutes(ConfigurationKeyEnum.ALLIANCE_CHESTS_OFFSET_INT, 240);
-        assertMinutes(ConfigurationKeyEnum.ALLIANCE_TECH_OFFSET_INT, 200);
-        assertMinutes(ConfigurationKeyEnum.ALLIANCE_TRIUMPH_OFFSET_INT, 240);
-        assertMinutes(ConfigurationKeyEnum.CITY_ACCEPT_NEW_SURVIVORS_OFFSET_INT, 360);
-        assertMinutes(ConfigurationKeyEnum.DAILY_MISSION_OFFSET_INT, 720);
-        assertMinutes(ConfigurationKeyEnum.MAIL_REWARDS_OFFSET_INT, 720);
-        assertMinutes(ConfigurationKeyEnum.LIFE_ESSENCE_OFFSET_INT, 360);
-        assertMinutes(ConfigurationKeyEnum.INT_EXPLORATION_CHEST_OFFSET, 360);
+        assertMinutes(ConfigurationKeyEnum.ALLIANCE_CHESTS_OFFSET_INT, 120);
+        assertMinutes(ConfigurationKeyEnum.ALLIANCE_TECH_OFFSET_INT, 120);
+        assertMinutes(ConfigurationKeyEnum.ALLIANCE_TRIUMPH_OFFSET_INT, 120);
+        assertMinutes(ConfigurationKeyEnum.CITY_ACCEPT_NEW_SURVIVORS_OFFSET_INT, 240);
+        assertMinutes(ConfigurationKeyEnum.DAILY_MISSION_OFFSET_INT, 120);
+        assertMinutes(ConfigurationKeyEnum.MAIL_REWARDS_OFFSET_INT, 120);
+        assertMinutes(ConfigurationKeyEnum.LIFE_ESSENCE_OFFSET_INT, 120);
+        assertMinutes(ConfigurationKeyEnum.INT_EXPLORATION_CHEST_OFFSET, 120);
+    }
+
+    @Test
+    void recurringRewardChecksUseTwoHourDefault() {
+        assertMinutes(ConfigurationKeyEnum.ONLINE_REWARDS_CHECK_INTERVAL_INT, 120);
+        assertMinutes(ConfigurationKeyEnum.FREE_DAILY_CHESTS_INTERVAL_INT, 360);
+        assertMinutes(ConfigurationKeyEnum.SMART_DAILY_OVERVIEW_INTERVAL_INT, 120);
+        assertMinutes(ConfigurationKeyEnum.GROWTH_REWARDS_CHECK_INTERVAL_INT, 120);
+        assertMinutes(ConfigurationKeyEnum.EVENT_MILESTONE_CHECK_INTERVAL_INT, 120);
     }
 
     @Test
@@ -29,7 +38,7 @@ class TaskIntervalDefaultsTest {
     void missingProfileSettingUsesTheRevisedDefault() {
         AccountDescriptor profile = new AccountDescriptor(1L);
 
-        assertEquals(240, profile.getConfig(ConfigurationKeyEnum.ALLIANCE_CHESTS_OFFSET_INT, Integer.class));
+        assertEquals(120, profile.getConfig(ConfigurationKeyEnum.ALLIANCE_CHESTS_OFFSET_INT, Integer.class));
     }
 
     @Test

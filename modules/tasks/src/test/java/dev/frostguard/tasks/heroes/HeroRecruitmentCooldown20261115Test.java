@@ -20,7 +20,7 @@ class HeroRecruitmentCooldown20261115Test {
         assertEquals(now.plus(advanced).plusSeconds(12),
                 HeroRecruitmentRoutine.nextModernCheck(now, advanced, epic,
                         true, true, false));
-        assertEquals(now.plusMinutes(20),
+        assertEquals(now.plusMinutes(10),
                 HeroRecruitmentRoutine.nextModernCheck(now, advanced, epic,
                         true, true, true));
         assertEquals(now.plusMinutes(5),
@@ -59,5 +59,22 @@ class HeroRecruitmentCooldown20261115Test {
                 HeroRecruitmentRoutine.parseModernCooldown(advanced));
         assertEquals(Duration.ofHours(10).plusMinutes(4).plusSeconds(21),
                 HeroRecruitmentRoutine.parseModernCooldown(epic));
+    }
+    @org.junit.jupiter.api.Test
+    void skipsMissingFreeTemplateOnlyWithIndependentlyConfirmedLongCooldown() {
+        org.junit.jupiter.api.Assertions.assertFalse(
+                HeroRecruitmentRoutine.shouldProbeFreeButtonAfterPassiveMiss(
+                        java.time.Duration.ofHours(12)));
+        org.junit.jupiter.api.Assertions.assertFalse(
+                HeroRecruitmentRoutine.shouldProbeFreeButtonAfterPassiveMiss(
+                        java.time.Duration.ofMinutes(2)));
+        org.junit.jupiter.api.Assertions.assertTrue(
+                HeroRecruitmentRoutine.shouldProbeFreeButtonAfterPassiveMiss(null));
+        org.junit.jupiter.api.Assertions.assertTrue(
+                HeroRecruitmentRoutine.shouldProbeFreeButtonAfterPassiveMiss(
+                        java.time.Duration.ofSeconds(15)));
+        org.junit.jupiter.api.Assertions.assertTrue(
+                HeroRecruitmentRoutine.shouldProbeFreeButtonAfterPassiveMiss(
+                        java.time.Duration.ZERO));
     }
 }

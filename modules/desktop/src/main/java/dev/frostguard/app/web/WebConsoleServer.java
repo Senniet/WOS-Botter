@@ -248,13 +248,16 @@ public final class WebConsoleServer {
         ScheduleService service = ScheduleService.obtain();
         String command = str(data, "action");
         switch (command) {
-            case "start" -> {
+            case "start", "startPaused" -> {
                 var settings = ConfigService.obtain().loadGlobalSettings();
                 if (settings == null || !"SERVE_EMU".equals(settings.get(
                         ConfigurationKeyEnum.CURRENT_EMULATOR_STRING.name()))) {
                     throw new IllegalStateException("Configure Serve-Emu before starting");
                 }
-                if (!service.getCoordinator().hasManagedQueues()) service.launchEngine();
+                if (!service.getCoordinator().hasManagedQueues()) {
+                    if ("startPaused".equals(command)) service.launchEnginePaused();
+                    else service.launchEngine();
+                }
             }
             case "stop" -> service.haltEngine();
             case "pause" -> service.suspendEngine();
@@ -298,6 +301,17 @@ public final class WebConsoleServer {
                     throw new IllegalStateException("Cannot schedule a task that is executing");
                 }
                 ScheduleService.obtain().persistScheduleAdjustment(p, task, next, null);
+                // The live TaskStateData otherwise retains the old due date
+                // even though TaskQueue and the database were just rescheduled.
+                // Keep Task Timeline in sync with explicit scheduler edits.
+                if (queue != null) {
+                    TaskStateData live = TaskManagementService.shared()
+                            .lookupTaskState(p.getId(), task.getId());
+                    if (live != null) {
+                        live.setNextExecutionTime(next);
+                        TaskManagementService.shared().recordTaskState(p.getId(), live);
+                    }
+                }
             }
         } else {
             throw new IllegalArgumentException("Invalid task action");
@@ -347,6 +361,34 @@ public final class WebConsoleServer {
             throw new IllegalArgumentException("Expected boolean");
         }
         if (key.getType() == Integer.class) Integer.parseInt(value);
+        if (key.name().startsWith("TASK_REPEAT_GAP_")) {
+            int gap = Integer.parseInt(value);
+            if (gap != 0 && (gap < 5 || gap > 10080)) {
+                throw new IllegalArgumentException(
+                        "Repeat limit must be 0 (Automatic) or 5-10080 minutes");
+            }
+        }
+        if (java.util.Set.of(
+                ConfigurationKeyEnum.ALLIANCE_CHESTS_OFFSET_INT,
+                ConfigurationKeyEnum.ALLIANCE_TECH_OFFSET_INT,
+                ConfigurationKeyEnum.ALLIANCE_TRIUMPH_OFFSET_INT,
+                ConfigurationKeyEnum.CITY_ACCEPT_NEW_SURVIVORS_OFFSET_INT,
+                ConfigurationKeyEnum.ONLINE_REWARDS_CHECK_INTERVAL_INT,
+                ConfigurationKeyEnum.FREE_DAILY_CHESTS_INTERVAL_INT,
+                ConfigurationKeyEnum.SMART_DAILY_OVERVIEW_INTERVAL_INT,
+                ConfigurationKeyEnum.GROWTH_REWARDS_CHECK_INTERVAL_INT,
+                ConfigurationKeyEnum.EVENT_MILESTONE_CHECK_INTERVAL_INT,
+                ConfigurationKeyEnum.DAILY_MISSION_OFFSET_INT,
+                ConfigurationKeyEnum.MAIL_REWARDS_OFFSET_INT,
+                ConfigurationKeyEnum.LIFE_ESSENCE_OFFSET_INT,
+                ConfigurationKeyEnum.ALLIANCE_LIFE_ESSENCE_OFFSET_INT,
+                ConfigurationKeyEnum.INT_EXPLORATION_CHEST_OFFSET).contains(key)) {
+            int interval = Integer.parseInt(value);
+            if (interval < 5 || interval > 10080) {
+                throw new IllegalArgumentException(
+                        "Regular check interval must be 5-10080 minutes");
+            }
+        }
         if (key == ConfigurationKeyEnum.CURRENT_EMULATOR_STRING &&
                 !"SERVE_EMU".equals(value)) {
             throw new IllegalArgumentException("Web version supports Serve-Emu only");

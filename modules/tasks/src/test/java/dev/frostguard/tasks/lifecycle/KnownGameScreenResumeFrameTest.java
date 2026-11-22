@@ -37,6 +37,29 @@ class KnownGameScreenResumeFrameTest {
                 KnownGameScreenResume.findSafeBackPage(frame("squad-settings-page-redacted.png")));
     }
 
+    @Test void recognizesHeroesPageAfterRecruitmentBackAtNewHeaderPosition() throws Exception {
+        assertEquals(KnownGameScreenResume.Page.HEROES,
+                KnownGameScreenResume.findSafeBackPage(
+                        frame("heroes-current-after-recruitment-20261122.png")));
+    }
+
+    @Test void recognizesPetAdventureMapAfterAChestIsStarted() throws Exception {
+        assertEquals(KnownGameScreenResume.Page.PET_ADVENTURE,
+                KnownGameScreenResume.findSafeBackPage(
+                        frame("pet-adventure-map-after-start-20261122.png")));
+    }
+
+    @Test void recognizesEventsPageAfterMercenaryTask() throws Exception {
+        assertEquals(KnownGameScreenResume.Page.EVENTS,
+                KnownGameScreenResume.findSafeBackPage(frame("events-mercenary-live-20261122.png")));
+    }
+
+    @Test void recognizesIntelClaimAllPageFromLiveScreenshot() throws Exception {
+        assertEquals(KnownGameScreenResume.Page.INTEL,
+                KnownGameScreenResume.findSafeBackPage(
+                        frame("intel-claim-all-live.png")));
+    }
+
     @Test void recognizesCityBonusFromWrongInitialStaminaHudClick() throws Exception {
         assertEquals(KnownGameScreenResume.Page.CITY_BONUS,
                 KnownGameScreenResume.findSafeBackPage(frame("city-bonus-header-20261116.png")));

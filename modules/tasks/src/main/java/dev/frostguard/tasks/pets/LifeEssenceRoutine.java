@@ -193,6 +193,10 @@ public class LifeEssenceRoutine extends DelayedTask {
 	private LifeEssenceClaimPolicy.Observation observeClaimMarkers() {
 		try {
 			RawImageData frame = emuManager.captureScreen(EMULATOR_NUMBER);
+            if (!LifeEssenceIslandFrame.ownIsland(frame)) {
+                logWarning("Life Essence: My Island header absent; do not count an unknown screen as empty");
+                return LifeEssenceClaimPolicy.Observation.screenUnconfirmed();
+            }
 			BufferedImage image = ImageConverter.toBufferedImage(frame);
 			return LifeEssenceClaimPolicy.Observation.markers(
 					LifeEssenceSearchKind.COLOR.open(null).find(image));
@@ -338,10 +342,19 @@ public class LifeEssenceRoutine extends DelayedTask {
 	}
 
 	private void handleClaimFailure(int confirmedClaims) {
-		logDebug("Exiting Life Essence interface after an unfinished claim");
-		tapNear(EXIT_BUTTON);
-		sleepTask(1000);
-		scheduleRetry("Life Essence claim unfinished after " + confirmedClaims + " confirmed claims");
+        logDebug("Life Essence claim unfinished; verify island before exit");
+        try {
+            if (LifeEssenceIslandFrame.ownIsland(emuManager.captureScreen(EMULATOR_NUMBER))) {
+                tapNear(EXIT_BUTTON);
+                sleepTask(500);
+            } else {
+                logWarning("Life Essence failure: island not visible; no blind exit tap");
+            }
+        } catch (RuntimeException ex) {
+            TaskControlSignals.rethrowControlSignal(ex);
+            logWarning("Life Essence failure: island verification failed; no blind exit tap");
+        }
+        scheduleRetry("Life Essence claim unfinished after " + confirmedClaims + " confirmed claims");
 	}
 
 	private void scheduleRetry(String reason) {

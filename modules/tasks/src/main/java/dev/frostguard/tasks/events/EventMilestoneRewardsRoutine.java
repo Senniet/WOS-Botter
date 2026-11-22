@@ -30,7 +30,7 @@ public final class EventMilestoneRewardsRoutine extends DelayedTask {
 
     private void executeSafely(){
         Integer setting=profile.getConfig(ConfigurationKeyEnum.EVENT_MILESTONE_CHECK_INTERVAL_INT,Integer.class);
-        int interval=setting==null?240:Math.clamp(setting,45,1440);
+        int interval=setting==null?120:Math.clamp(setting,45,1440);
         boolean enteredEvents=false;
         try{
             navigationHelper.ensureCorrectScreenLocation(LaunchPoint.HOME,this::checkPreemption);

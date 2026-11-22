@@ -39,7 +39,9 @@ import dev.frostguard.vision.ocr.OcrEngine;
 /**
  * Task responsible for managing arena challenges.
  *
- * <p>The routine only attacks weaker opponents. Optional profile-based filters
+ * <p>The routine prefers weaker opponents and tries all free refreshes
+ * before using a clearly identified stronger opponent as a last resort to
+ * finish free daily challenges. Optional profile-based filters
  * protect the profile alliance and apply a server preference using the
  * Character Information stored on the selected profile.</p>
  */
@@ -83,6 +85,7 @@ public class ArenaRoutine extends DelayedTask {
     private static final int POWER_TEXT_COMPACT_LAYOUT_Y_OFFSET = 0;
     private static final int POWER_TEXT_COMPACT_LAYOUT_HEIGHT = 22;
     private static final Color ARENA_POWER_GREEN_TEXT = new Color(105, 230, 50);
+    private static final Color ARENA_POWER_RED_TEXT = new Color(240, 85, 65);
 
     private static final int OPPONENT_SCORE_STAR_X = 296;
     private static final int OPPONENT_SCORE_STAR_WIDTH = 42;
@@ -111,6 +114,14 @@ public class ArenaRoutine extends DelayedTask {
     // ========== Arena Constants ==========
     private static final int INITIAL_ARENA_SCORE = 1000;
     private static final int MAX_REASONABLE_CHALLENGE_ATTEMPTS = 10;
+    // The current Serve-Emu layout renders "Daily challenges: N". The former
+    // 33-pixel digit-only crop misread 1 as 7 and a digit as 75. Verify the
+    // labelled line on two live frames before authorizing a battle.
+    private static final PointData CHALLENGES_LABEL_TOP_LEFT = new PointData(170, 933);
+    private static final PointData CHALLENGES_LABEL_BOTTOM_RIGHT = new PointData(455, 1005);
+    private static final Pattern DAILY_CHALLENGE_LABEL = Pattern.compile(
+            "(?i)\\bchallenges\\b[\\s]*[:;|.][\\s]*([0-9])\\b");
+
     private static final int MAX_FREE_REFRESHES = 3;
     private static final int MAX_GEM_REFRESHES = 5;
     static final SearchConfig TRANSIENT_BUTTON_SEARCH = SearchConfig.builder()
@@ -192,6 +203,12 @@ public class ArenaRoutine extends DelayedTask {
         Boolean configuredRefresh = profile.getConfig(
                 ConfigurationKeyEnum.ARENA_TASK_REFRESH_WITH_GEMS_BOOL, Boolean.class);
         this.refreshWithGems = configuredRefresh != null ? configuredRefresh : DEFAULT_REFRESH_WITH_GEMS;
+        if (!dev.frostguard.tasks.security.TaskGemSpendPolicy.allowed(
+                profile, TpDailyTaskEnum.ARENA)) {
+            extraAttempts = 0;
+            refreshWithGems = false;
+            logInfo("Arena diamond-spending permission OFF; free challenges and free refreshes remain available");
+        }
         // Retained profile settings from another emulator must never spend
         // diamonds on the live Serve-EMU free-challenges-only account.
         if (!arenaPaidActionsAllowed(emuManager.getSelectedEmulatorType())) {
@@ -441,6 +458,7 @@ public class ArenaRoutine extends DelayedTask {
         if (nowUtc.isBefore(scheduledTimeUtc)) {
             logDebug(String.format("Task triggered too early (current: %s UTC, scheduled: %s UTC). Rescheduling for scheduled time.",
                     nowUtc.format(DateTimeFormatter.ofPattern("HH:mm")), activationTime));
+            markWorkIncomplete("Arena: configured start time not yet reached");
             rescheduleForToday();
             return false;
         }
@@ -448,6 +466,7 @@ public class ArenaRoutine extends DelayedTask {
         if (nowUtc.isAfter(cutoffTimeUtc)) {
             logDebug(String.format("Task triggered too late (current: %s UTC, cutoff: 23:55 UTC). Scheduling for tomorrow.",
                     nowUtc.format(DateTimeFormatter.ofPattern("HH:mm"))));
+            markWorkIncomplete("Arena: configured execution window closed before challenges were attempted");
             rescheduleWithActivationHour();
             return false;
         }
@@ -468,6 +487,14 @@ public class ArenaRoutine extends DelayedTask {
     }
 
     private boolean arenaHomeVisible() {
+        // On Serve-Emu the title is an optional PAGE PRESENCE probe, not
+        // an actionable miss. The same capture is inspected locally and the
+        // proven 2026 exact-title ROI is retained. The Challenge tap is still
+        // independently confirmed by locateAction on two frames.
+        if (emuManager.getSelectedEmulatorType()
+                == dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU) {
+            return ArenaLiveFrame.arenaHome(emuManager.captureScreen(EMULATOR_NUMBER));
+        }
         // Live 720x1280 frame: Arena of Exploration header is at y~40.
         // Previous y70..150 search scored only 31.93%; corrected ROI 99.28%.
         if (templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_ARENA_TITLE,
@@ -483,6 +510,13 @@ public class ArenaRoutine extends DelayedTask {
     }
 
     private boolean challengeListVisible() {
+        // A closed Challenge List is normal on the Arena home/formation.
+        // Do not run two retries + implicit fallbacks or classify absence
+        // as an error. Actual tapping still requires separate verification.
+        if (emuManager.getSelectedEmulatorType()
+                == dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU) {
+            return ArenaLiveFrame.challengeList(emuManager.captureScreen(EMULATOR_NUMBER));
+        }
         return templateSearchHelper.locatePattern(TemplatesEnum.SERVE_EMU_ARENA_LIST_TITLE,
                 SearchConfig.builder().withMaxAttempts(2).withDelay(150)
                         .withThreshold(90).withArea(AreaData.of(230, 170, 510, 280)).build()).isFound();
@@ -554,6 +588,11 @@ public class ArenaRoutine extends DelayedTask {
                 .charWhitelist("0123456789")
                 .build();
 
+        if (emuManager.getSelectedEmulatorType()
+                == dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU) {
+            return readVerifiedLiveChallengeCount();
+        }
+
         Integer attemptsRead = readNumberValue(
                 CHALLENGES_LEFT_TOP_LEFT,
                 CHALLENGES_LEFT_BOTTOM_RIGHT,
@@ -592,12 +631,69 @@ public class ArenaRoutine extends DelayedTask {
         return true;
     }
 
+    static int parseDailyChallengeLabel(String text) {
+        if (text == null) return -1;
+        Matcher matcher = DAILY_CHALLENGE_LABEL.matcher(text.replace('\n', ' '));
+        if (!matcher.find()) return -1;
+        int count = Integer.parseInt(matcher.group(1));
+        return count <= MAX_REASONABLE_CHALLENGE_ATTEMPTS ? count : -1;
+    }
+
+    private int readLiveChallengeLabel() {
+        try {
+            String label = emuManager.readText(EMULATOR_NUMBER,
+                    CHALLENGES_LABEL_TOP_LEFT, CHALLENGES_LABEL_BOTTOM_RIGHT,
+                    OcrSettingsData.assembler()
+                            .textLayout(OcrSettingsData.TextLayout.SINGLE_LINE)
+                            .build(), false);
+            return parseDailyChallengeLabel(label);
+        } catch (Exception error) {
+            if (Thread.currentThread().isInterrupted())
+                throw new java.util.concurrent.CancellationException("Arena label OCR interrupted");
+            logWarning("Arena labelled attempt count OCR unavailable: "
+                    + error.getClass().getSimpleName());
+            return -1;
+        }
+    }
+
+    private boolean readVerifiedLiveChallengeCount() {
+        int first = readLiveChallengeLabel();
+        sleepTask(170);
+        int second = readLiveChallengeLabel();
+        if (first < 0 || first != second) {
+            logWarning("Arena labelled Daily challenges count is unverified ("
+                    + first + "/" + second + "); refusing battles");
+            return false;
+        }
+        attempts = first;
+        logInfo("Verified Arena Daily challenges remaining: " + attempts);
+        return true;
+    }
+
     private void processChallenges() {
         logInfo(String.format("Processing %d challenge attempts", attempts));
 
         while (true) {
             while (attempts > 0) {
                 OpponentCandidate opponent = findEligibleOpponent();
+                if (opponent == null) {
+                    // Exhaust FREE refreshes before risking a stronger red
+                    // opponent. Losing still consumes one free daily challenge,
+                    // so the player can reach 5/5 and collect the daily chest.
+                    if (tryRefreshOpponentList()) {
+                        logInfo("No weaker opponent; free list refreshed before red fallback.");
+                        continue;
+                    }
+                    opponent = findLastResortOpponent();
+                    if (opponent == null) {
+                        logWarning(String.format("No verified Arena opponent after free refreshes. %d attempts unused; %s",
+                                attempts, captureArenaDiagnostic("no-verified-opponents")));
+                        return;
+                    }
+                    logInfo("Free daily challenges remain with no weaker target: using "
+                            + (opponent.power().relation() == PowerRelation.STRONGER ? "RED" : "GREEN")
+                            + " opponent " + opponent.number() + " after verified challenge-button check.");
+                }
                 if (opponent != null) {
                     ChallengeOutcome outcome = challengeOpponent(opponent);
                     if (outcome == ChallengeOutcome.NO_ATTEMPTS) {
@@ -609,6 +705,15 @@ public class ArenaRoutine extends DelayedTask {
                         return;
                     }
                     if (outcome == ChallengeOutcome.DEFEAT) {
+                        if (opponent.power().relation() == PowerRelation.STRONGER) {
+                            // Expected last-resort loss. It still counts as
+                            // one daily challenge. Try another verified red
+                            // opponent until all free attempts are consumed;
+                            // never buy more attempts or paid refreshes.
+                            logInfo("Arena red fallback defeat confirmed; "
+                                    + attempts + " free daily challenge(s) remain.");
+                            continue;
+                        }
                         if (!shouldRefreshAfterDefeat(attempts)) {
                             logInfo(String.format(
                                     "Our attack lost to opponent %d. No attempts remain; skipping list refresh.",
@@ -631,14 +736,6 @@ public class ArenaRoutine extends DelayedTask {
                     continue;
                 }
 
-                if (tryRefreshOpponentList()) {
-                    logInfo("List refreshed. Rescanning opponents.");
-                    continue;
-                }
-
-                logWarning(String.format("No eligible arena opponents after refresh checks. Stopping with %d attempts unused; %s",
-                        attempts, captureArenaDiagnostic("no-eligible-opponents")));
-                return;
             }
 
             if (extraAttemptsPurchased || extraAttempts <= 0) {
@@ -806,7 +903,35 @@ public class ArenaRoutine extends DelayedTask {
         return selected;
     }
 
+    /**
+     * Only called after the routine has failed to find green and exhausted
+     * permitted free refreshes. Re-scan on a fresh Arena List and keep all
+     * profile-alliance/server hard exclusions.
+     */
+    private OpponentCandidate findLastResortOpponent() {
+        List<OpponentCandidate> allowed = scanOpponents(true).stream()
+                .filter(OpponentCandidate::eligible)
+                .filter(candidate -> !attemptedOpponentSlots.contains(candidate.number()))
+                .toList();
+        // Always prefer a newly appeared green opponent, even in fallback.
+        Comparator<OpponentCandidate> preference = alliancePolicy.comparator(profileAllianceTag)
+                .thenComparing(serverPolicy.comparator(profileServer))
+                .thenComparing(candidate -> candidate.power().value(), ArenaRoutine::comparePowerValues)
+                .thenComparingInt(OpponentCandidate::number);
+        List<OpponentCandidate> ranked = ArenaFallbackPolicy.preferGreenBeforeRed(
+                allowed, candidate -> candidate.power().relation() == PowerRelation.WEAKER,
+                preference);
+        if (ranked.isEmpty()) return null;
+        OpponentCandidate selected = ranked.get(0);
+        logInfo("Arena last-resort selection: opponent " + selected.number() + " " + selected.selectionSummary());
+        return selected;
+    }
+
     private List<OpponentCandidate> scanOpponents() {
+        return scanOpponents(false);
+    }
+
+    private List<OpponentCandidate> scanOpponents(boolean allowStronger) {
         int baseY = firstRun ? OPPONENT_BASE_Y_FIRST_RUN : OPPONENT_BASE_Y_NORMAL;
         List<OpponentCandidate> opponents = new ArrayList<>(MAX_OPPONENTS);
 
@@ -814,10 +939,11 @@ public class ArenaRoutine extends DelayedTask {
             int opponentY = baseY + (i * OPPONENT_Y_SPACING);
             int opponentNumber = i + 1;
             OpponentLayout layout = detectOpponentLayout(opponentY, opponentNumber);
-            PowerRead power = readPower(opponentY, opponentNumber, layout);
+            PowerRead power = readPower(opponentY, opponentNumber, layout, allowStronger);
             AllianceRead alliance = AllianceRead.notChecked();
             ServerRead server = ServerRead.notChecked();
-            if (power.relation() == PowerRelation.WEAKER) {
+            if (power.relation() == PowerRelation.WEAKER
+                    || allowStronger && power.relation() == PowerRelation.STRONGER) {
                 if (alliancePolicy != AlliancePolicy.ANY && profileAllianceTag != null) {
                     alliance = readAllianceTag(opponentY, opponentNumber);
                 }
@@ -825,7 +951,8 @@ public class ArenaRoutine extends DelayedTask {
                     server = readServer(opponentY, opponentNumber, layout);
                 }
             }
-            OpponentCandidate candidate = classifyOpponent(opponentNumber, opponentY, power, alliance, server);
+            OpponentCandidate candidate = classifyOpponent(
+                    opponentNumber, opponentY, power, alliance, server, allowStronger);
             opponents.add(candidate);
             logInfo(String.format("Opponent %d scan: layout=%s power=%s alliance=%s server=%s decision=%s",
                     opponentNumber, layout.label, power.logValue(), alliance.logValue(), server.logValue(), candidate.decision()));
@@ -836,8 +963,12 @@ public class ArenaRoutine extends DelayedTask {
     }
 
     private OpponentCandidate classifyOpponent(int number, int opponentY, PowerRead power,
-                                               AllianceRead alliance, ServerRead server) {
-        if (power.relation() != PowerRelation.WEAKER) {
+                                               AllianceRead alliance, ServerRead server,
+                                               boolean allowStronger) {
+        if (!ArenaFallbackPolicy.selectablePower(
+                power.relation() == PowerRelation.WEAKER,
+                power.relation() == PowerRelation.STRONGER,
+                allowStronger)) {
             return OpponentCandidate.skipped(number, opponentY, power, alliance, server, power.relation().skipReason);
         }
 
@@ -902,7 +1033,8 @@ public class ArenaRoutine extends DelayedTask {
         return layout;
     }
 
-    private PowerRead readPower(int opponentY, int opponentNumber, OpponentLayout layout) {
+    private PowerRead readPower(int opponentY, int opponentNumber,
+                                OpponentLayout layout, boolean allowStronger) {
         PowerRead primary = readPowerRelationAt(
                 opponentY,
                 opponentNumber,
@@ -910,6 +1042,7 @@ public class ArenaRoutine extends DelayedTask {
                 layout.powerHeight(),
                 layout.label);
         if (primary.relation() != PowerRelation.UNKNOWN) {
+            if (primary.relation() == PowerRelation.STRONGER && !allowStronger) return primary;
             return enrichPowerWithOcr(
                     opponentY, opponentNumber, layout.powerYOffset(), layout.powerHeight(), layout.label, primary);
         }
@@ -924,6 +1057,7 @@ public class ArenaRoutine extends DelayedTask {
                 fallbackLayout.powerHeight(),
                 fallbackLayout.label + " fallback");
         if (fallback.relation() != PowerRelation.UNKNOWN) {
+            if (fallback.relation() == PowerRelation.STRONGER && !allowStronger) return fallback;
             return enrichPowerWithOcr(
                     opponentY, opponentNumber, fallbackLayout.powerYOffset(), fallbackLayout.powerHeight(),
                     fallbackLayout.label + " fallback", fallback);
@@ -970,19 +1104,20 @@ public class ArenaRoutine extends DelayedTask {
 
     private PowerRead enrichPowerWithOcr(int opponentY, int opponentNumber, int yOffset, int height,
                                          String label, PowerRead colorRead) {
-        if (colorRead.relation() != PowerRelation.WEAKER) {
-            return colorRead;
-        }
+        if (colorRead.relation() == PowerRelation.UNKNOWN) return colorRead;
         AreaData powerArea = powerTextArea(opponentY, yOffset, height);
         PointData topLeft = powerArea.topLeft();
         PointData bottomRight = powerArea.bottomRight();
 
-        OcrSettingsData powerSettings = powerOcrSettings();
-
+        OcrSettingsData powerSettings = colorRead.relation() == PowerRelation.STRONGER
+                ? powerOcrSettings(ARENA_POWER_RED_TEXT) : powerOcrSettings();
+        // For a last-resort red target, one OCR attempt is sufficient to
+        // choose a lower-power foe if readable; when unreadable the button
+        // and RED color remain the authorization, not speculative OCR.
         String text = stringHelper.attemptRecognition(
                 topLeft,
                 bottomRight,
-                3,
+                colorRead.relation() == PowerRelation.STRONGER ? 1 : 3,
                 150L,
                 powerSettings,
                 value -> parsePowerValue(value) != null,
@@ -999,10 +1134,14 @@ public class ArenaRoutine extends DelayedTask {
     }
 
     static OcrSettingsData powerOcrSettings() {
+        return powerOcrSettings(ARENA_POWER_GREEN_TEXT);
+    }
+
+    private static OcrSettingsData powerOcrSettings(Color textColor) {
         return OcrSettingsData.assembler()
                 .textLayout(OcrSettingsData.TextLayout.SINGLE_LINE)
                 .stripBackground(true)
-                .setTextColor(ARENA_POWER_GREEN_TEXT)
+                .setTextColor(textColor)
                 .charWhitelist("0123456789.,KMBkmb")
                 .build();
     }
@@ -1368,19 +1507,29 @@ public class ArenaRoutine extends DelayedTask {
         }
         boolean equalize=Boolean.TRUE.equals(profile.getConfig(
                 ConfigurationKeyEnum.ARENA_TASK_ATTACK_QUICK_DEPLOY_BOOL,Boolean.class));
-        if(equalize){
-            // Real 17-Nov screen: Equalize at (296,1200), NOT the legacy
-            // Quick Deploy (180,1200). The old tap was hitting empty space.
-            var button=ArenaLiveFrame.equalize(formation);
-            if(!button.isFound()){
+        if (equalize && ArenaLiveFrame.balanced(formation)) {
+            // The current game may already show 33%/33%/33% on all three
+            // green bars. Pressing Equalize again is redundant, and with the
+            // new Balance control can be an unintended UI action.
+            logInfo("Arena formation already balanced on all three troop bars; Equalize not required");
+        } else if(equalize) {
+            var button = ArenaLiveFrame.equalize(formation);
+            if(!button.isFound()) {
                 logWarning("Arena Equalize not recognized on verified formation; no blind action");
                 return ArenaLiveFrame.Result.NONE;
             }
-            tapNear(button.getPoint());
-            sleepTask(120);
+            sleepTask(170);
+            var fresh=emuManager.captureScreen(EMULATOR_NUMBER);
+            var confirm=ArenaLiveFrame.equalize(fresh);
+            if (!dev.frostguard.engine.helper.RecognitionConsensus.agrees(button,confirm,12)) {
+                logWarning("Arena Equalize shifted/unconfirmed between two fresh frames; no tap");
+                return ArenaLiveFrame.Result.NONE;
+            }
+            tapNear(confirm.getPoint());
+            sleepTask(260);
             formation=emuManager.captureScreen(EMULATOR_NUMBER);
             if(!ArenaLiveFrame.balanced(formation)){
-                logWarning("Arena Equalize tapped but all three troop allocation bars were not confirmed");
+                logWarning("Arena Equalize tapped but three troop allocation bars not confirmed");
                 return ArenaLiveFrame.Result.UNKNOWN;
             }
         }
@@ -1463,6 +1612,12 @@ public class ArenaRoutine extends DelayedTask {
     }
 
     private int buyExtraAttempts() {
+        if (!dev.frostguard.tasks.security.TaskGemSpendPolicy.allowed(
+                profile, TpDailyTaskEnum.ARENA)
+                || !arenaPaidActionsAllowed(emuManager.getSelectedEmulatorType())) {
+            logInfo("Arena paid attempts denied by per-task permission or emulator policy");
+            return 0;
+        }
         logDebug("Opening extra attempts purchase dialog");
         tapNear(EXTRA_ATTEMPTS_BUTTON);
         sleepTask(1000);
@@ -1505,6 +1660,12 @@ public class ArenaRoutine extends DelayedTask {
             sleepTask(300);
         }
 
+        if (!dev.frostguard.tasks.security.TaskGemSpendPolicy.allowed(
+                profile, TpDailyTaskEnum.ARENA)) {
+            logWarning("Arena diamond permission switched off before purchase confirmation; aborting");
+            pressBack();
+            return 0;
+        }
         tapNear(PURCHASE_CONFIRM_BUTTON);
         sleepTask(500);
 
@@ -1589,8 +1750,10 @@ public class ArenaRoutine extends DelayedTask {
             }
         }
 
-        if (!refreshWithGems) {
-            logDebug("Paid arena list refresh disabled in configuration");
+        if (!refreshWithGems || !dev.frostguard.tasks.security.TaskGemSpendPolicy.allowed(
+                profile, TpDailyTaskEnum.ARENA)
+                || !arenaPaidActionsAllowed(emuManager.getSelectedEmulatorType())) {
+            logDebug("Paid arena list refresh disabled by per-task diamond permission or emulator policy");
             return false;
         }
 
@@ -1621,6 +1784,12 @@ public class ArenaRoutine extends DelayedTask {
         if (confirmResult.isFound()) {
             gemRefreshCount++;
             logInfo(String.format("Confirming gem list refresh (%d/%d)", gemRefreshCount, MAX_GEM_REFRESHES));
+            if (!dev.frostguard.tasks.security.TaskGemSpendPolicy.allowed(
+                    profile, TpDailyTaskEnum.ARENA)) {
+                logWarning("Arena diamond permission OFF before refresh confirmation; canceling");
+                pressBack();
+                return false;
+            }
             tapInside(confirmResult);
             sleepTask(1000);
             attemptedOpponentSlots.clear();

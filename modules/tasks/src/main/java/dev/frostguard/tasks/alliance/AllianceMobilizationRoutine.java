@@ -1088,9 +1088,12 @@ private void hydrateTaskTypeFlags() {
                 ConfigurationKeyEnum.ALLIANCE_MOBILIZATION_TRAINING_SPEEDUPS_BOOL,
                 DefaultsShape.TASK_TYPE_ENABLED);
 
-        this.useGemsEnabled = resolveConfigBoolean(
-                ConfigurationKeyEnum.ALLIANCE_MOBILIZATION_USE_GEMS_BOOL,
-                DefaultsShape.TASK_TYPE_ENABLED);
+        this.useGemsEnabled = dev.frostguard.tasks.security.TaskGemSpendPolicy.permitted(
+                dev.frostguard.tasks.security.TaskGemSpendPolicy.allowed(
+                        profile, TpDailyTaskEnum.ALLIANCE_MOBILIZATION),
+                resolveConfigBoolean(
+                        ConfigurationKeyEnum.ALLIANCE_MOBILIZATION_USE_GEMS_BOOL,
+                        DefaultsShape.TASK_TYPE_ENABLED));
 
         this.useSpeedupsEnabled = resolveConfigBoolean(
                 ConfigurationKeyEnum.ALLIANCE_MOBILIZATION_USE_SPEEDUPS_BOOL,

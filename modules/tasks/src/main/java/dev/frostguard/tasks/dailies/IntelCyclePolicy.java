@@ -24,6 +24,11 @@ final class IntelCyclePolicy {
         return new Decision(Action.WAIT_FOR_NEXT_REFRESH, nextRefresh(now, localZone));
     }
 
+    /** Bounded retry for a green Intel badge with unknown action markers. */
+    static LocalDateTime retryAfterUnknownMarkers(LocalDateTime now) {
+        return now.plusMinutes(15);
+    }
+
     void completeCycle() {
         cycleInProgress = false;
     }

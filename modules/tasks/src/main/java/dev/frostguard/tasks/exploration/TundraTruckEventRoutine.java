@@ -753,15 +753,22 @@ public class TundraTruckEventRoutine extends DelayedTask {
 	private boolean handleGemRefresh(ImageSearchResultData gemButton) {
 		logInfo("Gem refresh popup detected");
 
-		if (useGems) {
-			logInfo("Using gems for refresh (useGems=true)");
+		if (useGems && dev.frostguard.tasks.security.TaskGemSpendPolicy.allowed(
+                profile, TpDailyTaskEnum.EVENT_TUNDRA_TRUCK)) {
+			logInfo("Using gems for refresh (both Tundra Truck gem settings enabled)");
 			tapInside(CONFIRM_CHECKBOX.topLeft(), CONFIRM_CHECKBOX.bottomRight());
 			sleepTask(500);
+            if (!dev.frostguard.tasks.security.TaskGemSpendPolicy.allowed(
+                    profile, TpDailyTaskEnum.EVENT_TUNDRA_TRUCK)) {
+                logWarning("Tundra Truck diamond permission revoked before refresh confirmation");
+                tapInside(CANCEL_POPUP.topLeft(), CANCEL_POPUP.bottomRight());
+                return false;
+            }
 			tapInside(gemButton);
 			return true;
 		}
 
-		logInfo("Declining gem refresh (useGems=false)");
+		logInfo("Declining gem refresh (Tundra Truck diamond permission or refresh preference off)");
 		tapInside(CANCEL_POPUP.topLeft(), CANCEL_POPUP.bottomRight());
 		closeWindow();
 		return false;

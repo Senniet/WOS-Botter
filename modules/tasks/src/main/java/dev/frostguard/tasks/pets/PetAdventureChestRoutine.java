@@ -9,12 +9,15 @@ import dev.frostguard.api.configs.TemplatesEnum;
 import dev.frostguard.api.configs.TpDailyTaskEnum;
 import dev.frostguard.api.domain.ImageSearchResultData;
 import dev.frostguard.api.domain.PointData;
+import dev.frostguard.api.domain.RawImageData;
+import java.util.Objects;
 import dev.frostguard.api.domain.AccountDescriptor;
 import dev.frostguard.engine.schedule.DelayedTask;
 import dev.frostguard.engine.nav.SearchConfigConstants;
 import dev.frostguard.engine.helper.TemplateSearchHelper.SearchConfig;
 
 import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 
 /**
@@ -122,6 +125,13 @@ public class PetAdventureChestRoutine extends DelayedTask {
 	// TASK CONFIGURATION
 	// ========================================================================
 
+    // Pet Adventure sidebar opens only from a verified City/World root.
+    // ANY can leave us on an unknown modal and SidebarNavigator refuses to tap.
+    @Override
+    protected LaunchPoint getRequiredStartLocation() {
+        return LaunchPoint.HOME;
+    }
+
 	@Override
 	protected boolean consumesStamina() {
 		return true;
@@ -155,26 +165,116 @@ public class PetAdventureChestRoutine extends DelayedTask {
 
 		// Collecting finished adventures is free. Never skip available
         // claims just because stamina is too low to START a new adventure.
-		if (!navigateToPetAdventures()) {
-			rescheduleForNavigationRetry();
-			return;
-		}
-
-		claimCompletedChests();
-		if (observeOnlyVisit()) {
-			clearObserveOnly();
-			logInfo("Re-reading Pet Adventure after an unverified start; Start will not be sent on this visit.");
-			rescheduleForChestCompletion();
-			return;
-		}
+        if (!navigateToPetAdventures()) {
+            markWorkIncomplete("Pet Adventure sidebar navigation failed");
+            rescheduleForNavigationRetry();
+            return;
+        }
+        try {
+        if (!claimCompletedChests()) {
+            markWorkIncomplete("Pet Adventure claim action not confirmed; no new chest taps");
+            return;
+        }
+        if (observeOnlyVisit()) {
+            // Recover an unverified Start without ever tapping the original
+            // pin again: the original location needs a confirmed running timer
+            // on TWO separate map frames. After recovery, continue scanning
+            // other idle red/purple/blue pins; don't defer all of them 2h.
+            PointData pending = pendingStartLocation();
+            if (pending != null && startedChestTimerConfirmed(pending)) {
+                logInfo("Previously uncertain Pet Adventure Start verified by two-frame "
+                        + "timer at " + pending + ". Clearing observe-only and "
+                        + "continuing with OTHER available chests.");
+                confirmedDailyMissionProgress = true;
+                clearPendingStart();
+            } else {
+                Instant since = pendingStartInstant();
+                if (pending == null) {
+                    if (!verifiedMapTwice()) {
+                        scheduleUnknownChestRetry("orphaned observer state; map not confirmed",
+                                "orphaned");
+                        return;
+                    }
+                    logWarning("Pet Adventure orphaned observer flag cleared on confirmed map");
+                    clearPendingStart();
+                } else if (PetAdventureDecisions.pendingHasExpired(since, Instant.now())
+                        && verifiedMapTwice()) {
+                    logInfo("Pet Adventure unconfirmed Start expired after "
+                            + PetAdventureDecisions.PENDING_MAX_AGE.toMinutes()
+                            + " minutes without a running timer. Rescanning for idle chests.");
+                    clearPendingStart();
+                } else {
+                    if (since == null && pending != null) {
+                        // Migrate legacy x,y-only pending records exactly
+                        // once; do not refresh their age on each revisit.
+                        writeProfileSetting(ConfigurationKeyEnum.PET_ADVENTURE_PENDING_START_STRING,
+                                encodeTimedPendingStart(pending, Instant.now()));
+                        logInfo("Pet Adventure migrated legacy pending position");
+                    }
+                    LocalDateTime next = unverifiedStartRecheck(LocalDateTime.now());
+                    markWorkIncomplete("Pet Adventure earlier Start still unverified; "
+                            + "timed observe-only safeguard remains active");
+                    logWarning("Pet Adventure pending Start not proven at "
+                            + pending + "; no duplicate Start. Next observation "
+                            + next.format(DATETIME_FORMATTER));
+                    reschedule(next);
+                    return;
+                }
+            }
+        }
         // Only new adventures consume stamina; check after free claims and
         // the observe-only guard, avoiding a redundant initial check.
         if (!staminaHelper.checkStaminaOrReschedule(
                 MIN_STAMINA_REQUIRED, TARGET_STAMINA_FOR_REFRESH, this)) {
+            markWorkIncomplete("Pet Adventure has insufficient stamina for new chest starts");
             return;
         }
 		startAvailableChests();
+        } finally {
+            // Never leave the Pet Adventure map over the next unrelated task.
+            // A true map title on two fresh frames is required to authorize
+            // exactly one in-game Back; no generic screen dismissal.
+            returnFromVerifiedPetAdventureMap();
+        }
 	}
+
+    private void returnFromVerifiedPetAdventureMap() {
+        try {
+            if (!verifiedMapTwice()) {
+                var panel = PetAdventureSelectPetFrame.closeIfVisible(
+                        () -> {checkPreemption(); return emuManager.captureScreen(EMULATOR_NUMBER);},
+                        target -> {checkPreemption(); tapNear(target);},
+                        () -> sleepTask(600));
+                if (panel == PetAdventureSelectPetFrame.CloseResult.CLOSED_TO_MAP) {
+                    logInfo("Select Pet closed via twice-verified title and X; "
+                            + "Treasure Spot also closed if present; adventure map restored");
+                } else {
+                    markWorkIncomplete("Pet Adventure exit: Select Pet/map not positively closed");
+                    scheduleUnknownChestRetry("unable to verify Select Pet exit / map", "select-pet-exit");
+                    return;
+                }
+            }
+            if (!verifiedMapTwice()) {
+                markWorkIncomplete("Pet Adventure map not stable after closing Select Pet");
+                scheduleUnknownChestRetry("map not stable after Select Pet exit", "map-exit");
+                return;
+            }
+            pressBack();
+            sleepTask(450);
+            if (PetAdventureMapFrame.isMap(emuManager.captureScreen(EMULATOR_NUMBER))) {
+                markWorkIncomplete("Pet Adventure map remained open after verified Back");
+                scheduleUnknownChestRetry("map remained open after Back", "map-still-open");
+            } else {
+                logInfo("Pet Adventure map closed via verified Back; next task can start at Home/World");
+            }
+        } catch (dev.frostguard.engine.error.TaskPreemptedException ex) {
+            throw ex;
+        } catch (dev.frostguard.engine.error.StopExecutionException ex) {
+            throw ex;
+        } catch (RuntimeException ex) {
+            logWarning("Pet Adventure exit validation unavailable: " + ex.getMessage());
+        }
+    }
 
 	// ========================================================================
 	// NAVIGATION METHODS
@@ -223,22 +323,24 @@ public class PetAdventureChestRoutine extends DelayedTask {
 	 * <li>Return to adventure map</li>
 	 * </ol>
 	 */
-    private void claimCompletedChests() {
+    private boolean claimCompletedChests() {
         // The 2026 map repositions treasure spots after a claim. Never
         // iterate over a stale list of chest coordinates.
         for (int i = 0; i < 6; i++) {
             List<ImageSearchResultData> completed = templateSearchHelper.locateAllPatterns(
                     TemplatesEnum.PETS_CHEST_COMPLETED,
                     SearchConfigConstants.MULTIPLE_RESULTS);
-            if (completed == null || completed.isEmpty()) return;
+            if (completed == null || completed.isEmpty()) return true;
             ImageSearchResultData next = completed.stream()
                     .filter(ImageSearchResultData::isFound).findFirst().orElse(null);
-            if (next == null) return;
+            if (next == null) return true;
             if (!claimSingleChest(next)) {
                 markWorkIncomplete("Pet Adventure: completed chest did not disappear after claim");
-                return;
+                return false;
             }
         }
+        logInfo("Pet Adventure claim iteration capped; recheck remaining rewards on next visit");
+        return true;
     }
 
     static boolean sameChestLocation(PointData a, PointData b) {
@@ -300,6 +402,14 @@ public class PetAdventureChestRoutine extends DelayedTask {
 	 * </ol>
 	 */
 	private void startAvailableChests() {
+        if (PetAdventureAttemptsGate.blockedUntilReset(
+                profile.getConfig(ConfigurationKeyEnum.PET_ADVENTURE_ATTEMPTS_EXHAUSTED_UNTIL_STRING,
+                        String.class), LocalDateTime.now())) {
+            logInfo("Pet Adventure attempts already verified exhausted. "
+                    + "Skipping new starts; completed chest claims were still checked");
+            rescheduleToGameReset();
+            return;
+        }
 		logDebug("Starting available adventure chests");
 
 		int iterationCount = 0;
@@ -396,8 +506,9 @@ public class PetAdventureChestRoutine extends DelayedTask {
 				TemplatesEnum.PETS_CHEST_SELECT,
 				SearchConfigConstants.DEFAULT_SINGLE);
 
-		if (!selectButton.isFound()) {
-			scheduleUnknownChestRetry("Select control was missing for " + chestTemplate, "select-control");
+        if (!selectButton.isFound()) {
+            markWorkIncomplete("Pet Adventure chest Select control missing");
+            scheduleUnknownChestRetry("Select control was missing for " + chestTemplate, "select-control");
 			pressBack();
 			return ChestStartResult.UNKNOWN;
 		}
@@ -410,41 +521,51 @@ public class PetAdventureChestRoutine extends DelayedTask {
 				SearchConfigConstants.DEFAULT_SINGLE);
 
 		if (startButton.isFound()) {
-			tapInside(startButton);
-			sleepTask(1000);
-			ImageSearchResultData startStillVisible = templateSearchHelper.locatePattern(
-					TemplatesEnum.PETS_CHEST_START,
-					SearchConfigConstants.DEFAULT_SINGLE);
-			if (startStillVisible.isFound()) {
-				scheduleUnknownChestRetry("Start control remained visible after the tap", "start-unconfirmed");
-				pressBack();
-				return ChestStartResult.UNKNOWN;
-			}
+            tapInside(startButton);
+            sleepTask(350);
+            // The 20 Nov real emu proved: Start succeeded, remaining attempts
+            // fell to 3 and the originally purple chest gained a timer while
+            // its sprite changed to GOLD. The old code only looked for
+            // In Adventure after 1 s, missed it, and deferred for 2 hours.
+            StartConfirmation confirmed = confirmStartAfterTap(chestResult.getPoint());
+            if (confirmed != StartConfirmation.UNKNOWN) {
+                staminaHelper.subtractStamina(STAMINA_PER_CHEST, false);
+                confirmedDailyMissionProgress = true;
+                clearPendingStart();
+                logInfo("Started " + chestTemplate + " adventure, verified " + confirmed
+                        + " for chest at " + chestResult.getPoint()
+                        + " (cost " + STAMINA_PER_CHEST + " stamina)");
+                if (confirmed == StartConfirmation.IN_ADVENTURE_OVERLAY) {
+                    pressBack(); // Close the exact confirmed occupied-chest dialog
+                    sleepTask(400);
+                } // TIMER_ON_MAP: already on map, Back would incorrectly leave it.
+                return ChestStartResult.STARTED;
+            }
 
-			ImageSearchResultData inAdventure = templateSearchHelper.locatePattern(
-					TemplatesEnum.PETS_CHEST_IN_ADVENTURE,
-					SearchConfigConstants.DEFAULT_SINGLE);
-			if (PetAdventureDecisions.inAdventureOverlay(inAdventure)) {
-				staminaHelper.subtractStamina(STAMINA_PER_CHEST, false);
-				logInfo("Started " + chestTemplate + " adventure (consumed "
-						+ STAMINA_PER_CHEST + " stamina)");
-				pressBack();
-				sleepTask(500);
-				return ChestStartResult.STARTED;
-			}
+            ImageSearchResultData stillStart = templateSearchHelper.locatePattern(
+                    TemplatesEnum.PETS_CHEST_START,
+                    SearchConfigConstants.DEFAULT_SINGLE);
+            if (stillStart.isFound()) {
+                scheduleUnknownChestRetry("Start button remained visible; game did not acknowledge tap",
+                        "start-unconfirmed");
+                markWorkIncomplete("Pet Adventure Start remained visible; no confirmed adventure");
+                pressBack();
+                return ChestStartResult.UNKNOWN;
+            }
 
-			markObserveOnly();
-			LocalDateTime nextCheck = unverifiedStartRecheck(LocalDateTime.now());
-			String snapshot = TaskDiagnosticSnapshots.capture(
-					emuManager, EMULATOR_NUMBER, "petadventurechest", "start-outcome");
-			logWarning("Start tap was sent but the adventure state was not confirmed; "
-					+ "the next visit only re-reads. Next check at "
-					+ nextCheck.format(DATETIME_FORMATTER) + "; " + snapshot + ".");
-			reschedule(nextCheck);
-			pressBack();
-			sleepTask(500);
-			return ChestStartResult.UNKNOWN;
-		}
+            rememberPendingStart(chestResult.getPoint());
+            LocalDateTime next = unverifiedStartRecheck(LocalDateTime.now());
+            String snapshot = TaskDiagnosticSnapshots.capture(
+                    emuManager, EMULATOR_NUMBER, "petadventurechest", "start-outcome");
+            markWorkIncomplete("Pet Adventure Start not confirmed; safe observer recheck scheduled");
+            logWarning("Start tap was sent but neither In Adventure nor timer beneath the "
+                    + "original chest was confirmed. No duplicate Start; next observation "
+                    + next.format(DATETIME_FORMATTER) + "; " + snapshot + ".");
+            reschedule(next);
+            // May already be on map; only go Back when an actual Start control
+            // proves a dialog is still present.
+            return ChestStartResult.UNKNOWN;
+        }
 
 		ImageSearchResultData noAttemptsMessage = templateSearchHelper.locatePattern(
 				TemplatesEnum.PETS_CHEST_ATTEMPT,
@@ -456,11 +577,121 @@ public class PetAdventureChestRoutine extends DelayedTask {
 			return ChestStartResult.NO_ATTEMPTS;
 		}
 
+        markWorkIncomplete("Pet Adventure: neither Start nor No Attempts was detected");
 		logWarning("Could not determine chest start status for " + chestTemplate);
 		scheduleUnknownChestRetry("neither Start nor No Attempts was detected", "start-status");
 		pressBack();
 		return ChestStartResult.UNKNOWN;
 	}
+
+    enum StartConfirmation { IN_ADVENTURE_OVERLAY, TIMER_ON_MAP, UNKNOWN }
+
+    private static final int START_VERIFY_FRAMES = 7;
+    private static final int START_VERIFY_INTERVAL_MS = 260;
+
+    private StartConfirmation confirmStartAfterTap(PointData originalChest) {
+        for (int i = 0; i < START_VERIFY_FRAMES; i++) {
+            checkPreemption();
+            RawImageData frame = emuManager.captureScreen(EMULATOR_NUMBER);
+            if (frame != null) {
+                StartConfirmation candidate = inspectStartFrame(originalChest, frame);
+                if (candidate != StartConfirmation.UNKNOWN) {
+                    sleepTask(180);
+                    StartConfirmation next = inspectStartFrame(originalChest,
+                            emuManager.captureScreen(EMULATOR_NUMBER));
+                    if (next == candidate) return candidate;
+                }
+            }
+            sleepTask(START_VERIFY_INTERVAL_MS);
+        }
+        return StartConfirmation.UNKNOWN;
+    }
+
+    private StartConfirmation inspectStartFrame(PointData previous, RawImageData frame) {
+        if (frame == null || !frame.isValid()) return StartConfirmation.UNKNOWN;
+        ImageSearchResultData overlay = emuManager.locatePattern(
+                EMULATOR_NUMBER, frame, TemplatesEnum.PETS_CHEST_IN_ADVENTURE, 90);
+        if (PetAdventureDecisions.inAdventureOverlay(overlay)
+                || emuManager.locatePattern(EMULATOR_NUMBER, frame,
+                        TemplatesEnum.PETS_CHEST_IN_ADVENTURE_NOV_2026,
+                        new PointData(240, 272), new PointData(480, 370), 89).isFound())
+            return StartConfirmation.IN_ADVENTURE_OVERLAY;
+
+        List<ImageSearchResultData> timers = emuManager.locateAllPatterns(
+                EMULATOR_NUMBER, frame, TemplatesEnum.PETS_CHEST_ADVENTURE_TIMER,
+                new PointData(0, 0), new PointData(720, 1280),
+                PetAdventureDecisions.TIMER_THRESHOLD, 5);
+        return PetAdventureDecisions.startedChestHasTimer(previous, timers)
+                ? StartConfirmation.TIMER_ON_MAP : StartConfirmation.UNKNOWN;
+    }
+
+    private boolean startedChestTimerConfirmed(PointData previous) {
+        for (int i = 0; i < 3; i++) {
+            RawImageData first = emuManager.captureScreen(EMULATOR_NUMBER);
+            if (inspectStartFrame(previous, first) == StartConfirmation.TIMER_ON_MAP) {
+                sleepTask(190);
+                if (inspectStartFrame(previous, emuManager.captureScreen(EMULATOR_NUMBER))
+                        == StartConfirmation.TIMER_ON_MAP) return true;
+            }
+            sleepTask(200);
+        }
+        return false;
+    }
+
+    private boolean verifiedMapTwice() {
+        if (!PetAdventureMapFrame.isMap(emuManager.captureScreen(EMULATOR_NUMBER)))
+            return false;
+        sleepTask(180);
+        return PetAdventureMapFrame.isMap(emuManager.captureScreen(EMULATOR_NUMBER));
+    }
+
+    static String encodeTimedPendingStart(PointData location, Instant at) {
+        return encodePendingStart(location) + "@" + at.getEpochSecond();
+    }
+
+    static Instant parsePendingStartInstant(String record) {
+        if (record == null || !record.matches("[0-9]{1,3},[0-9]{1,4}@[0-9]{9,12}"))
+            return null;
+        try {
+            long epoch=Long.parseLong(record.substring(record.indexOf('@')+1));
+            return epoch > 1_700_000_000L ? Instant.ofEpochSecond(epoch) : null;
+        } catch (NumberFormatException invalid) {
+            return null;
+        }
+    }
+
+    private Instant pendingStartInstant() {
+        return parsePendingStartInstant(profile.getConfig(
+                ConfigurationKeyEnum.PET_ADVENTURE_PENDING_START_STRING, String.class));
+    }
+
+    static String encodePendingStart(PointData location) {
+        return location.getX() + "," + location.getY();
+    }
+
+    static PointData parsePendingStart(String value) {
+        if (value == null || !value.matches("[0-9]{1,3},[0-9]{1,4}(@[0-9]{9,12})?")) return null;
+        String[] parts = value.split("[,@]");
+        int x = Integer.parseInt(parts[0]), y = Integer.parseInt(parts[1]);
+        return (x >= 0 && x < 720 && y >= 0 && y < 1280)
+                ? new PointData(x, y) : null;
+    }
+
+    private PointData pendingStartLocation() {
+        return parsePendingStart(profile.getConfig(
+                ConfigurationKeyEnum.PET_ADVENTURE_PENDING_START_STRING, String.class));
+    }
+
+    private void rememberPendingStart(PointData location) {
+        writeProfileSetting(ConfigurationKeyEnum.PET_ADVENTURE_PENDING_START_STRING,
+                encodeTimedPendingStart(location, Instant.now()));
+        markObserveOnly();
+    }
+
+    private void clearPendingStart() {
+        clearObserveOnly();
+        writeProfileSetting(ConfigurationKeyEnum.PET_ADVENTURE_PENDING_START_STRING, "");
+    }
 
 	// ========================================================================
 	// RESCHEDULING METHODS
@@ -488,6 +719,8 @@ public class PetAdventureChestRoutine extends DelayedTask {
 	 */
 	private void rescheduleToGameReset() {
 		LocalDateTime nextReset = GameTimeUtils.dailyResetTime();
+        writeProfileSetting(ConfigurationKeyEnum.PET_ADVENTURE_ATTEMPTS_EXHAUSTED_UNTIL_STRING,
+                nextReset.toString());
 		reschedule(nextReset);
 		logInfo("Rescheduled to next game reset: " +
 				nextReset.format(DATETIME_FORMATTER));
@@ -506,7 +739,7 @@ public class PetAdventureChestRoutine extends DelayedTask {
 	}
 
 	static LocalDateTime unverifiedStartRecheck(LocalDateTime now) {
-		return now.plusHours(CHEST_COMPLETION_HOURS);
+		return now.plusMinutes(20);
 	}
 
 	private boolean observeOnlyVisit() {

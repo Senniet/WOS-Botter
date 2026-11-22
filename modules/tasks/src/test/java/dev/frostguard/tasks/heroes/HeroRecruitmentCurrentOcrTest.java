@@ -14,9 +14,12 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Actual Nov19 Hero Recruitment HUD, profile/private pixels blacked out. */
 class HeroRecruitmentCurrentOcrTest {
     private static RawImageData frame()throws Exception {
+        return frame("recruitment-countdown-redacted.png");
+    }
+    private static RawImageData frame(String filename)throws Exception {
         BufferedImage b=ImageIO.read(Objects.requireNonNull(
                 HeroRecruitmentCurrentOcrTest.class.getResourceAsStream(
-                  "/heroes/live-20261119/recruitment-countdown-redacted.png")));
+                  "/heroes/live-20261119/" + filename)));
         byte[] rgba=new byte[b.getWidth()*b.getHeight()*4];int i=0;
         for(int y=0;y<b.getHeight();y++)for(int x=0;x<b.getWidth();x++){
             int rgb=b.getRGB(x,y);
@@ -40,6 +43,21 @@ class HeroRecruitmentCurrentOcrTest {
                 OcrSettingsData.TextLayout.SINGLE_LINE,"0123456789")),
                 "Old ROI below Advanced key HUD must never count as a saved key");
     }
+    @Test void liveZeroKeyHudIsRecognizedWithoutInventingPositiveInventory() throws Exception {
+        var empty = frame("recruitment-zero-keys-redacted.png");
+        var withKeys = frame("recruitment-countdown-redacted.png");
+        for(var box:new int[][]{{238,24,279,64},{422,24,464,64}}) {
+            var topLeft = new PointData(box[0],box[1]);
+            var bottomRight = new PointData(box[2],box[3]);
+            assertTrue(HeroRecruitmentZeroHud.isZero(empty,topLeft,bottomRight),
+                    "Actual zero glyph must bypass blank OCR and skip unused keys");
+            assertFalse(HeroRecruitmentZeroHud.isZero(withKeys,topLeft,bottomRight),
+                    "Positive 2/4 keys must NEVER look like zero");
+        }
+        assertFalse(HeroRecruitmentZeroHud.isZero(null,
+                new PointData(238,24),new PointData(279,64)));
+    }
+
     @Test void realFreeTimersIncludeDayLongEpicCountdown()throws Exception{
         var f=frame();
         var advanced=read(f,40,770,350,810,OcrSettingsData.TextLayout.SINGLE_LINE,"0123456789:dD");

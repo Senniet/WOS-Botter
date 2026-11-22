@@ -98,6 +98,7 @@ public class InitializeRoutine extends DelayedTask {
 	private static final int UPDATE_PROGRESS_LOG_INTERVAL = 12;
 	private static final String GOOGLE_PLAY_PACKAGE = "com.android.vending";
 	private static final int MAX_WELCOME_BACK_DISMISSALS = 1;
+    private static final int MAX_GMS_WARNING_DISMISSALS = 1;
 	private static final int MAX_CLOSEABLE_OVERLAY_DISMISSALS = 3;
 	private static final int MAX_TREK_EXIT_HINT_DISMISSALS = 3;
 	private static final int UNKNOWN_BLOCKER_BACK_SETTLE_MS = 2000;
@@ -113,6 +114,8 @@ public class InitializeRoutine extends DelayedTask {
     private boolean gameAlreadyRunningAtStart = false;
 	private int unknownBlockerBackAttempts = 0;
 	private int welcomeBackDismissals = 0;
+    private boolean obtainMoreDismissedThisStart;
+    private int googleServicesWarningDismissals = 0;
 	private int closeableOverlayDismissals = 0;
 	private int trekExitHintDismissals = 0;
 	private String lastVerifiedStartupState = "initialization started";
@@ -380,12 +383,31 @@ public class InitializeRoutine extends DelayedTask {
 				continue;
 			}
 
+            if (dismissExactGoogleServicesWarningIfPresent()) {
+                logWarning("Verified Whiteout Survival / Google Play services signature "
+                        + "warning was acknowledged once; checking for City/World again.");
+                sleepTask(900);
+                attempts++;
+                continue;
+            }
+
 			MandatoryUpdateResult updateResult = followMandatoryUpdateIfPresent();
 			if (updateResult == MandatoryUpdateResult.COMPLETED) {
 				homeScreenFound = true;
 				logInfo("Home screen found after the game update flow.");
 				break;
 			}
+
+            // The previous routine may have left the Chief Stamina
+            // Obtain more modal open. It hides both root anchors, so this
+            // exact typed dialog must be recovered before the generic
+            // startup screen loop can proceed.
+            if (dismissKnownStaminaObtainMoreIfPresent()) {
+                logInfo("Initialize: closed previously open Chief Stamina Obtain more");
+                sleepTask(400);
+                attempts++;
+                continue;
+            }
 
 			if (dismissCloseableStartupOverlayIfPresent()) {
 				logInfo("Verified closeable startup overlay dismissed. Waiting for home/world postcondition.");
@@ -592,6 +614,28 @@ public class InitializeRoutine extends DelayedTask {
 				updateButton);
 	}
 
+    private boolean dismissExactGoogleServicesWarningIfPresent() {
+        if (googleServicesWarningDismissals >= MAX_GMS_WARNING_DISMISSALS
+                || !isGameForeground()
+                || emuManager.getSelectedEmulatorType()
+                   != dev.frostguard.engine.emulator.EmulatorType.SERVE_EMU)
+            return false;
+        RawImageData initial = captureStartupFrame("Google Play services warning inspection");
+        ImageSearchResultData first = GooglePlayServicesWarningFrame.verifiedOk(initial);
+        if (!first.isFound()) return false;
+        sleepTask(180);
+        ImageSearchResultData confirmed = GooglePlayServicesWarningFrame.verifiedOk(
+                captureStartupFrame("Google Play services warning confirmation"));
+        if (!dev.frostguard.engine.helper.RecognitionConsensus.agrees(first, confirmed, 12))
+            return false;
+        googleServicesWarningDismissals++;
+        lastVerifiedStartupState = "exact Serve-Emu Google Play services incompatible signature warning";
+        logWarning("Confirmed Google Play services compatibility dialog in foreground game; "
+                + "pressing only its verified OK action once, not uninstalling packages or altering account data.");
+        if (!tapInside(confirmed)) return false;
+        return true;
+    }
+
 	private boolean dismissWelcomeBackIfPresent() {
 		if (welcomeBackDismissals >= MAX_WELCOME_BACK_DISMISSALS) {
 			return false;
@@ -631,6 +675,33 @@ public class InitializeRoutine extends DelayedTask {
 		lastVerifiedStartupState = "Welcome back Confirm action sent";
 		return true;
 	}
+
+    private boolean dismissKnownStaminaObtainMoreIfPresent() {
+        if (obtainMoreDismissedThisStart || !isGameForeground()) return false;
+        var first=dev.frostguard.engine.helper.ObtainMoreStaminaOverlayFrame.verifiedClose(
+                captureStartupFrame("Obtain more startup inspection"));
+        if (!first.isFound()) return false;
+        sleepTask(160);
+        var second=dev.frostguard.engine.helper.ObtainMoreStaminaOverlayFrame.verifiedClose(
+                captureStartupFrame("Obtain more startup confirmation"));
+        if (!dev.frostguard.engine.helper.RecognitionConsensus.agrees(first,second,12)) {
+            logWarning("Initialize: Chief Stamina title/X unstable; no blind close");
+            return false;
+        }
+        obtainMoreDismissedThisStart=true;
+        if (!tapInside(second)) {
+            throw new ProfileCooldownException("Stamina Obtain more close action unavailable",
+                    LocalDateTime.now().plusMinutes(5));
+        }
+        sleepTask(450);
+        if (dev.frostguard.engine.helper.ObtainMoreStaminaOverlayFrame.verifiedClose(
+                captureStartupFrame("Obtain more post-close check")).isFound()) {
+            throw new ProfileCooldownException(
+                    "Stamina Obtain more did not close; refusing repeated taps",
+                    LocalDateTime.now().plusMinutes(5));
+        }
+        return true;
+    }
 
 	private boolean dismissCloseableStartupOverlayIfPresent() {
 		if (closeableOverlayDismissals >= MAX_CLOSEABLE_OVERLAY_DISMISSALS) {
