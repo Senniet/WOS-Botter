@@ -1,15 +1,15 @@
 <!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SurvivalOps Web</title><link rel="stylesheet" href="/static/style.css"><link rel="stylesheet" href="/static/operations.css"><link rel="stylesheet" href="/static/emulator-mobile.css">
+<title>SurvivalOps Web</title><link rel="stylesheet" href="/static/style.css"><link rel="stylesheet" href="/static/operations.css"><link rel="stylesheet" href="/static/emulator-mobile.css"><link rel="stylesheet" href="/static/theme-overrides.css">
 </head><body>
 <div id="app" class="app">
   <aside class="sidebar">
     <div class="identity"><span class="brand-mark">S</span><span><b>SurvivalOps</b><small>WEB CONTROL CENTER</small></span></div>
     <nav aria-label="Navigation">
       <button class="nav-btn active" data-page="dashboard"><span class="nav-icon">◫</span> Overview</button>
+      <button class="nav-btn" data-page="timeline"><span class="nav-icon">◷</span> Task Timeline</button>
       <button class="nav-btn" data-page="tasks"><span class="nav-icon">☷</span> Task Manager</button>
-      <button class="nav-btn" data-page="custom"><span class="nav-icon">⚒</span> Custom Tasks</button>
       <button class="nav-btn" data-page="emulator"><span class="nav-icon">▣</span> Emulator</button>
       <button class="nav-btn" data-page="statistics"><span class="nav-icon">▥</span> Statistics</button>
       <button class="nav-btn" data-page="profiles"><span class="nav-icon">♙</span> Profiles</button>
@@ -20,10 +20,19 @@
     <div class="sidebar-footer"><span class="status-led"></span><span id="side-status">Checking connection…</span><small>Java engine on webserver</small></div>
   </aside>
   <main class="main">
-    <header class="topbar"><button class="mobile-menu" id="mobile-menu" aria-label="Menu">☰</button><div><span class="eyebrow">SURVIVALOPS / <span id="breadcrumb">OVERVIEW</span></span><h1 id="page-title">Overview</h1></div><div class="top-actions"><span class="clock" id="clock"></span><span class="pill" id="connection">Connecting…</span><button id="logout" class="small ghost" title="Log out">Log out</button></div></header>
+    <header class="topbar"><button class="mobile-menu" id="mobile-menu" aria-label="Menu">☰</button><div></div><div class="top-actions"><span class="clock" id="clock"></span><button class="secondary small" id="theme-toggle" type="button" aria-label="Toggle light or dark theme">☀ Light</button></div></header>
     <div id="notice" class="notice" role="status" hidden></div>
     <section data-view="dashboard" class="page active operations-home">
-      <div class="hero operations-hero"><div class="operations-hero-head"><span class="operations-kicker">SURVIVALOPS / CONTROL ROOM</span><h2>Operations Overview</h2><p>Monitor Serve-Emu and the task scheduler in one place. Check the status, then start the bot when you are ready to run your routines.</p></div><div class="operations-controls"><span class="operations-control-label">BOT CONTROLS</span><div class="actions"><button id="start" class="primary">▶ Start</button><button id="pause" class="secondary">Ⅱ Pause</button><button id="resume" class="secondary">↪ Resume</button><button id="stop" class="danger">■ Stop</button></div></div></div>
+      <div class="hero operations-hero"><div class="operations-hero-head"><span class="operations-kicker">SURVIVALOPS / CONTROL ROOM</span><h2>Operations Overview</h2><p>Monitor Serve-Emu and the task scheduler in one place. Check the status, then start the bot when you are ready to run your routines.</p></div><div class="operations-controls" aria-label="Bot controls">
+          <div class="bot-control-heading"><span class="operations-control-label">BOT CONTROLS</span><span id="bot-control-status" class="bot-control-status" role="status"><i aria-hidden="true"></i><span id="bot-control-state">Checking…</span></span></div>
+          <p class="bot-control-caption" id="bot-control-caption">Manage the scheduler</p>
+          <div class="bot-control-buttons">
+            <button id="start" class="primary bot-action-primary" type="button"><span aria-hidden="true">▶</span> Start bot</button>
+            <button id="resume" class="primary bot-action-primary" type="button" hidden><span aria-hidden="true">▶</span> Resume bot</button>
+            <button id="pause" class="secondary bot-action-secondary" type="button" hidden><span aria-hidden="true">Ⅱ</span> Pause</button>
+            <button id="stop" class="bot-action-stop" type="button" hidden><span aria-hidden="true">■</span> Stop</button>
+          </div>
+        </div></div>
       <div class="metric-grid">
         <article class="metric"><span>Engine</span><strong id="metric-engine">—</strong><small id="metric-engine-sub">Loading status</small></article>
         <article class="metric"><span>Configured Tasks</span><strong id="metric-tasks">—</strong><small id="metric-tasks-sub">Available routines</small></article>
@@ -34,6 +43,26 @@
         <article class="panel"><div class="panel-heading"><h3>Active Task Queues</h3><span class="muted" id="queue-count">0 queues</span></div><div id="queues" class="panel-content empty-message">No tasks are currently running.</div></article>
         <article class="panel"><div class="panel-heading"><h3>Workspace</h3></div><div class="quick-links"><button data-go="tasks">☷ <span>Manage Routines <small>Status, settings and execution</small></span>›</button><button data-go="emulator">▣ <span>Live Serve-Emu <small>Continuous WebSocket stream</small></span>›</button><button data-go="qa">◇ <span>Diagnostics <small>Task Coach and screenshots</small></span>›</button></div></article>
       </div>
+      <article class="panel timeline-dashboard-panel"><div class="panel-heading"><h3>Next scheduled routines</h3><button class="secondary small" data-go="timeline" type="button">View full Task Timeline</button></div><div id="dashboard-timeline" class="dashboard-timeline" aria-live="polite">Loading schedule…</div></article>
+    </section>
+    <section data-view="timeline" class="page operations-timeline">
+      <header class="timeline-head">
+        <div><span class="work-eyebrow">AUTOMATION / LIVE SCHEDULE</span><h2>Task Timeline</h2><p>See which routines are due next and follow their real execution history as the scheduler updates.</p></div>
+        <label class="work-profile">PROFILE<select id="timeline-profile" aria-label="Timeline profile"></select></label>
+      </header>
+      <div class="timeline-summary" aria-label="Timeline overview">
+        <div><span>Running now</span><strong id="timeline-running-count">—</strong></div>
+        <div><span>Scheduled routines</span><strong id="timeline-scheduled-count">—</strong></div>
+        <div><span>Recorded attempts</span><strong id="timeline-history-count">—</strong></div>
+        <div><span>Last sync</span><strong id="timeline-sync">—</strong></div>
+      </div>
+      <div id="timeline-error" class="timeline-error" role="status" hidden></div>
+      <section class="timeline-running" id="timeline-running-section" hidden><div class="timeline-section-head"><h3>Running now</h3><span class="timeline-live-dot">LIVE</span></div><div id="timeline-running"></div></section>
+      <div class="timeline-grid">
+        <article class="panel timeline-panel"><div class="panel-heading"><div><h3>Current run queue</h3><small>Queued tasks for the active bot session; times are eligibility, not start guarantees</small></div><div class="actions"><span class="muted" id="timeline-upcoming-count">—</span><button class="secondary small" type="button" id="timeline-refresh">↻ Refresh</button></div></div><div class="timeline-list" id="timeline-upcoming" aria-live="polite">Loading schedule…</div><div class="timeline-unscheduled" id="timeline-unscheduled" hidden></div></article>
+        <article class="panel timeline-panel"><div class="panel-heading"><div><h3>Execution history</h3><small>Actual attempts, not just successful claims</small></div><label class="timeline-history-sort">Order<select id="timeline-history-order" aria-label="Execution history order"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></label></div><div class="timeline-list" id="timeline-history" aria-live="polite">Loading history…</div></article>
+      </div>
+      <p class="timeline-note">Current queue is based on enabled, queued routines reported by the Java scheduler. Ready does not guarantee the next execution order. History shows completed observed attempts, not stale running records.</p>
     </section>
     <section data-view="tasks" class="page operations-tasks">
       <header class="work-heading">
@@ -70,17 +99,18 @@
     <section data-view="emulator" class="page emulator-page">
       <div class="emu-stage" aria-label="Interactive Serve-Emu">
         <div class="emu-stage-toolbar">
-          <div class="emu-stage-title"><strong>Live emulator</strong><span>Android 16 · 720 × 1280</span></div>
+          <div class="emu-stage-title"><strong>Live emulator</strong><span id="emu-device-label">Android 16 · 720 × 1280</span><span id="emu-control-status" class="emu-control-status" hidden role="status" aria-live="polite"><span class="emu-control-dot" aria-hidden="true"></span><span id="emu-control-status-text">Bot is controlling the emulator · manual control paused</span></span></div>
           <div class="emu-stage-actions">
+            <button type="button" class="secondary small" id="emu-manual-toggle" hidden>Pause bot to control</button>
             <span id="emu-connection" class="pill">Checking connection</span>
             <a class="emu-external-link" href="https://192.168.1.20:8448/" target="_blank" rel="noopener noreferrer" aria-label="Open full Serve-Emu in a new tab">Full Serve-Emu <span aria-hidden="true">↗</span></a>
           </div>
         </div>
         <div class="emu-player-area">
           <div class="emu-phone" id="emu-phone">
-            <iframe id="emu-live" src="https://192.168.1.20:8448/embed.html" title="Interactive live Serve-Emu screen" loading="lazy" referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin" aria-label="Interactive Whiteout Survival screen" tabindex="0"></iframe>
+            <iframe id="emu-live" title="Interactive live Serve-Emu screen" loading="lazy" referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin" aria-label="Interactive Whiteout Survival screen" tabindex="0"></iframe>
             <div class="emu-mobile-view" id="emu-mobile-view" hidden aria-label="Live emulator screen for mobile devices"><img id="emu-mobile-frame" alt="Live 720 by 1280 emulator screen. Tap and swipe to control while automation is stopped." draggable="false"><span class="emu-mobile-message" id="emu-mobile-message" role="status">Connecting to emulator…</span></div>
-            <div class="emu-input-shield" id="emu-input-shield" hidden role="status" aria-live="polite"><span class="emu-shield-icon" aria-hidden="true">◉</span><strong>Bot is controlling the emulator</strong><span>Stop automation to use the screen here.</span></div>
+            <div class="emu-input-shield" id="emu-input-shield" hidden aria-hidden="true" title="Manual control paused while automation is active"></div>
           </div>
         </div>
       </div>
@@ -94,9 +124,10 @@
       </div>
     </section>
     <section data-view="settings" class="page">
-      <div class="section-intro"><h2>Settings</h2><p>Find general system settings here. Configure individual routine behavior under <strong>Task Manager → ⚙ Options</strong> . All remaining technical MSI settings are available under Advanced.</p></div>
+      <div class="section-intro"><h2>Bot configuration</h2><p>Find general system settings here. Configure individual routine behavior under <strong>Task Manager → ⚙ Options</strong> . All remaining technical MSI settings are available under Advanced.</p></div>
+      <div class="panel runtime-panel"><div class="panel-heading"><h3>Session duration</h3><span class="muted">Optional automatic stop</span></div><div class="panel-content"><p class="text-muted">Set a maximum continuous run duration. After the limit, the bot stops and Whiteout Survival closes. After the configured rest period, the scheduler and game restart automatically. Manual stops do not trigger a timed restart. Disabled by default. The clock starts when this controller first observes a running session.</p><div class="runtime-controls"><label class="checkbox-label"><input id="runtime-enabled" type="checkbox"> Enable maximum runtime</label><label>Maximum time (minutes) <input id="runtime-minutes" type="number" min="15" max="1440" step="5" value="180"></label><label>Rest period (minutes) <input id="runtime-rest-minutes" type="number" min="5" max="1440" step="5" value="60"></label><button class="primary small" id="runtime-save" type="button">Save run & rest cycle</button></div><small class="text-muted" id="runtime-status">Loading runtime settings…</small></div></div>
       <div class="panel settings-panel"><div class="toolbar"><label class="compact-label">Settings for <select id="settings-profile"><option value="">Global (Serve-Emu)</option></select></label><input type="search" id="settings-search" placeholder="Search settings…" ><select id="settings-type"><option value="">All types</option><option value="Boolean">Switches</option><option value="Integer">Numbers</option><option value="String">Text</option></select><label class="checkbox-label"><input id="settings-advanced" type="checkbox"> Show advanced settings</label></div><div id="settings-list" class="settings-list"></div></div>
-      <div class="panel credentials-panel"><div class="panel-heading"><h3>Account Security</h3></div><form id="password-form" class="panel-content form-grid"><p class="text-muted">This change only affects SurvivalOps Web, not the existing QA dashboard.</p><label>Current password<input type="password" id="password-current" required autocomplete="current-password"></label><label>New password (at least 14 characters)<input type="password" id="password-new" minlength="14" maxlength="128" required autocomplete="new-password"></label><label>Confirm new password<input type="password" id="password-confirm" minlength="14" maxlength="128" required autocomplete="new-password"></label><button class="secondary" type="submit">Change Password</button></form></div>
+
     </section>
     <section data-view="logs" class="page"><div class="section-intro"><h2>Logs</h2><p>Latest messages from the server-side Java engine.</p></div><div class="panel"><div class="panel-heading"><h3>Live Engine Logs</h3><button id="logs-refresh" class="secondary small">↻ Refresh</button></div><pre id="logs-body" class="log-lines">Loading…</pre></div></section>
     <section data-view="qa" class="page">
@@ -109,5 +140,5 @@
     <dialog id="qa-dialog" class="qa-dialog"><div class="dialog-head"><h3 id="qa-dialog-title">Diagnostics</h3><button class="ghost small" id="qa-dialog-close">Close ×</button></div><div id="qa-dialog-info" class="hint"></div><img id="qa-dialog-image" alt="Diagnostic screenshot" hidden><pre id="qa-dialog-logs" class="log-lines"></pre></dialog>
     <footer class="footer">SurvivalOps Web · Original Java Engine · Serve-Emu only <span id="last-sync"></span></footer>
   </main>
-</div><script src="/static/app.js" defer></script><script src="/static/emulator-mobile.js" defer></script>
+</div><script src="/static/app.js?v=city-paid-replenish-20261120" defer></script><script src="/static/emulator-mobile.js" defer></script>
 </body></html>

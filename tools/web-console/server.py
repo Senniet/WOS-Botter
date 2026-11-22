@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Authenticated HTTPS frontend for the localhost-only Java SurvivalOps engine.
+"""LAN-only HTTPS frontend for the localhost-only Java SurvivalOps engine.
 
 This process never implements game automation: all routines, scheduling and
 recognition remain owned by the original Java engine. ADB read-only captures
@@ -8,28 +8,24 @@ and optional manual controls are restricted to configured Serve-Emu endpoints.
 from __future__ import annotations
 
 import argparse
-import base64
-from collections import defaultdict, deque
 from datetime import datetime, timezone, timedelta
-import hashlib
-import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import http.client
 import json
-import os
 import re
 import sqlite3
 from pathlib import Path
-import secrets
 import ssl
 import subprocess
 import threading
 import time
 from urllib.parse import urlparse, parse_qs
 from emulator_live import BOUNDARY, CLIENT_LIMIT, live_jpegs
+from timeline import TimelineArchive, snapshot, start_monitor, valid_profile
+import run_limit
 
 ROOT = Path(__file__).resolve().parent
-AUTH_PATH = Path.home() / ".config/survivalops-web/auth.json"
+TLS_DIR = Path.home() / ".config/survivalops-web"
 ENGINE_ADDR = ("127.0.0.1", 18765)
 ADB = Path.home() / ".local/share/WsScrcpyWeb/dependencies/adb/adb"
 MAX_BODY = 64 * 1024
@@ -37,44 +33,7 @@ MAX_FRAME = 10 * 1024 * 1024
 QA_DB = Path.home() / ".local/share/survivalops-qa/dashboard.sqlite3"
 DIAG_DIR = Path.home() / "survivalops-diagnostics/inbox"
 DIAG_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}/[A-Za-z0-9_-]+\.json")
-SESSION_AGE = 60 * 60 * 24 * 7
-LOGIN_ATTEMPTS: dict[str, deque] = defaultdict(deque)
-ATTEMPTS_LOCK = threading.Lock()
-
-
-def load_auth() -> dict:
-    return json.loads(AUTH_PATH.read_text())
-
-
-def key_bytes(auth: dict) -> bytes:
-    return bytes.fromhex(auth["session_key"])
-
-
-def password_ok(auth: dict, candidate: str) -> bool:
-    expected = bytes.fromhex(auth["password_hash"])
-    computed = hashlib.pbkdf2_hmac(
-        "sha256", candidate.encode("utf-8"),
-        bytes.fromhex(auth["salt"]), 350000)
-    return hmac.compare_digest(expected, computed)
-
-
-def make_token(auth: dict) -> str:
-    payload = f"{int(time.time()) + SESSION_AGE}:{secrets.token_hex(20)}"
-    tag = hmac.new(key_bytes(auth), payload.encode(), hashlib.sha256).hexdigest()
-    return base64.urlsafe_b64encode(f"{payload}:{tag}".encode()).decode().rstrip("=")
-
-
-def token_ok(auth: dict, cookie: str) -> bool:
-    try:
-        token = next((v.split("=", 1)[1] for v in cookie.split("; ")
-                      if v.startswith("sops_web=")), "")
-        data = base64.urlsafe_b64decode(token + "=" * (-len(token) % 4)).decode()
-        exp, nonce, mac = data.split(":")
-        expected = hmac.new(key_bytes(auth), f"{exp}:{nonce}".encode(),
-                            hashlib.sha256).hexdigest()
-        return int(exp) > time.time() and hmac.compare_digest(mac, expected)
-    except (ValueError, TypeError, IndexError, UnicodeError):
-        return False
+TIMELINE = TimelineArchive()
 
 
 def engine(path: str, method="GET", body: bytes | None = None) -> tuple[int, bytes]:
@@ -214,12 +173,27 @@ def other_controller_recent(seconds: int = 60) -> bool:
     return False
 
 
+def manual_input_allowed(engine_state: dict) -> bool:
+    """Only accept input when the scheduler cannot launch a competing task."""
+    if engine_state.get("executing"):
+        return False
+    queues = engine_state.get("queues")
+    if isinstance(queues, list) and any(isinstance(q, dict) and q.get("executing")
+                                        for q in queues):
+        return False
+    if not engine_state.get("running"):
+        return True
+    return (isinstance(queues, list) and bool(queues)
+            and all(isinstance(q, dict) and q.get("paused") is True
+                    for q in queues))
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "SurvivalOpsWeb/1"
     protocol_version = "HTTP/1.1"
 
     def log_message(self, fmt, *args):
-        # Do not write login request bodies, session cookies or screenshots.
+        # Do not log request bodies or screenshots.
         print(f"{self.address_string()} {fmt % args}", flush=True)
 
     def send(self, code: int, content: bytes, kind="application/json",
@@ -261,9 +235,6 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, json.JSONDecodeError):
             raise ValueError("Invalid JSON body")
 
-    def authenticated(self) -> bool:
-        return token_ok(self.server.auth, self.headers.get("Cookie", ""))
-
     def is_safe_origin(self) -> bool:
         origin = self.headers.get("Origin", "")
         host = self.headers.get("Host", "")
@@ -278,22 +249,15 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/":
             path = "/index.html"
+        if path in ("/api/session", "/login", "/api/logout", "/api/change-password"):
+            self.json(404, {"error": "Not found"})
+            return
         if path not in ("/index.html", "/static/app.js", "/static/style.css",
-                        "/api/session", "/static/login.js", "/static/operations.css",
+                        "/static/operations.css", "/static/theme-overrides.css",
                         "/static/emulator-mobile.js", "/static/emulator-mobile.css") and not path.startswith("/api/"):
             self.json(404, {"error": "Not found"})
             return
-        if not self.authenticated() and path not in ("/static/login.js", "/static/style.css", "/static/operations.css", "/static/emulator-mobile.css"):
-            if path == "/api/session" or path.startswith("/api/"):
-                self.json(401, {"error": "Login required"})
-            elif path == "/index.html":
-                self.send(200, (ROOT / "login.html").read_bytes(), "text/html; charset=utf-8")
-            else:
-                self.json(401, {"error": "Login required"})
-            return
-        if path == "/api/session":
-            self.json(200, {"authenticated": True})
-        elif path == "/index.html":
+        if path == "/index.html":
             self.send(200, (ROOT / "index.html").read_bytes(), "text/html; charset=utf-8")
         elif path.startswith("/static/"):
             filename = ROOT / path.lstrip("/")
@@ -324,6 +288,26 @@ class Handler(BaseHTTPRequestHandler):
             self.live_stream()
         elif path == "/api/emulator/state":
             self.device_state()
+        elif path == "/api/run-limit":
+            self.json(200, run_limit.read())
+        elif path == "/api/timeline":
+            profile_id = parse_qs(parsed.query).get("profile", [""])[0]
+            try:
+                valid_profile(profile_id)
+            except ValueError:
+                self.json(400, {"error": "Invalid profile"})
+                return
+            try:
+                status, raw = engine("/api/tasks?profile=" + profile_id)
+                if status != 200:
+                    self.json(503, {"error": "Task scheduler is unavailable"})
+                    return
+                state_status, state_raw = engine("/api/status")
+                running = (state_status == 200 and bool(json.loads(state_raw).get("running")))
+                self.json(200, snapshot(profile_id, json.loads(raw), TIMELINE,
+                                        scheduler_running=running))
+            except (OSError, ValueError, sqlite3.Error, RuntimeError):
+                self.json(503, {"error": "Task timeline temporarily unavailable"})
         elif path == "/api/logs":
             self.logs()
         else:
@@ -334,20 +318,17 @@ class Handler(BaseHTTPRequestHandler):
         if not self.is_safe_origin():
             self.json(403, {"error": "Invalid origin"})
             return
-        if parsed.path == "/login":
-            self.login()
-            return
-        if not self.authenticated():
-            self.json(401, {"error": "Login required"})
+        if parsed.path in ("/login", "/api/logout", "/api/change-password"):
+            self.json(404, {"error": "Not found"})
             return
         if self.headers.get("X-SurvivalOps-Request") != "web":
             self.json(403, {"error": "Missing request token"})
             return
-        if parsed.path == "/api/logout":
-            self.send(200, b'{"ok":true}', extra={"Set-Cookie":
-                "sops_web=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0"})
-        elif parsed.path == "/api/change-password":
-            self.change_password()
+        if parsed.path == "/api/run-limit":
+            try:
+                self.json(200, run_limit.configure(self.read_json()))
+            except ValueError as error:
+                self.json(400, {"error": str(error)})
         elif parsed.path == "/api/emulator/input":
             self.emulator_input()
         elif parsed.path.startswith("/api/"):
@@ -364,62 +345,6 @@ class Handler(BaseHTTPRequestHandler):
                 self.json(400, {"error": str(err)})
         else:
             self.json(404, {"error": "Not found"})
-
-    def login(self):
-        address = self.client_address[0]
-        now = time.monotonic()
-        with ATTEMPTS_LOCK:
-            attempts = LOGIN_ATTEMPTS[address]
-            while attempts and attempts[0] < now - 900:
-                attempts.popleft()
-            if len(attempts) >= 8:
-                self.json(429, {"error": "Too many attempts, try later"})
-                return
-        try:
-            password = self.read_json().get("password", "")
-            if not isinstance(password, str) or len(password) > 256:
-                raise ValueError("Invalid password")
-        except ValueError:
-            self.json(400, {"error": "Invalid request"})
-            return
-        if not password_ok(self.server.auth, password):
-            with ATTEMPTS_LOCK:
-                attempts.append(now)
-            self.json(401, {"error": "Incorrect password"})
-            return
-        with ATTEMPTS_LOCK:
-            attempts.clear()
-        token = make_token(self.server.auth)
-        self.send(200, b'{"ok":true}', extra={"Set-Cookie":
-            f"sops_web={token}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age={SESSION_AGE}"})
-
-    def change_password(self):
-        try:
-            data = self.read_json()
-            old, new = data.get("current", ""), data.get("new", "")
-            if not isinstance(old, str) or not isinstance(new, str) or \
-                    len(new) < 14 or len(new) > 128 or new.isspace():
-                raise ValueError("New password must contain between 14 and 128 characters")
-            if not password_ok(self.server.auth, old):
-                self.json(403, {"error": "Current password is incorrect"})
-                return
-            salt = secrets.token_bytes(24)
-            next_auth = {"salt": salt.hex(),
-                         "password_hash": hashlib.pbkdf2_hmac(
-                             "sha256", new.encode(), salt, 350000).hex(),
-                         "session_key": secrets.token_bytes(32).hex()}
-            temporary = AUTH_PATH.with_suffix(".tmp")
-            with temporary.open("w", encoding="utf-8") as stream:
-                json.dump(next_auth, stream)
-                stream.flush()
-                os.fsync(stream.fileno())
-            temporary.chmod(0o600)
-            temporary.replace(AUTH_PATH)
-            self.server.auth = next_auth
-            self.send(200, b'{"ok":true}', extra={"Set-Cookie":
-                "sops_web=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0"})
-        except (OSError, ValueError) as error:
-            self.json(400, {"error": str(error)})
 
     def forward(self, path, method, body=None):
         try:
@@ -452,7 +377,7 @@ class Handler(BaseHTTPRequestHandler):
     def live_stream(self):
         """Send real *continuous* frames from the same scrcpy H.264 source.
 
-        One authenticated GET holds a multipart stream open until navigation
+        One GET holds a multipart stream open until navigation
         or disconnect. It does not poll ADB or refresh the <img> every N secs.
         Input is separately guarded through /api/emulator/input.
         """
@@ -491,9 +416,10 @@ class Handler(BaseHTTPRequestHandler):
             if status != 200:
                 raise RuntimeError("Bot state unavailable")
             engine_state = json.loads(raw)
-            # No manual inputs while tasks are running or a queue could wake up.
-            if engine_state.get("running") or engine_state.get("executing"):
-                self.json(409, {"error": "Stop the bot before manual emulator control"})
+            # A paused scheduler cannot start a new routine; executing tasks
+            # and any unpaused queue must still block ADB input.
+            if not manual_input_allowed(engine_state):
+                self.json(409, {"error": "Pause the bot and wait until the current routine finishes"})
                 return
             if other_controller_recent():
                 self.json(409, {"error": "Another SurvivalOps session is currently producing diagnostics. "
@@ -548,16 +474,17 @@ def main():
     parser.add_argument("--port", type=int, default=9098)
     args = parser.parse_args()
     server = ThreadingHTTPServer((args.host, args.port), Handler)
-    server.auth = load_auth()
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.minimum_version = ssl.TLSVersion.TLSv1_2
     private = Path.home() / "survivalops-diagnostics/private"
-    certificate = AUTH_PATH.parent / "server-cert.pem"
-    private_key = AUTH_PATH.parent / "server-key.pem"
+    certificate = TLS_DIR / "server-cert.pem"
+    private_key = TLS_DIR / "server-key.pem"
     context.load_cert_chain(certificate if certificate.exists() else private / "server-cert.pem",
                             private_key if private_key.exists() else private / "server-key.pem")
     server.socket = context.wrap_socket(server.socket, server_side=True)
     print(f"SurvivalOps Web HTTPS ready on https://{args.host}:{args.port}", flush=True)
+    start_monitor(engine, TIMELINE)
+    run_limit.start_monitor(engine, adb, emulator_endpoint)
     server.serve_forever()
 
 

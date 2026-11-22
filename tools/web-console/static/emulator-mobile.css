@@ -1,5 +1,5 @@
-/* Mobile Safari must show a live screen even without worker WebCodecs or
-   permission to load the separately certified Serve-Emu iframe. */
+/* Cross-platform live player: a continuous same-origin MJPEG stream.
+   This retains mobile Safari's reliable 720x1280 native image rendering. */
 .emu-mobile-view[hidden]{display:none!important}
 .emu-phone.emu-mobile-fallback>iframe{display:none!important}
 .emu-phone.emu-mobile-fallback .emu-mobile-view{

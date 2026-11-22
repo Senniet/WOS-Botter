@@ -3,10 +3,10 @@
 The source is the SAME scrcpy WebSocket consumed by native desktop Serve-Emu;
 no ADB screencap polling, no new emulator or second scrcpy server. The small
 FFmpeg process decodes one continuous H.264 feed and encodes live JPEG frames
-for mobile Safari's native multipart/x-mixed-replace <img> support.
+for browsers with native multipart/x-mixed-replace <img> support.
 
 This module has no third-party Python dependencies. Video and input remain
-inside the existing authenticated SurvivalOps HTTPS origin.
+inside the same-origin SurvivalOps LAN HTTPS gateway.
 """
 from __future__ import annotations
 

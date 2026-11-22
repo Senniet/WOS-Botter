@@ -1,0 +1,194 @@
+/* Loaded last so light palette reaches operations-specific layouts. */
+html[data-theme=light] .operations-timeline,html[data-theme=light] .operations-home,html[data-theme=light] .operations-tasks{color:var(--text)}
+html[data-theme=light] .timeline-panel,html[data-theme=light] .timeline-row,html[data-theme=light] .timeline-running,html[data-theme=light] .timeline-section-head,html[data-theme=light] .timeline-summary,html[data-theme=light] .timeline-head,html[data-theme=light] .timeline-list,html[data-theme=light] .work-layout>*{background:var(--panel);color:var(--text);border-color:var(--border)}
+html[data-theme=light] .timeline-row:hover{background:#edf4fd}
+html[data-theme=light] .timeline-row.running{background:#fff5e6}
+html[data-theme=light] .timeline-row strong,html[data-theme=light] .timeline-time strong,html[data-theme=light] .timeline-task strong,html[data-theme=light] .dashboard-timeline-row strong,html[data-theme=light] .work-task-open strong{color:var(--text)}
+html[data-theme=light] .timeline-row small,html[data-theme=light] .timeline-panel small,html[data-theme=light] .timeline-summary span,html[data-theme=light] .timeline-head p,html[data-theme=light] .timeline-history-sort,html[data-theme=light] .work-heading p{color:var(--muted)}
+html[data-theme=light] .timeline-row,html[data-theme=light] .dashboard-timeline-row,html[data-theme=light] .timeline-panel .panel-heading{border-color:var(--border)}
+html[data-theme=light] .timeline-state,html[data-theme=light] .timeline-history-sort select{background:#e3edf9;color:#284260;border-color:#bdcee0}
+html[data-theme=light] .timeline-state.success{background:#d9f5ea;color:#115742}
+html[data-theme=light] .timeline-state.failed{background:#ffebe8;color:#9e332d}
+html[data-theme=light] .timeline-state.running{background:#ffefd0;color:#744b12}
+html[data-theme=light] .timeline-head .work-eyebrow,html[data-theme=light] .timeline-note{color:var(--muted)}
+html[data-theme=light] .operations-home .operations-hero,html[data-theme=light] .work-summary,html[data-theme=light] .work-groups,html[data-theme=light] .work-tools{border-color:var(--border)}
+html[data-theme=light] .timeline-list{scrollbar-color:#b4c4d7 transparent}
+
+/* Complete light palette: operations.css predates the theme and hardcodes
+   charcoal backgrounds / pale text. Override on all web-console surfaces. */
+html[data-theme="light"] body,
+html[data-theme="light"] .main,
+html[data-theme="light"] .page,
+html[data-theme="light"] .topbar{background:#f1f5fb;color:#192c43}
+html[data-theme="light"] .sidebar{background:#e6eef8;border-color:#c8d4e2}
+html[data-theme="light"] .sidebar .identity{border-color:#c8d4e2}
+html[data-theme="light"] .sidebar .identity b,
+html[data-theme="light"] .sidebar-footer,
+html[data-theme="light"] .sidebar .nav-btn{color:#263e58}
+html[data-theme="light"] .sidebar .nav-btn:hover,
+html[data-theme="light"] .sidebar .nav-btn.active{background:#d0e2f7;color:#173d69}
+html[data-theme="light"] .brand-mark{background:#d8e6f7;color:#31547a;border-color:#a2b8d0}
+html[data-theme="light"] .operations-home .hero.operations-hero{background:#e2edfa;color:#1a3049;border-color:#b6cde4}
+html[data-theme="light"] .operations-home .hero h2,
+html[data-theme="light"] .operations-home .hero p,
+html[data-theme="light"] .operations-hero-head,
+html[data-theme="light"] .operations-kicker{color:#243c58}
+html[data-theme="light"] .operations-home .metric-grid{background:#c9d6e4;border-color:#c9d6e4}
+html[data-theme="light"] .operations-home .metric,
+html[data-theme="light"] .metric,
+html[data-theme="light"] .panel,
+html[data-theme="light"] .settings-panel,
+html[data-theme="light"] .runtime-panel,
+html[data-theme="light"] .setting-row,
+html[data-theme="light"] .panel-content{background:#fff;color:#192c43;border-color:#d3deea}
+html[data-theme="light"] .metric strong,
+html[data-theme="light"] .metric span,
+html[data-theme="light"] .panel-heading h3,
+html[data-theme="light"] .work-heading h2,
+html[data-theme="light"] .section-intro h2,
+html[data-theme="light"] .timeline-head h2{color:#192c43}
+html[data-theme="light"] .metric small,
+html[data-theme="light"] .section-intro p,
+html[data-theme="light"] .setting-row small,
+html[data-theme="light"] .work-footnote{color:#53667e}
+html[data-theme="light"] .panel-heading,
+html[data-theme="light"] .setting-row,
+html[data-theme="light"] .queue-item{border-color:#d1dce8}
+html[data-theme="light"] .quick-links button{border-color:#d1dce8;color:#335a82}
+html[data-theme="light"] .quick-links button:hover{background:#edf4fc}
+html[data-theme="light"] .quick-links span{color:#1a3048}
+html[data-theme="light"] .work-summary{background:#e7f0fa;color:#27415b;border-color:#c4d4e6}
+html[data-theme="light"] .work-summary strong,
+html[data-theme="light"] .work-summary span{color:#27415b}
+html[data-theme="light"] .work-tools,
+html[data-theme="light"] .work-layout,
+html[data-theme="light"] .work-groups,
+html[data-theme="light"] .work-list,
+html[data-theme="light"] .work-inspector{color:#192c43}
+html[data-theme="light"] .work-groups,
+html[data-theme="light"] .work-list,
+html[data-theme="light"] .work-inspector,
+html[data-theme="light"] .work-inspector-content{background:#fff;border-color:#cbd8e6}
+html[data-theme="light"] .work-group,
+html[data-theme="light"] .work-section-header,
+html[data-theme="light"] .work-detail-head,
+html[data-theme="light"] .work-detail-activation,
+html[data-theme="light"] .work-inspector .task-option,
+html[data-theme="light"] .work-inspector .research-priority-option{background:#eef4fb;color:#1d344e;border-color:#cedce9}
+html[data-theme="light"] .work-group:hover,
+html[data-theme="light"] .work-group.is-current,
+html[data-theme="light"] .work-task:hover,
+html[data-theme="light"] .work-task.is-selected,
+html[data-theme="light"] .work-inspector .task-option:hover{background:#dceafb;color:#133d6a}
+html[data-theme="light"] .work-task,
+html[data-theme="light"] .work-task-open,
+html[data-theme="light"] .work-list-heading,
+html[data-theme="light"] .work-detail-content{background:#fff;color:#1d344e;border-color:#d5e0ec}
+html[data-theme="light"] .work-task-open strong,
+html[data-theme="light"] .work-list-heading strong,
+html[data-theme="light"] .work-group strong,
+html[data-theme="light"] .work-inspector strong,
+html[data-theme="light"] .work-detail-head strong{color:#172b42}
+html[data-theme="light"] .work-segments button,
+html[data-theme="light"] .work-no-results button,
+html[data-theme="light"] .work-row-arrow,
+html[data-theme="light"] .work-detail-head button{background:#e4edf8;color:#294967;border-color:#b8c9dd}
+html[data-theme="light"] .work-segments button:hover,
+html[data-theme="light"] .work-segments button.is-active{background:#cbdff7;color:#163e6f}
+html[data-theme="light"] .work-search input,
+html[data-theme="light"] .work-profile select,
+html[data-theme="light"] .work-sort select{background:#fff;color:#19314b;border-color:#adbed2}
+html[data-theme="light"] .research-priority-row,
+html[data-theme="light"] .research-priority-actions button{background:#e3edf8;border-color:#bfd0e1;color:#284660}
+html[data-theme="light"] .research-priority-row strong{color:#17314d}
+html[data-theme="light"] .timeline-summary{background:#d0dce9;border-color:#c0ccdb}
+html[data-theme="light"] .timeline-summary>div{background:#fff;color:#192c43}
+html[data-theme="light"] .timeline-summary strong{color:#192c43}
+html[data-theme="light"] .timeline-running{background:#fffaf0;border-color:#d7c2a1}
+html[data-theme="light"] .timeline-section-head{background:#fff6e8;border-color:#e5d7c1}
+html[data-theme="light"] .timeline-row{background:#fff;border-color:#d4dfeb}
+html[data-theme="light"] .timeline-row:hover{background:#eaf2fc}
+html[data-theme="light"] .timeline-row.running{background:#fff6e8}
+html[data-theme="light"] .timeline-row strong{color:#162c46}
+html[data-theme="light"] .timeline-time small,
+html[data-theme="light"] .timeline-task small{color:#64758a}
+html[data-theme="light"] .timeline-state.waiting,
+html[data-theme="light"] .timeline-state.unknown{background:#e5edf6;color:#3a526b}
+html[data-theme="light"] .timeline-unscheduled{background:#fff;color:#53677c;border-color:#cdd9e7}
+html[data-theme="light"] .timeline-error{background:#fff0ed;color:#923d33;border-color:#ebbfb7}
+html[data-theme="light"] .dashboard-timeline-time{color:#805a20}
+html[data-theme="light"] .dashboard-timeline-state{color:#54677d}
+html[data-theme="light"] .setting-group h3{background:#e9f1fa;color:#1c3551}
+html[data-theme="light"] .setting-row label{color:#1c3551}
+html[data-theme="light"] .setting-row input,
+html[data-theme="light"] .setting-row select{background:#fff;color:#1b314a;border-color:#b2c3d5}
+html[data-theme="light"] .checkbox-label,
+html[data-theme="light"] .compact-label,
+html[data-theme="light"] .form-grid label{color:#29415b}
+html[data-theme="light"] .profile-row{border-color:#d5e0eb;color:#203650}
+html[data-theme="light"] .log-lines{background:#edf3fa;color:#203b58;border:1px solid #cad8e7}
+html[data-theme="light"] .qa-item,
+html[data-theme="light"] .qa-scroll{background:#fff;color:#1d344f;border-color:#d6e0e9}
+html[data-theme="light"] .qa-item:hover{background:#edf4fb}
+html[data-theme="light"] .qa-dialog{background:#fff;color:#203751}
+html[data-theme="light"] .emu-stage-title strong{color:#193451}
+html[data-theme="light"] .emu-stage-title span{color:#52677f}
+html[data-theme="light"] .emu-external-link{background:#e2ecfa;color:#224974;border-color:#b1c7df}
+html[data-theme="light"] .emu-external-link:hover{background:#cfdef1;color:#173d68}
+/* The Android live picture itself must remain unchanged. */
+
+
+/* Bot controls: clear state, single primary action and secondary stop. */
+.operations-home .operations-controls{
+  flex:0 0 318px;min-width:0;max-width:100%;padding:18px;
+  background:rgba(7,12,19,.22);border:1px solid #3c4855;border-radius:10px;
+  align-items:stretch;justify-content:center;gap:10px;
+}
+.bot-control-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;min-width:0}
+.bot-control-status{display:inline-flex;align-items:center;gap:7px;padding:5px 9px;border-radius:30px;background:#202f39;color:#cbd7df;font-size:11px;font-weight:700;white-space:nowrap}
+.bot-control-status i{width:7px;height:7px;background:#8a9aa8;border-radius:50%;flex:none}
+.bot-control-status[data-state="active"],.bot-control-status[data-state="busy"]{background:#18372f;color:#a3dfc8}
+.bot-control-status[data-state="active"] i,.bot-control-status[data-state="busy"] i{background:#70cda9}
+.bot-control-status[data-state="paused"]{background:#3f3524;color:#f3d79c}
+.bot-control-status[data-state="paused"] i{background:#e7bc70}
+.bot-control-status[data-state="offline"]{background:#45262b;color:#ffc0c0}
+.bot-control-status[data-state="offline"] i{background:#e28b8b}
+.bot-control-caption{color:#b3bfcd;font-size:12px;line-height:1.5;margin:0!important}
+.bot-control-buttons{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.operations-controls .bot-control-buttons button{min-height:42px;padding:10px 12px;border-radius:7px;font-weight:750;white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;gap:8px}
+.operations-controls .bot-control-buttons button[hidden]{display:none!important}
+.operations-controls .bot-action-primary{grid-column:1 / -1;background:#c5a268;color:#1a1b1d;border:1px solid #d8b67c}
+.operations-controls .bot-action-secondary{grid-column:1;background:#25333d;color:#e7eef4;border:1px solid #465767}
+.operations-controls .bot-action-stop{grid-column:2;background:transparent;color:#e7a6a0;border:1px solid #79514b}
+.operations-controls .bot-action-stop:hover{background:#442b30;color:#ffcac5}
+.operations-controls .bot-control-buttons:has(.bot-action-secondary[hidden]) .bot-action-stop{grid-column:1 / -1}
+.operations-controls .bot-control-buttons button:focus-visible{outline:2px solid #e6c58c;outline-offset:3px}
+html[data-theme="light"] .operations-home .operations-controls{background:#f8fbff;border-color:#bdd0e2}
+html[data-theme="light"] .operations-control-label{color:#4b627b}
+html[data-theme="light"] .bot-control-caption{color:#53687e}
+html[data-theme="light"] .bot-control-status{background:#e4edf7;color:#39536b}
+html[data-theme="light"] .bot-control-status[data-state="active"],
+html[data-theme="light"] .bot-control-status[data-state="busy"]{background:#d9f2e6;color:#176449}
+html[data-theme="light"] .bot-control-status[data-state="paused"]{background:#fff0d5;color:#805b20}
+html[data-theme="light"] .bot-control-status[data-state="offline"]{background:#ffebea;color:#903c40}
+html[data-theme="light"] .operations-controls .bot-action-secondary{background:#e4edf8;color:#2d4c6c;border-color:#bacde0}
+html[data-theme="light"] .operations-controls .bot-action-stop{background:#fff;color:#a13f45;border-color:#d8afb1}
+html[data-theme="light"] .operations-controls .bot-action-stop:hover{background:#fff0ee}
+@media(max-width:950px){.operations-home .operations-controls{flex:auto;width:100%;max-width:none}}
+@media(max-width:580px){.operations-home .operations-controls{padding:14px}.bot-control-buttons{grid-template-columns:1fr 1fr}}
+
+/* Per-task repeat controls */
+.work-repeat-section{margin-top:14px}
+.task-repeat-editor{display:grid;gap:9px;padding:14px 18px 18px}
+.task-repeat-editor>.option-name{font-weight:750;color:#dfeaf6}
+.task-repeat-input{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.task-repeat-input input{width:110px;min-width:92px;font-variant-numeric:tabular-nums}
+.task-repeat-input>span{font-size:12px;color:#a5b5c7}
+.work-repeat-help{font-size:12px;line-height:1.6;margin:0;color:#9faec0}
+.work-repeat-status{font-size:12px;font-weight:700;color:#a3d5c1}
+.work-schedule-not-supported{padding:14px 18px;font-size:12px;color:#a7b6c6;line-height:1.6}
+html[data-theme="light"] .task-repeat-editor>.option-name{color:#1e344b}
+html[data-theme="light"] .work-repeat-help,html[data-theme="light"] .work-schedule-not-supported{color:#52667b}
+html[data-theme="light"] .task-repeat-input>span{color:#53677e}
+html[data-theme="light"] .work-repeat-status{color:#1d7655}
+@media(max-width:580px){.task-repeat-input{gap:8px}.task-repeat-input input{width:100px}}

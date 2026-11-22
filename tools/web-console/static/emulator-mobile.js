@@ -1,21 +1,12 @@
 /*
- * Live iPhone/iPad Serve-Emu player. Native scrcpy requires worker
- * OffscreenCanvas + WebCodecs; iOS Safari cannot reliably render the
- * third-party separately certified iframe. Instead we play an uninterrupted
- * MJPEG stream repackaged from the SAME native scrcpy H.264 WebSocket source.
- * It is not an ADB screenshot loop: one image request continuously receives
- * new frames (18fps) without reloads. Input uses the guarded same-origin API.
- * Other browsers retain the native low-latency WebSocket player.
+ * One same-origin continuous Serve-Emu video player on desktop and mobile.
+ * The native cross-origin iframe may fail behind another self-signed TLS
+ * certificate (especially on mobile and Edge). Use the working 18fps H.264
+ * -> MJPEG streaming gateway for both without ADB polling or page refresh.
+ * Keep existing iOS tap/swipe and connection cleanup behavior intact.
  */
 (() => {
   'use strict';
-  const agent = navigator.userAgent || '';
-  const ios = /iPad|iPhone|iPod/i.test(agent)
-    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-  const nativeWorkerUnavailable = !window.Worker
-    || !HTMLCanvasElement.prototype.transferControlToOffscreen;
-  if (!ios && !nativeWorkerUnavailable) return;
-
   const phone = document.getElementById('emu-phone');
   const native = document.getElementById('emu-live');
   const view = document.getElementById('emu-mobile-view');
@@ -23,8 +14,8 @@
   const message = document.getElementById('emu-mobile-message');
   if (!phone || !native || !view || !frame || !message) return;
 
-  // Do not load a separate untrusted TLS certificate or an unsupported
-  // OffscreenCanvas bundle in mobile Safari. All requests stay on :9098.
+  // Never load the cross-origin iframe. Reuse the same trusted HTTPS origin
+  // for desktop and mobile so a second browser certificate is not needed.
   native.removeAttribute('src');
   phone.classList.add('emu-mobile-fallback');
   view.hidden = false;
@@ -38,8 +29,7 @@
       && !document.hidden;
   }
   function busy() {
-    return !state.status || state.status.running || state.status.executing
-      || state.emulator?.externalControllerLikelyActive;
+    return emulatorManualState().blocked;
   }
   function setMessage(text) {
     message.textContent = text;
@@ -121,7 +111,6 @@
         headers:{'Content-Type':'application/json','X-SurvivalOps-Request':'web'},
         body:JSON.stringify(payload)
       });
-      if (result.status === 401) {location.reload(); return;}
       if (!result.ok) {
         const problem = await result.json().catch(() => ({}));
         setMessage(problem.error || 'Manual control unavailable');

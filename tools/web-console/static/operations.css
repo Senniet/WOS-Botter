@@ -66,21 +66,25 @@ body.is-emulator-page .footer{display:none}
 .emulator-page{animation:none}
 .emulator-page .emu-stage{width:100%;min-width:0}
 .emu-stage-toolbar{min-height:42px;display:flex;align-items:center;justify-content:space-between;gap:15px;flex-wrap:wrap;margin-bottom:10px}
-.emu-stage-title{display:flex;align-items:baseline;gap:11px;min-width:0}
+.emu-stage-title{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:2px;min-width:0}
 .emu-stage-title strong{font-size:13px;letter-spacing:-.1px;font-weight:750;color:#f1f6ff}
 .emu-stage-title span{font-size:11px;color:#91a2ba;white-space:nowrap}
 .emu-stage-actions{display:flex;align-items:center;gap:12px;margin-left:auto}
 .emu-stage-actions .pill{font-size:10px;padding:4px 9px}
+.emu-stage-actions #emu-manual-toggle{font-size:11px;padding:7px 10px;white-space:nowrap}
+.emu-stage-actions #emu-manual-toggle[hidden]{display:none!important}
+.emu-stage-actions #emu-manual-toggle:disabled{opacity:.5;cursor:not-allowed}
+
 .emu-external-link{display:inline-flex;align-items:center;gap:8px;text-decoration:none;white-space:nowrap;font-size:12px;font-weight:700;color:#c6dcff;background:#18273b;border:1px solid #384962;border-radius:8px;padding:8px 12px;transition:background .15s,border-color .15s}
 .emu-external-link:hover,.emu-external-link:focus-visible{background:#243b58;border-color:#6586b8;color:#fff}
 .emu-player-area{display:flex;align-items:flex-start;justify-content:center;min-height:0;width:100%;padding:0}
 .emu-phone{position:relative;width:min(100%,480px,calc((100dvh - 176px)*9/16));aspect-ratio:9/16;max-height:calc(100dvh - 176px);overflow:hidden;background:#03070d;border-radius:13px;box-shadow:0 10px 42px #0007;border:1px solid #334155}
 .emu-phone iframe{width:100%;height:100%;display:block;border:0;background:#03070d;touch-action:none}
-.emu-input-shield{position:absolute;inset:0;z-index:2;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;text-align:center;padding:24px;background:#070d19c9;color:#e5efff;pointer-events:auto}
+.emu-stage-title .emu-control-status{display:inline-flex;align-items:center;gap:6px;font-size:10px;line-height:1.25;color:#d7c59e;white-space:normal;max-width:265px}
+.emu-control-status[hidden],.emu-stage-title #emu-device-label[hidden]{display:none!important}
+.emu-control-dot{width:6px;height:6px;flex:none;border-radius:50%;background:#d8b575;box-shadow:0 0 0 2px #d8b57522}
+.emu-input-shield{position:absolute;inset:0;z-index:2;background:transparent;pointer-events:auto;cursor:not-allowed}
 .emu-input-shield[hidden]{display:none!important}
-.emu-input-shield .emu-shield-icon{font-size:26px;color:#8ab5f4}
-.emu-input-shield strong{font-size:14px}
-.emu-input-shield span:last-child{font-size:12px;color:#afc0d7}
 @media(max-width:750px){
  body.is-emulator-page .topbar{padding-top:10px;padding-bottom:9px;margin-bottom:8px}
  .emu-stage-toolbar{margin-bottom:8px;min-height:38px}
@@ -96,10 +100,16 @@ body.is-emulator-page .footer{display:none}
  .emu-external-link{font-size:10px;padding:6px 7px}
 }
 
-/* Long All Tasks lists may scroll only in the INNER task-list.
-   overflow:hidden created a second, hidden scroll container: Chrome could
-   scroll the outer panel 3,000px on a task switch, leaving a black panel.
-   Clip cannot scroll; layout containment still prevents phantom page height. */
+/* Keep the small bot status visible on phones even though the device subtitle hides. */
+@media(max-width:750px){.emu-stage-title .emu-control-status:not([hidden]){display:inline-flex;max-width:175px;font-size:9.5px}.emu-stage-title .emu-control-status #emu-control-status-text{display:inline}.emu-stage-title .emu-control-status .emu-control-dot{display:inline-block}}
+
+/* Prevent the tall All Tasks list from leaking scroll extent into the document. */
+/* The outer work-list must NOT be a scroll container. `overflow:hidden`
+   made Chrome/Playwright scroll this box thousands of pixels on the second
+   toggle, moving the *inner* list completely out of view (black panel).
+   `clip` prevents hidden ancestor scrolling while the inner task-list
+   remains independently scrollable. Layout containment prevents phantom
+   document height without the paint clipping from the previous fix. */
 .operations-tasks .work-list { contain: layout; overflow: clip; }
 
 /* Research: sortable operator-defined category order, shared with the Java
@@ -122,3 +132,74 @@ body.is-emulator-page .footer{display:none}
 .research-priority-enabled input {width:15px;height:15px;accent-color:#86ae99;margin:0}
 .research-priority-feedback {font-size:10px;color:#a2c0ad;margin:10px 0 0;line-height:1.35}
 @media(max-width:580px){.research-priority-row{grid-template-columns:12px 15px minmax(0,1fr) 65px 47px;gap:4px;padding:8px 5px}.research-priority-actions button{width:29px;height:29px}}
+
+/* Read-only Task Timeline, shared source of truth with the Java task scheduler. */
+.operations-timeline{animation:none}
+.timeline-head{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;flex-wrap:wrap;margin:4px 0 19px}
+.timeline-head h2{font-size:26px;margin:4px 0 7px;letter-spacing:-.5px}
+.timeline-head p{font-size:12px;color:#aab5bf;line-height:1.55;max-width:640px;margin:0}
+.timeline-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:#37424b;border:1px solid #37424b;border-radius:6px;overflow:hidden;margin-bottom:17px}
+.timeline-summary>div{background:#19232c;padding:15px 17px;min-width:0}
+.timeline-summary span{display:block;color:#a7b4c0;font-size:11px;margin-bottom:5px}
+.timeline-summary strong{display:block;font-size:22px;color:#f2efe8;font-variant-numeric:tabular-nums}
+#timeline-sync{font-size:17px;padding-top:4px}
+.timeline-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start}
+.timeline-panel{min-width:0;overflow:hidden;border-radius:6px}
+.timeline-panel .panel-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:65px}
+.timeline-panel .panel-heading h3{margin:0 0 4px}
+.timeline-panel .panel-heading small{display:block;font-size:10px;color:#91a1af}
+.timeline-history-sort{display:flex;align-items:center;gap:6px;color:#aab7c4;font-size:10px}
+.timeline-history-sort select{width:auto;max-width:125px;font-size:11px;padding:6px;background:#1b2832;border:1px solid #455363;border-radius:4px;color:#e8edf1}
+.timeline-list{max-height:calc(100dvh - 360px);min-height:300px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#485867 transparent}
+.timeline-row{display:grid;grid-template-columns:106px minmax(0,1fr) auto;gap:11px;align-items:center;padding:13px 13px;border-top:1px solid #2c3741;border-left:3px solid transparent}
+.timeline-row:first-child{border-top:none}
+.timeline-row:hover{background:#212d38}
+.timeline-row.running{border-left-color:#dfb876;background:#272d30}
+.timeline-row.success{border-left-color:#70b6a6}
+.timeline-row.failed{border-left-color:#d98276}
+.timeline-row.waiting{border-left-color:#a3a8b3}
+.timeline-time strong{display:block;font:700 12px/1.4 ui-monospace,Consolas,monospace;color:#e7e9ea;white-space:nowrap;font-variant-numeric:tabular-nums}
+.timeline-time small,.timeline-task small{display:block;font-size:10px;margin-top:4px;color:#91a3b2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.timeline-task{min-width:0}
+.timeline-task strong{display:block;font-size:12px;color:#edf2f6;white-space:normal;overflow-wrap:anywhere}
+.timeline-state{white-space:nowrap;text-align:right;font-size:10px;color:#b4c4d0;border:1px solid #3a4c5a;border-radius:12px;padding:5px 8px;background:#22313d}
+.timeline-state.running{border-color:#826e4b;background:#3b3427;color:#efce8c}
+.timeline-state.success{border-color:#2a5a50;background:#1d3731;color:#8fceb8}
+.timeline-state.failed{border-color:#6c413c;background:#3c2929;color:#e9a398}
+.timeline-state.unknown,.timeline-state.waiting{color:#b5bfcb;background:#242e38}
+.timeline-running{border:1px solid #856b47;background:#1c262c;border-radius:6px;margin:0 0 16px;overflow:hidden}
+.timeline-section-head{display:flex;align-items:center;justify-content:space-between;padding:12px 15px;border-bottom:1px solid #4b4c43}
+.timeline-section-head h3{font-size:14px;margin:0}
+.timeline-live-dot{font:800 10px/1.4 ui-monospace,Consolas,monospace;color:#ebc78a;letter-spacing:1px}
+.timeline-live-dot:before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:#d6b378;box-shadow:0 0 9px #d6b378;margin-right:7px}
+.timeline-empty{color:#9cabb7;text-align:center;font-size:12px;padding:45px 16px;line-height:1.6}
+.timeline-error{color:#e9aa9f;background:#412c2e;border:1px solid #704749;padding:11px;border-radius:5px;margin:12px 0}
+.timeline-error[hidden],.timeline-running[hidden],.timeline-unscheduled[hidden]{display:none!important}
+.timeline-unscheduled{padding:12px;font-size:11px;color:#adbac6;border-top:1px solid #354550;line-height:1.6}
+.timeline-note{font-size:11px;color:#97a5b2;margin:17px 3px;line-height:1.6}
+@media(max-width:1150px){
+ .timeline-grid{grid-template-columns:1fr}
+ .timeline-list{max-height:420px;min-height:170px}
+}
+@media(max-width:630px){
+ .timeline-head .work-profile{width:100%}
+ .timeline-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .timeline-summary>div{padding:12px 14px}
+ .timeline-summary strong{font-size:20px}
+ .timeline-row{grid-template-columns:94px minmax(0,1fr);gap:5px 9px;padding:11px 9px}
+ .timeline-state{grid-column:2;justify-self:start;font-size:9px;padding:3px 7px}
+ .timeline-time strong{font-size:10.5px}
+ .timeline-time small,.timeline-task small{font-size:9px}
+ .timeline-list{max-height:440px}
+}
+
+/* Short live upcoming-runs preview directly on Overview. */
+.timeline-dashboard-panel{margin-top:16px;overflow:hidden;border-radius:6px}
+.timeline-dashboard-panel .panel-heading{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.dashboard-timeline{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 17px;padding:2px 14px 9px}
+.dashboard-timeline-row{display:grid;grid-template-columns:95px minmax(0,1fr) auto;align-items:center;gap:10px;border-bottom:1px solid #303c46;padding:11px 1px;min-width:0}
+.dashboard-timeline-time{font:700 11px ui-monospace,Consolas,monospace;color:#d7bb85;white-space:nowrap}
+.dashboard-timeline-row strong{font-size:12px;color:#e5ebf0;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dashboard-timeline-state{font-size:10px;color:#97adbb}
+@media(max-width:1150px){.dashboard-timeline{grid-template-columns:1fr}}
+@media(max-width:600px){.dashboard-timeline{padding:1px 10px 8px}.dashboard-timeline-row{grid-template-columns:84px minmax(0,1fr);gap:6px}.dashboard-timeline-state{display:none}.dashboard-timeline-row strong{font-size:11px}.timeline-dashboard-panel .panel-heading h3{font-size:13px}}

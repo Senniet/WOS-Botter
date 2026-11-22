@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 """Smoke/security tests for the SurvivalOps web gateway (no game input)."""
-import hashlib
 import importlib.util
 import json
 from pathlib import Path
-import secrets
 import ssl
 import sys
 import unittest
@@ -19,37 +17,26 @@ WEB = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(WEB)
 
 
-class AuthTests(unittest.TestCase):
-    def test_password_hash_accepts_only_correct_password(self):
-        salt = secrets.token_bytes(16)
-        data = {
-            "salt": salt.hex(),
-            "password_hash": hashlib.pbkdf2_hmac("sha256", b"expected", salt, 350000).hex(),
-            "session_key": secrets.token_bytes(32).hex(),
-        }
-        self.assertTrue(WEB.password_ok(data, "expected"))
-        self.assertFalse(WEB.password_ok(data, "other"))
-        cookie = "sops_web=" + WEB.make_token(data)
-        self.assertTrue(WEB.token_ok(data, cookie))
-        self.assertFalse(WEB.token_ok(data, cookie + "alteration"))
-        self.assertFalse(WEB.token_ok(data, "other=value"))
-
+class GatewayTests(unittest.TestCase):
     def test_operator_interface_uses_english(self):
         """English game terminology should remain consistent across all web screens."""
         import re
         source = Path(__file__).parent
         html = (source / "index.html").read_text(encoding="utf-8")
-        login = (source / "login.html").read_text(encoding="utf-8")
         app = (source / "static/app.js").read_text(encoding="utf-8")
-        login_js = (source / "static/login.js").read_text(encoding="utf-8")
         self.assertIn('<html lang="en">', html)
-        self.assertIn('<html lang="en">', login)
+        self.assertIn('<section data-view="timeline"', html)
+        self.assertIn('id="dashboard-timeline"', html)
+        self.assertIn('id="timeline-upcoming"', html)
+        self.assertIn('id="timeline-history"', html)
+        self.assertIn('setInterval(loadTimeline,5000)', app)
+        self.assertNotIn('id="logout"', html)
+        self.assertNotIn('id="password-form"', html)
+        self.assertNotIn('/api/change-password', app)
         self.assertIn("'en-GB'", app)
         self.assertIn('Daily Tasks', app)
         self.assertIn('Hero Recruitment', app)
         self.assertIn('Claim Recruitment Points Chest', app)
-        self.assertIn('Password', login)
-        self.assertIn('Login failed', login_js)
         dutch_ui = re.compile(
             r"\b(?:instellingen|takenbeheer|wachtwoord|inloggen|overzicht|"
             r"ingeschakeld|uitgeschakeld|beloningen|troepen|gebruiken|"
@@ -57,10 +44,36 @@ class AuthTests(unittest.TestCase):
             r"verzamelen|profielen|laad|beschikbaar|niet|geen|voor)\b",
             re.IGNORECASE,
         )
-        for label, content in (("index", html), ("login", login),
-                               ("app", app), ("login script", login_js)):
+        for label, content in (("index", html), ("app", app)):
             self.assertIsNone(dutch_ui.search(content),
                               f"Dutch operator text remains in {label}")
+
+    def test_manual_control_only_when_no_queue_can_execute(self):
+        allowed = WEB.manual_input_allowed
+        self.assertTrue(allowed({"running": False, "executing": False, "queues": []}))
+        self.assertTrue(allowed({"running": True, "executing": False,
+                                 "queues": [{"paused": True, "executing": False}]}))
+        self.assertFalse(allowed({"running": True, "executing": False, "queues": []}))
+        self.assertFalse(allowed({"running": True, "executing": False,
+                                  "queues": [{"paused": False, "executing": False}]}))
+        self.assertFalse(allowed({"running": True, "executing": True,
+                                  "queues": [{"paused": True, "executing": True}]}))
+        self.assertFalse(allowed({"running": True, "executing": False,
+                                  "queues": [{"paused": True}, {"paused": False}]}))
+        self.assertFalse(allowed({"running": True, "executing": False,
+                                  "queues": [{"paused": True}, {"paused": True, "executing": True}]}))
+
+    def test_live_player_shared_on_desktop_and_mobile(self):
+        source = Path(__file__).parent
+        script = (source / "static/emulator-mobile.js").read_text(encoding="utf-8")
+        html = (source / "index.html").read_text(encoding="utf-8")
+        self.assertIn('id="emu-manual-toggle"', html)
+        self.assertIn("frame.src = '/api/emulator/live'", script)
+        self.assertIn("return emulatorManualState().blocked;", script)
+        self.assertIn("frame.removeAttribute('src')", script)
+        self.assertIn("native.removeAttribute('src')", script)
+        self.assertNotIn('id="emu-live" src=', html)
+        self.assertNotIn("nativeWorkerUnavailable", script)
 
     def test_qa_directory_traversal_is_not_available(self):
         self.assertIsNone(WEB.qa_indexed_record("../../etc/passwd"))
@@ -83,16 +96,42 @@ class LiveReadonlyTests(unittest.TestCase):
     def test_health_exposes_only_online_flag(self):
         self.assertEqual(self.get_status("/health"), 200)
 
-    def test_unauthenticated_engine_api_is_denied(self):
-        self.assertEqual(self.get_status("/api/status"), 401)
-        self.assertEqual(self.get_status("/api/qa/summary"), 401)
-        self.assertEqual(self.get_status("/api/emulator/frame"), 401)
-
-    def test_login_assets_accessible(self):
-        self.assertEqual(self.get_status("/"), 200)
+    def test_lan_console_is_available_without_a_cookie(self):
+        with urlopen(self.base + "/", context=self.context, timeout=5) as response:
+            html = response.read().decode("utf-8")
+        self.assertIn('id="dashboard-timeline"', html)
+        self.assertNotIn('id="login-form"', html)
         self.assertEqual(self.get_status("/static/style.css"), 200)
-        self.assertEqual(self.get_status("/static/login.js"), 200)
-        self.assertEqual(self.get_status("/static/app.js"), 401)
+        self.assertEqual(self.get_status("/static/app.js"), 200)
+        self.assertEqual(self.get_status("/api/status"), 200)
+        self.assertEqual(self.get_status("/api/timeline?profile=1"), 200)
+        self.assertEqual(self.get_status("/api/qa/summary"), 200)
+
+    def post_status(self, path, headers=None, body=b"{}"):
+        request = Request(self.base + path, data=body, method="POST",
+                          headers=headers or {})
+        try:
+            with urlopen(request, context=self.context, timeout=5) as response:
+                return response.status
+        except HTTPError as err:
+            return err.code
+
+    def test_mutations_keep_origin_and_request_header_protection(self):
+        # The request must be rejected before it can reach the engine.
+        self.assertEqual(self.post_status("/api/engine"), 403)
+        self.assertEqual(self.post_status("/api/engine", {
+            "Host": "10.0.0.100:9098",
+            "Origin": "https://other-host.example",
+            "X-SurvivalOps-Request": "web"
+        }), 403)
+
+    def test_login_and_password_routes_are_removed(self):
+        header = {"X-SurvivalOps-Request": "web"}
+        self.assertEqual(self.get_status("/api/session"), 404)
+        self.assertEqual(self.get_status("/static/login.js"), 404)
+        self.assertEqual(self.post_status("/login", header), 404)
+        self.assertEqual(self.post_status("/api/change-password", header), 404)
+        self.assertEqual(self.post_status("/api/logout", header), 404)
 
     def test_unknown_paths_fail_closed(self):
         self.assertEqual(self.get_status("/../../etc/passwd"), 404)

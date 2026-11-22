@@ -1,31 +1,31 @@
 # SurvivalOps Web (parallel to the Windows MSI)
 
-The original Java automation engine, task registry and scheduler run on the `webserver` host in a separate workspace and checkout. The web UI is an authenticated HTTPS Python gateway, while Java owns the local-only API (`127.0.0.1:18765`). Only Serve-Emu is supported.
+The original Java automation engine, task registry and scheduler run on the `webserver` host in a separate workspace and checkout. The web UI is a password-free, LAN-only HTTPS Python gateway, while Java owns the local-only API (`127.0.0.1:18765`). Only Serve-Emu is supported.
 
 ## Addresses
 
-- Home LAN: `https://192.168.1.20:9098/` (TrueNAS reverse TCP proxy -> SSH remote tunnel -> webserver)
+- Home LAN: `https://192.0.2.10:9098/` (TrueNAS reverse TCP proxy -> SSH remote tunnel -> webserver)
 - Webserver network: `https://10.0.0.100:9098/`
 - Internal Java API: `127.0.0.1:18765` (never expose publicly)
-- TrueNAS Serve-Emu UI: `https://192.168.1.20:8448/`
+- TrueNAS Serve-Emu UI: `https://192.0.2.10:8448/`
 
-The app uses a self-signed TLS certificate covering both IP addresses (stored only in `~/.config/survivalops-web`). Never copy the TLS private key or password file into Git.
+The app uses a self-signed TLS certificate covering both IP addresses (stored only in `~/.config/survivalops-web`). Never copy private key material into Git.
 
 ## Deployment
 
 Webserver user services:
 
 - `survivalops-web-engine.service`: Java bot
-- `survivalops-web.service`: authenticated HTTPS frontend
+- `survivalops-web.service`: password-free, LAN-only HTTPS frontend
 - `survivalops-web-lan-tunnel.service`: SSH reverse tunnel to TrueNAS using an existing authorized deployment key, remote bound to `127.0.0.1:19098`
 
-TrueNAS runs the separate Docker container `survivalops-web-lan-proxy` with host networking, bound only to `192.168.1.20:9098`. It forwards TCP/TLS to the SSH tunnel and is set to restart automatically. It does **not** modify the existing Serve-Emu application.
+TrueNAS runs the separate Docker container `survivalops-web-lan-proxy` with host networking, bound only to `192.0.2.10:9098`. It forwards TCP/TLS to the SSH tunnel and is set to restart automatically. It does **not** modify the existing Serve-Emu application.
 
-Access password is initially provisioned under `~/.config/survivalops-web/initial-password.txt`, and may be changed in the Web Settings page. Password hash, TLS key, and session signing key must never be committed. The QA dashboard remains available separately.
+No login or password is required for SurvivalOps Web. It remains bound to the webserver's private 10.0.0.100 interface and reachable from the home LAN through the TrueNAS 192.0.2.10:9098 TCP proxy and loopback-only SSH tunnel. Do not forward 9098 to the public internet; anyone with LAN access can read diagnostics and issue control commands. The TLS private key must not be committed. Existing old login credentials are inactive and retained on disk only for rollback. The separate QA dashboard retains its own access controls.
 
 ## Current validation and limitations
 
-- Web API, browser assets, task registry, profile persistence, frontend login and local Serve-Emu screenshot read have been tested.
+- Web API, browser assets, task registry, profile persistence, password-free access and local Serve-Emu screenshot read have been tested.
 - Browser UI exposes 65 Java task enum entries and 285 engine settings; the historical QA archive tracks 62 active/triaged routines (different counts, not identical universes).
 - Web Task Builder supports point tap, swipe, wait, back and simple linear flows. Advanced FXML editor and MSI-only features have **not** been ported.
 - The web engine is **stopped by default**, with no tasks enabled. No claim of complete live task-by-task E2E verification; use shared ADB maintenance lock and coordinate with the Windows MSI before enabling.
@@ -37,7 +37,7 @@ Avoid running the Windows client and Web scheduler against the same emulator sim
 
 The Task Management page now reads both `/api/tasks?profile=...` and `/api/settings?profile=...`, maps the original task-specific configuration keys to an expandable behavior panel on each routine, and writes changes back through `/api/setting`. This preserves all original MSI configuration keys and per-profile values. The task's own activation switch is not duplicated in its options, nor is another routine's activation switch exposed as a behavior setting. Internal state fields (last-run timestamps, consecutive failure counts, etc.) are hidden from the ordinary behavior panel. Technical keys remain available via the explicit Advanced checkbox in System Settings; default view shows only core system settings.
 
-Serve-Emu now has an interactive portrait-only native WebSocket player. Its own full device manager, app tools, settings and navigation are hidden **only on a dedicated `/embed.html` endpoint** hosted by the original TrueNAS Serve-Emu container. Original `https://192.168.1.20:8448/` is unchanged. The player retains the original live scrcpy video, pointer/touch/swipe and keyboard handlers; no screenshot-refresh loop, no ADB coordinate overlay, and no additional emulator. Manual input is shielded while the web scheduler runs or diagnostics indicate another active controller. The **Full Serve-Emu** link is in the compact toolbar above the screen. The old duplicate screenshot, manual buttons, settings and management panels are no longer rendered on this page; backend manual endpoints remain for compatibility.
+Serve-Emu now has an interactive portrait-only native WebSocket player. Its own full device manager, app tools, settings and navigation are hidden **only on a dedicated `/embed.html` endpoint** hosted by the original TrueNAS Serve-Emu container. Original `https://192.0.2.10:8448/` is unchanged. The player retains the original live scrcpy video, pointer/touch/swipe and keyboard handlers; no screenshot-refresh loop, no ADB coordinate overlay, and no additional emulator. Manual input is shielded while the web scheduler runs or diagnostics indicate another active controller. The **Full Serve-Emu** link is in the compact toolbar above the screen. The old duplicate screenshot, manual buttons, settings and management panels are no longer rendered on this page; backend manual endpoints remain for compatibility.
 
 Validation: `node tools/web-console/test_task_ui.cjs` (reads original Java task/setting APIs, asserts option ownership and security-sensitive UI behavior), `node --check tools/web-console/static/app.js`, `python3 -m unittest tools/web-console/test_web_console.py`, and Maven reactor build. Native Serve-Emu WebSocket upgrade and inbound data were verified on port 8448. Playwright Chromium validates the interface on desktop and mobile viewports; mobile Safari itself has not been visually tested.
 
@@ -47,7 +47,7 @@ The Task Management page is now an operator workbench rather than a grid of task
 
 The ordinary Overview page was also restyled into a flatter control-room layout; the original dashboard and Java API functionality is retained. The standalone MSI project and existing user task values were not touched. The automated browser test uses intercepted `/api/setting` and `/api/task` calls to verify switch payloads **without altering production tasks**.
 
-Validation: `node tools/web-console/test_task_ui.cjs` uses the live Java task/setting endpoints and checks all 65 unique group assignments and option ownership. `node tools/web-console/test_browser.cjs` uses Playwright-core with an installed headless Chromium, accepts `SURVIVALOPS_WEB_BASE=https://192.168.1.20:9098/`, and checks authenticated navigation, desktop/mobile layout widths, task detail drawer, search, favorites and intercepted original API calls. JavaScript syntax, Python gateway smoke/security tests, and live HTTPS availability can be checked independently. The browser test reads the initial password file only from local private storage; when changed, provide its replacement through an approved local test mechanism. Do not commit credentials or unredacted screenshots.
+Validation: `node tools/web-console/test_task_ui.cjs` uses the live Java task/setting endpoints and checks all 65 unique group assignments and option ownership. `node tools/web-console/test_browser.cjs` uses Playwright-core with an installed headless Chromium, accepts `SURVIVALOPS_WEB_BASE=https://192.0.2.10:9098/`, and checks password-free navigation, desktop/mobile layout widths, task detail drawer, search, favorites and intercepted original API calls. JavaScript syntax, Python gateway smoke/security tests, and live HTTPS availability can be checked independently. The browser test opens the console directly without a password. Do not commit credentials or unredacted screenshots.
 
 ## English operator interface (November 2026)
 
@@ -143,7 +143,7 @@ The Task Manager used to replace **every** row and the open details panel whenev
 
 **Repro proof:** the new `test_task_toggle_stability.cjs` fails on the original behavior (`Toggled card detached`) and passes after the fix. It tests scrolling at the bottom of All Tasks, switching a task on and off, a concurrent-like simulated refresh, the 390px-wide mobile inspector with independent scroll, a rejected POST, a failed polling GET, preservation of all 69 task rows, and unchanged page visibility. The full `test_browser.cjs`, `test_task_ui.cjs`, `test_task_option_hover.cjs` and `test_web_console.py` pass. The actual authenticated web UI was also used to switch `EVENT_MILESTONE_REWARDS` **false → true → false**, each confirmed by the Java backend `/api/tasks`, with the original 27 enabled tasks and engine stopped state preserved. No bot tasks, emulator settings, or Windows MSI were changed for this UI fix.
 
-Browser test: `NODE_PATH=<playwright-core node_modules> CHROME_HEADLESS_SHELL=<chromium binary> SURVIVALOPS_WEB_BASE=https://192.168.1.20:9098/ node tools/web-console/test_task_toggle_stability.cjs`. The test intercepts browser writes; it does **not** mutate live task flags.
+Browser test: `NODE_PATH=<playwright-core node_modules> CHROME_HEADLESS_SHELL=<chromium binary> SURVIVALOPS_WEB_BASE=https://192.0.2.10:9098/ node tools/web-console/test_task_toggle_stability.cjs`. The test intercepts browser writes; it does **not** mutate live task flags.
 
 ### Black task list after the second switch — visual rendering regression (2026-11-19)
 
@@ -228,10 +228,30 @@ The selected regression suite covers current Top-up tabs, two free-chest artwork
 
 ### iPhone/iPad Emulator white screen + continuous live video (2026-11-19)
 
-**The earlier 1.3-second ADB screenshot fallback was replaced the same day** because it is not live video. The original `https://192.168.1.20:8448/embed.html` native scrcpy WebSocket player requires worker OffscreenCanvas + WebCodecs and also a separately certified HTTPS origin; Safari on iPhone/iPad cannot reliably use that embedded player.
+**The earlier 1.3-second ADB screenshot fallback was replaced the same day** because it is not live video. The original `https://192.0.2.10:8448/embed.html` native scrcpy WebSocket player requires worker OffscreenCanvas + WebCodecs and also a separately certified HTTPS origin; Safari on iPhone/iPad cannot reliably use that embedded player.
 
-**Current mobile implementation:** `static/emulator-mobile.js` opens exactly ONE authenticated same-origin `GET /api/emulator/live` per active viewing session, holding it open to receive **continuous MJPEG video** (`multipart/x-mixed-replace`). It never polls screenshots or uses a refresh timer. The Python web gateway's `emulator_live.py` connects read-only to the very same Serve-Emu `wss://192.168.1.20:8448/ws?frame-meta=1` H.264 stream as the desktop player, verifies the server's SHA-256 TLS certificate fingerprint, strips Serve-Emu's 24-byte `SEMU` frame metadata, then passes the raw H.264 video to a local, lightweight FFmpeg process. FFmpeg decodes/rescales to native 720×1280 and encodes JPEG frames at about **18 fps**, which the protected existing web gateway continuously streams to iOS as one HTTP response. No second scrcpy process, no extra ADB screenshots, and **no repetitive image requests**. One mobile client generates roughly 1–2 MB/s of LAN traffic depending on scene. To protect CPU/RAM, no more than two concurrent mobile sessions can transcode; when the user navigates away or background-hides the page, its video source disconnects and the decoder is cleaned up. Browser-level network interruptions trigger an event-driven reconnect only, not periodic frame refreshes. Desktop-capable browsers continue to use the native full-speed WebSocket canvas unchanged.
+**Current mobile implementation:** `static/emulator-mobile.js` opens exactly ONE authenticated same-origin `GET /api/emulator/live` per active viewing session, holding it open to receive **continuous MJPEG video** (`multipart/x-mixed-replace`). It never polls screenshots or uses a refresh timer. The Python web gateway's `emulator_live.py` connects read-only to the very same Serve-Emu `wss://192.0.2.10:8448/ws?frame-meta=1` H.264 stream as the desktop player, verifies the server's SHA-256 TLS certificate fingerprint, strips Serve-Emu's 24-byte `SEMU` frame metadata, then passes the raw H.264 video to a local, lightweight FFmpeg process. FFmpeg decodes/rescales to native 720×1280 and encodes JPEG frames at about **18 fps**, which the protected existing web gateway continuously streams to iOS as one HTTP response. No second scrcpy process, no extra ADB screenshots, and **no repetitive image requests**. One mobile client generates roughly 1–2 MB/s of LAN traffic depending on scene. To protect CPU/RAM, no more than two concurrent mobile sessions can transcode; when the user navigates away or background-hides the page, its video source disconnects and the decoder is cleaned up. Browser-level network interruptions trigger an event-driven reconnect only, not periodic frame refreshes. Desktop-capable browsers continue to use the native full-speed WebSocket canvas unchanged.
 
 Manual input maps touch/pointer taps and swipes directly to 720×1280 coordinates and goes through the original **authenticated, same-origin** `/api/emulator/input`, which refuses actions while the Java bot is running or another controller owns the emulator. The compact status indicator and transparent overlay remain in place. The native Serve-Emu manager, settings, TrueNAS emulator, running bot, task flags and Windows MSI are unchanged. If Serve-Emu's self-signed TLS certificate is renewed, update its fingerprint pin in `emulator_live.py` after verifying the new certificate.
 
 **Verified:** Live source session returned **237 H.264 video frames in 6 seconds**; the FFmpeg decoder returned **60 real JPEG frames in 3.42 seconds** (18 fps) after removal of startup-delay FFmpeg probing flags. The authenticated mobile browser test at 390×844 confirms a 720×1280 stream, **changing image pixels 1.9 seconds apart while exactly one `/api/emulator/live` request exists**, and that navigating away disconnects the stream. It tests both tap and swipe coordinate mapping with server input requests mocked so the actual game is never touched, plus the active-bot input shield. Real production endpoint returns HTTP 401 to unauthenticated callers; `test_emulator_live.py` validates frame-meta packet parsing without network/game input. The original desktop browser regression passes. A Chromium iPhone-user-agent simulation is not a physical Safari test; if Safari is still blank, inspect its MJPEG support/client TLS handling before changing the game or bot.
+
+
+## Live emulator on desktop and mobile (19 November 2026)
+
+Both desktop (including Edge/Chrome) and iOS/mobile now use the *same-origin*
+continuous H.264-to-MJPEG stream from `/api/emulator/live` at 18 fps, rather
+than loading the third-party self-signed TLS Serve-Emu iframe on desktops.
+There is no repeated screenshot polling: a single HTTP connection streams
+changing frames from the existing scrcpy WebSocket. The previous mobile Safari
+stream, tap/swipe coordinate mapping and disconnect cleanup are retained.
+The original full Serve-Emu link remains available.
+
+The emulator controls are guarded by the real Java scheduler state. When the
+scheduler is running, the **Pause bot to control** button pauses all queues.
+Manual taps/swipes are accepted only after the active routine has completed and
+every queue reports paused; **Resume bot** returns scheduling to normal. When
+stopped, manual control is available without pausing. Concurrent external
+Task Coach uploads still temporarily block inputs. Viewing the live stream is
+never blocked; only manual input is protected. The bot is never automatically
+paused merely by opening the emulator, and never silently resumed on navigation.

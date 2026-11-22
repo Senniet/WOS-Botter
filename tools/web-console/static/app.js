@@ -1,11 +1,12 @@
-const state = { page: 'dashboard', profiles: [], tasks: [], categories: [], profileId: '', settings: [], taskSettings: [], expandedTasks: new Set(), selectedTaskId: '', taskGroup: 'all', taskFilter: 'all', taskSort: 'logical', taskStars: new Set(), taskBusy: new Set(), taskRevision: 0, status: null, emulator: null, lastError: '' };
+const validPages = new Set(['dashboard','timeline','tasks','emulator','statistics','profiles','settings','logs','qa']);
+const initialPage = location.hash.slice(1);
+const state = { page: validPages.has(initialPage) ? initialPage : 'dashboard', profiles: [], tasks: [], categories: [], profileId: '', settings: [], taskSettings: [], expandedTasks: new Set(), selectedTaskId: '', taskGroup: 'all', taskFilter: 'all', taskSort: 'logical', taskStars: new Set(), taskBusy: new Set(), taskRevision: 0, status: null, emulator: null, lastError: '' };
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const datetime = value => { if (!value) return '—'; const d = new Date(value); return Number.isNaN(+d) ? esc(value) : d.toLocaleString('en-GB', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}); };
 const plain = v => v == null || v === '' ? '—' : String(v);
 const api = async (path, method='GET', data) => {
   const response = await fetch(path, {method, credentials:'same-origin', cache:'no-store', headers:{...(data ? {'Content-Type':'application/json'} : {}), ...(method === 'POST' ? {'X-SurvivalOps-Request':'web'} : {})}, body: data ? JSON.stringify(data) : undefined});
-  if (response.status === 401) { location.reload(); throw new Error('Session expired'); }
   const result = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(result.error || 'Request failed');
   return result;
@@ -13,31 +14,34 @@ const api = async (path, method='GET', data) => {
 let noticeTimer;
 function alertUser(message, isError=false) { const el=$('notice'); el.hidden=false; el.textContent=message; el.classList.toggle('error',isError); clearTimeout(noticeTimer); noticeTimer=setTimeout(()=>el.hidden=true,5500); }
 async function action(fn, success) { try { await fn(); if (success) alertUser(success); } catch(e) { alertUser(e.message,true); } }
-function setPage(page) {
+function setPage(page, navigate=true) {
+  if(!validPages.has(page))page="dashboard";
+  if(navigate && location.hash !== "#"+page) history.pushState({page}, "", "#"+page);
   if(page!=='tasks' && state.page==='tasks'){state.selectedTaskId='';document.querySelector('.operations-tasks')?.classList.remove('has-task-detail');}
   state.page = page;
   document.body.classList.toggle('is-emulator-page', page === 'emulator');
   document.querySelectorAll('.nav-btn').forEach(btn=>btn.classList.toggle('active',btn.dataset.page===page));
   document.querySelectorAll('.page').forEach(el=>el.classList.toggle('active',el.dataset.view===page));
-  const label = {dashboard:'Overview',tasks:'Task Manager',custom:'Custom Tasks',statistics:'Statistics',emulator:'Emulator',profiles:'Profiles',settings:'Settings',logs:'Logs',qa:'Diagnostics'}[page] || page;
-  $('page-title').textContent = label; $('breadcrumb').textContent = label.toUpperCase();
+  const label = {dashboard:'Overview',timeline:'Task Timeline',tasks:'Task Manager',statistics:'Statistics',emulator:'Emulator',profiles:'Profiles',settings:'Settings',logs:'Logs',qa:'Diagnostics'}[page] || page;
+  if($('page-title'))$('page-title').textContent = label; if($('breadcrumb'))$('breadcrumb').textContent = label.toUpperCase();
   document.querySelector('.sidebar').classList.remove('open');
+  if(page==='timeline'||page==='dashboard') loadTimeline();
   if(page==='tasks') loadTasks();
-  if(page==='settings') loadSettings();
+  if(page==='settings'){loadSettings();loadRunLimit();}
   if(page==='emulator') loadDevice();
   if(page==='logs') loadLogs();
   if(page==='profiles') renderProfiles();
   if(page==='qa') loadQa();
-  if(page==='custom') loadCustom();
+
   if(page==='statistics') loadStatistics();
 }
 function updateSelects(){
-  for(const name of ['tasks-profile','settings-profile','statistics-profile']){
+  for(const name of ['tasks-profile','settings-profile','statistics-profile','timeline-profile']){
     const el=$(name), before=el.value;
     const options = state.profiles.map(p=>'<option value="'+esc(p.id)+'">'+esc(p.name)+'</option>').join('');
     el.innerHTML=(name==='settings-profile'?'<option value="">Global (Serve-Emu)</option>':'')+options;
     if([...el.options].some(o=>o.value===before)) el.value=before;
-    else if(name==='tasks-profile'||name==='statistics-profile') el.value=state.profileId || (state.profiles[0]?.id ?? '');
+    else if(name==='tasks-profile'||name==='statistics-profile'||name==='timeline-profile') el.value=state.profileId || (state.profiles[0]?.id ?? '');
   }
 }
 async function loadProfiles(){
@@ -58,27 +62,129 @@ function editProfile(id){
 }
 function engineControls(s){
  const running=!!s.running, busy=!!s.executing;
+ const queues=Array.isArray(s.queues)?s.queues:[];
+ const paused=running && queues.length>0 && queues.every(q=>q.paused===true);
+ $('start').hidden=running;
+ $('resume').hidden=!paused;
+ $('pause').hidden=!running||paused;
+ $('stop').hidden=!running;
  $('start').disabled=running;
- $('pause').disabled=!running;
- $('resume').disabled=!running;
+ $('pause').disabled=!running||paused;
+ $('resume').disabled=!running||!paused;
  $('stop').disabled=!running;
+ const controlStatus=$('bot-control-status');
+ controlStatus.dataset.state=!running?'stopped':paused?'paused':busy?'busy':'active';
+ $('bot-control-state').textContent=!running?'Stopped':paused?'Paused':busy?'Running task':'Active';
+ $('bot-control-caption').textContent=!running?'Ready to start a new session':paused?'All queues are paused':busy?'A routine is being executed':'Scheduler is waiting for the next task';
  $('metric-engine').textContent=busy?'Running':running?'Active':'Stopped';
  $('metric-engine-sub').textContent=busy?'A routine is running':running?'Scheduler active':'Start manually';
  $('queue-count').textContent=s.queues.length+' queues';
  $('queues').innerHTML=s.queues.length?s.queues.map(q=>'<div class="queue-item"><div><strong>'+esc(q.name)+'</strong><small>'+esc(q.next?'Next '+datetime(q.next):'Not scheduled')+'</small></div><span class="pill '+(q.executing?'good':'')+'">'+(q.executing?'Running':q.paused?'Paused':'Waiting')+'</span></div>').join(''):'<span class="text-muted">The scheduler is not running. Start the bot when you have an active profile.</span>';
+}
+let timelineLoading = false;
+let timelineLastRendered = '';
+let dashboardTimelineRendered = '';
+let timelineData = null;
+function timelineOutcome(outcome){
+ const choices={SUCCEEDED:['Succeeded','success'],FAILED:['Failed','failed'],
+  DEFERRED:['Deferred','waiting'],SKIPPED:['Skipped','waiting'],
+  CANCELLED:['Cancelled','waiting'],RUNNING:['Running','running'],UNKNOWN:['Outcome unknown','unknown']};
+ return choices[outcome] || choices.UNKNOWN;
+}
+function timelineRow(row, kind, schedulerRunning, schedulerPaused){
+ const stamp=kind==='history'?row.attempt_at:kind==='running'?row.last_attempt:row.next;
+ const d=stamp?new Date(stamp):null;
+ const overdue=kind==='upcoming' && d && !Number.isNaN(+d) && +d<Date.now();
+ const [label,style]=kind==='history'?timelineOutcome(row.outcome):kind==='running'?
+  ['Running','running']:schedulerPaused?['Paused','waiting']:!schedulerRunning?['Scheduler stopped','waiting']:
+  overdue?['Due / waiting','waiting']:['Scheduled','scheduled'];
+ const hint=kind==='history'?'Recorded attempt':kind==='running'?'Started at':'Next eligible run';
+ return '<div class="timeline-row '+style+'">'
+  +'<div class="timeline-time"><strong>'+esc(stamp?datetime(stamp):'Now')+'</strong><small>'+hint+'</small></div>'
+  +'<div class="timeline-task"><strong>'+esc(row.task_name||row.task_id)+'</strong></div>'
+  +'<span class="timeline-state '+style+'">'+esc(label)+'</span></div>';
+}
+function renderTimeline(){
+ const data=timelineData;
+ if(!data)return;
+ const profileId=$('timeline-profile').value;
+ const queue=state.status?.queues?.find(q=>String(q.profileId)===profileId);
+ const engineRunning=!!queue && !!state.status?.running;
+ const paused=!!queue?.paused;
+ const historyOrder=$('timeline-history-order').value;
+ const key=JSON.stringify([profileId,data.running,data.upcoming,data.overdue,data.unscheduled,data.recent,
+  historyOrder,engineRunning,paused,Math.floor(Date.now()/60000)]);
+ $('timeline-sync').textContent=new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+ if(timelineLastRendered===key)return;
+ timelineLastRendered=key;
+ $('timeline-running-count').textContent=data.running.length;
+ $('timeline-scheduled-count').textContent=data.upcoming.length+(data.overdue||[]).length;
+ $('timeline-history-count').textContent=data.recent.length+(data.recent.length===100?'+':'');
+ $('timeline-upcoming-count').textContent=((data.overdue||[]).length+data.upcoming.length)+' queued';
+ $('timeline-running-section').hidden=data.running.length===0;
+ $('timeline-running').innerHTML=data.running.map(row=>timelineRow(row,'running',engineRunning,paused)).join('');
+ const upcoming=$('timeline-upcoming'), history=$('timeline-history');
+ const upScroll=upcoming.scrollTop, histScroll=history.scrollTop;
+ const dueRows=data.overdue||[];
+ const queueRows=[...dueRows.map(r=>({...r,ready:true})),...data.upcoming];
+ upcoming.innerHTML=queueRows.length?queueRows.map(row=>{
+   const label=row.ready?'Ready to run':datetime(row.next);
+   return '<div class="timeline-row '+(row.ready?'waiting':'scheduled')+'"><div class="timeline-time"><strong>'+esc(label)+'</strong><small>'+(row.ready?'Waiting for scheduler':'Eligible from')+'</small></div><div class="timeline-task"><strong>'+esc(row.task_name||row.task_id)+'</strong></div><span class="timeline-state '+(row.ready?'waiting':'scheduled')+'">'+(row.ready?'Ready':'Queued')+'</span></div>';
+ }).join(''):'<div class="timeline-empty">No tasks waiting in the current scheduler queue.</div>';
+ const recent=historyOrder==='oldest'?[...data.recent].reverse():data.recent;
+ history.innerHTML=recent.length?recent.map(row=>timelineRow(row,'history',engineRunning,paused)).join(''):
+  '<div class="timeline-empty">No task attempts have been observed yet.</div>';
+ upcoming.scrollTop=upScroll;history.scrollTop=histScroll;
+ const unscheduled=$('timeline-unscheduled');
+ unscheduled.hidden=!data.unscheduled.length;
+ if(data.unscheduled.length){
+  unscheduled.textContent=data.unscheduled.length+' enabled routine(s) are waiting for their first schedule: '+
+   data.unscheduled.map(t=>t.task_name).join(', ');
+ }
+}
+function renderDashboardTimeline(data){
+ const relevant=[...data.running.map(row=>({...row,running:true})),...(data.overdue||[]).map(row=>({...row,overdue:true})),...data.upcoming].slice(0,8);
+ const key=JSON.stringify(relevant);
+ if(key===dashboardTimelineRendered)return;
+ dashboardTimelineRendered=key;
+ $('dashboard-timeline').innerHTML=relevant.length?relevant.map(row=>
+  '<div class="dashboard-timeline-row"><span class="dashboard-timeline-time">'+esc(row.running?'NOW':row.overdue?'READY':datetime(row.next))+'</span>'+
+  '<strong>'+esc(row.task_name)+'</strong><span class="dashboard-timeline-state">'+(row.running?'Running':row.overdue?'Due / waiting':'Scheduled')+'</span></div>'
+ ).join(''):'<p class="timeline-empty">No enabled routines are currently scheduled.</p>';
+}
+async function loadTimeline(){
+ if(timelineLoading||!['timeline','dashboard'].includes(state.page))return;
+ const profileId=state.page==='dashboard'?state.profileId:$('timeline-profile').value;
+ if(!profileId)return;
+ timelineLoading=true;
+ try{
+  const data=await api('/api/timeline?profile='+encodeURIComponent(profileId));
+  if(state.page==='dashboard'&&state.profileId===profileId){renderDashboardTimeline(data);return;}
+  if(state.page!=='timeline'||$('timeline-profile').value!==profileId)return;
+  timelineData=data;
+  $('timeline-error').hidden=true;
+  renderTimeline();
+ }catch(error){
+  if(state.page==='dashboard'){$('dashboard-timeline').textContent='Schedule temporarily unavailable: '+error.message;dashboardTimelineRendered='';}
+  else {$('timeline-error').textContent='Timeline temporarily unavailable: '+error.message;$('timeline-error').hidden=false;}
+ }finally{timelineLoading=false;}
 }
 async function loadStatus(){
   try{
     state.status=await api('/api/status');
     engineControls(state.status);
     updateEmulatorInputSafety();
-    $('connection').textContent='Connected'; $('connection').className='pill good';
+
     $('side-status').textContent='Engine connected';document.querySelector('.status-led').classList.add('on');
     $('last-sync').textContent='Updated '+new Date().toLocaleTimeString('en-GB');
   }catch(e){
-    $('connection').textContent='Offline';$('connection').className='pill bad';
+
     $('side-status').textContent='Engine offline';document.querySelector('.status-led').classList.remove('on');
     $('metric-engine').textContent='Offline';
+    $('bot-control-status').dataset.state='offline';
+    $('bot-control-state').textContent='Offline';
+    $('bot-control-caption').textContent='Connection to the scheduler unavailable';
+    for(const id of ['start','pause','resume','stop'])$(id).disabled=true;
   }
 }
 // Task-specific controls reuse the real MSI ConfigurationKeyEnum keys and profile database.
@@ -118,7 +224,50 @@ const taskOptionPrefixes = {
 const taskOptionChoices = {
  HEAL_BATCH_MODE_STRING:['Full - Quick Select','Small - Current selection']
 };
+// Actual Java interval settings; other tasks have optional minimum gaps.
+const taskNativeRepeatKeys = {
+ ALLIANCE_CHESTS:'ALLIANCE_CHESTS_OFFSET_INT',
+ ALLIANCE_TECH:'ALLIANCE_TECH_OFFSET_INT',
+ ALLIANCE_TRIUMPH:'ALLIANCE_TRIUMPH_OFFSET_INT',
+ CITY_SURVIVORS:'CITY_ACCEPT_NEW_SURVIVORS_OFFSET_INT',
+ ONLINE_REWARDS:'ONLINE_REWARDS_CHECK_INTERVAL_INT',
+ FREE_DAILY_CHESTS:'FREE_DAILY_CHESTS_INTERVAL_INT',
+ SMART_DAILY_OVERVIEW:'SMART_DAILY_OVERVIEW_INTERVAL_INT',
+ GROWTH_MISSION_REWARDS:'GROWTH_REWARDS_CHECK_INTERVAL_INT',
+ EVENT_MILESTONE_REWARDS:'EVENT_MILESTONE_CHECK_INTERVAL_INT',
+ DAILY_MISSIONS:'DAILY_MISSION_OFFSET_INT',
+ MAIL_REWARDS:'MAIL_REWARDS_OFFSET_INT',
+ LIFE_ESSENCE:'LIFE_ESSENCE_OFFSET_INT',
+ LIFE_ESSENCE_CARING:'ALLIANCE_LIFE_ESSENCE_OFFSET_INT',
+ EXPLORATION_CHEST:'INT_EXPLORATION_CHEST_OFFSET',
+};
+const taskRepeatGapKey=id=>'TASK_REPEAT_GAP_'+id+'_INT';
+function taskSchedulingEditor(task,settings){
+ const nativeKey=taskNativeRepeatKeys[task.id];
+ const native=nativeKey?settings.find(s=>s.key===nativeKey):null;
+ const gap=settings.find(s=>s.key===taskRepeatGapKey(task.id));
+ if(!native&&!gap)return '<div class="work-schedule-not-supported">This routine follows a game or event schedule. Use Schedule for a manual one-time run.</div>';
+ const setting=native||gap;
+ const id='option-'+task.id+'-'+setting.key;
+ const automatic=gap&&String(gap.value)==='0';
+ const label=native?'Regular check interval':'Minimum gap between attempts';
+ const help=task.id==='DAILY_MISSIONS'
+  ?'Fallback check when other tasks have not triggered a Daily Missions refresh. The switch below can requeue it immediately after verified progress from other routines. 120 minutes is a reasonable starting point.'
+  :native
+  ?'Changes how often the routine normally checks again. Game cooldowns, daily limits, stamina and error backoffs can still postpone its next run.'
+  :'0 = Automatic (original scheduling). A custom minimum delays checks that would otherwise happen sooner. It never overrides longer game cooldowns.';
+ return '<div class="task-repeat-editor"><label class="option-name" for="'+esc(id)+'">'+esc(label)+'</label>'
+  +'<div class="task-repeat-input"><input type="number" min="'+(gap?0:5)+'" max="10080" step="1" inputmode="numeric" '
+  +'id="'+esc(id)+'" data-task-value="'+esc(setting.key)+'" data-task-owner="'+esc(task.id)+'" value="'+esc(setting.value)+'" aria-describedby="repeat-help-'+esc(task.id)+'">'
+  +'<span>minutes</span><button type="button" class="secondary small" data-save-task-value="'+esc(setting.key)+'" data-task-owner="'+esc(task.id)+'">Save</button></div>'
+  +'<p class="work-repeat-help" id="repeat-help-'+esc(task.id)+'">'+esc(help)+'</p>'
+  +(gap?'<div class="work-repeat-status">'+(automatic?'Automatic':esc(setting.value)+' min minimum')+'</div>':'')
+  +'</div>';
+}
 const taskOptionLabels = {
+ DAILY_MISSION_AUTO_SCHEDULE_BOOL:'Check immediately after daily mission progress',
+ DAILY_MISSION_OFFSET_INT:'Regular fallback check interval (minutes)',
+ LIFE_ESSENCE_BUY_WEEKLY_SCROLL_BOOL:'Claim the free weekly My Island scroll (optional)',
  ENDLESS_TRIAL_TARGET_ATTACKS_INT:'Daily Windhowler attacks (max 3)',
  ONLINE_REWARDS_CHECK_INTERVAL_INT:'Check interval (minutes)',
  FREE_DAILY_CHESTS_INTERVAL_INT:'Free chest check interval (minutes)',
@@ -136,9 +285,17 @@ const taskOptionLabels = {
  "GATHER_DOWNGRADE_LEVEL_BOOL": "Try lower-level nodes if necessary",
  "GATHER_NO_HERO_FALLBACK_BOOL": "Allow gathering without heroes",
  "CITY_UPGRADE_DOUBLE_TIME_BOOL": "Use double construction speed bonus",
+ "CITY_UPGRADE_USE_OWNED_RESOURCE_ITEMS_BOOL": "Use available resource packs from inventory",
+ "CITY_UPGRADE_ALLOW_GEM_SPENDING_BOOL": "Allow buying only missing resources with diamonds",
+ "CITY_UPGRADE_GEM_DAILY_LIMIT_INT": "Maximum diamonds per day for City Upgrade (default 100)",
  "CITY_UPGRADE_RESERVE_PRODUCTION_BOOL": "Preserve production bonus",
  "ARENA_TASK_ATTACK_QUICK_DEPLOY_BOOL": "Quick deploy for Arena attacks",
  "ARENA_TASK_REFRESH_WITH_GEMS_BOOL": "Refresh Arena opponents with Gems",
+ "ARENA_ALLOW_GEM_SPENDING_BOOL": "Allow spending diamonds in Arena (off by default)",
+ "GATHER_SPEED_ALLOW_GEM_SPENDING_BOOL": "Allow spending diamonds on Gathering Speed Boost",
+ "TUNDRA_TRUCK_ALLOW_GEM_SPENDING_BOOL": "Allow spending diamonds on Tundra Truck refresh",
+ "NOMADIC_MERCHANT_ALLOW_GEM_SPENDING_BOOL": "Allow spending diamonds in Nomadic Merchant",
+ "ALLIANCE_MOBILIZATION_ALLOW_GEM_SPENDING_BOOL": "Allow diamond-spending tasks in Alliance Mobilization",
  "ALLIANCE_AUTOJOIN_QUEUES_INT": "Rally queues (1–6)",
  "ALLIANCE_AUTOJOIN_USE_ALL_TROOPS_BOOL": "Use all available troops (off: specific formation)",
  "INTEL_RECALL_GATHER_TROOPS_BOOL": "Recall gatherers for Intel",
@@ -373,10 +530,10 @@ const workGroups=[
  {id:'daily',name:'Daily Tasks',icon:'◷',description:'Daily rewards and routine checks',ids:['DAILY_MISSIONS','MAIL_REWARDS','STOREHOUSE_CHEST','INTEL','CITY_SURVIVORS','SMART_DAILY_OVERVIEW','ONLINE_REWARDS','FREE_DAILY_CHESTS','GROWTH_MISSION_REWARDS']},
  {id:'city',name:'City & Development',icon:'⌂',description:'Construction, research and Chief Orders',ids:['CITY_UPGRADE_FURNACE','CITY_UPGRADE_PRIORITISE_FURNACE','RESEARCH','CHIEF_ORDER_RUSH_JOB','CHIEF_ORDER_URGENT_MOBILIZATION','CHIEF_ORDER_PRODUCTIVITY_DAY']},
  {id:'army',name:'Troops',icon:'♜',description:'Training and healing',ids:['TRAINING_TROOPS','HEAL_TROOPS']},
- {id:'world',name:'World Map',icon:'◇',description:'Gathering, hunting and marches',ids:['GATHER_RESOURCES','GATHER_BOOST','BEAST_HUNTING','EVENT_POLAR_TERROR','EVENT_BERSERK_CRYPTID']},
+ {id:'world',name:'World Map',icon:'◇',description:'Gathering, hunting and marches',ids:['GATHER_RESOURCES','GATHER_BOOST','BEAST_HUNTING','LIFE_ESSENCE','EVENT_POLAR_TERROR','EVENT_BERSERK_CRYPTID']},
  {id:'heroes',name:'Heroes & Exploration',icon:'✧',description:'Recruitment, Arena and exploration',ids:['HERO_RECRUITMENT','ARENA','DO_EXPLORATION','EXPLORATION_CHEST','LABYRINTH','EXPERT_AGNES_INTEL','EXPERT_ROMULUS_TAG','EXPERT_ROMULUS_TROOPS','EXPERT_SKILL_TRAINING']},
  {id:'alliance',name:'Alliance',icon:'⚑',description:'Helps, contributions, rallies and shops',ids:['ALLIANCE_AUTOJOIN','ALLIANCE_HELP_REQUEST','ALLIANCE_TECH','ALLIANCE_CHESTS','ALLIANCE_TRIUMPH','ALLIANCE_CHAMPIONSHIP','ALLIANCE_MOBILIZATION','ALLIANCE_PET_TREASURE','ALLIANCE_SHOP','LIFE_ESSENCE_CARING']},
- {id:'rewards',name:'Shops & Extras',icon:'▤',description:'Merchants, VIP and pets',ids:['SHOP_MYSTERY','NOMADIC_MERCHANT','VIP_POINTS','BANK','CRYSTAL_LABORATORY','WAR_ACADEMY','LIFE_ESSENCE','PET_SKILLS','PET_ADVENTURE']},
+ {id:'rewards',name:'Shops & Extras',icon:'▤',description:'Merchants, VIP and pets',ids:['SHOP_MYSTERY','NOMADIC_MERCHANT','VIP_POINTS','BANK','CRYSTAL_LABORATORY','WAR_ACADEMY','PET_SKILLS','PET_ADVENTURE']},
  {id:'events',name:'Events',icon:'✳',description:'Limited-time and special events',ids:['BEAR_TRAP','EVENT_TUNDRA_TRUCK','FISHING_MINIGAME','EVENT_HERO_MISSION','EVENT_JOURNEY_OF_LIGHT','EVENT_MYRIAD_BAZAAR','ENDLESS_TRIAL','EVENT_MILESTONE_REWARDS','MERCENARY_EVENT','TREK_AUTOMATION','TREK_SUPPLIES']},
  {id:'system',name:'System & Tests',icon:'⌘',description:'Technical and support routines',ids:['INITIALIZE','CREATE_CHARACTER','SKIP_TUTORIAL','DUMMY_TASK','TEST_HOOK_LOOP','CUSTOM_TASK','GAME_ANALYTICS_LABYRINTH','GAME_ANALYTICS_POWER']}
 ];
@@ -411,12 +568,12 @@ const workLabels = {
   "Welcome new Survivors and assign them to buildings."
  ],
  "CITY_UPGRADE_FURNACE": [
-  "Furnace Upgrade",
-  "Upgrade the Furnace and complete its prerequisites."
+  "City Upgrade",
+  "Upgrade any eligible game-recommended city building using available construction slots. When Furnace Priority is enabled, reserve the first slot for Furnace progression."
  ],
  "CITY_UPGRADE_PRIORITISE_FURNACE": [
   "Prioritize Furnace",
-  "Give Furnace construction the highest priority."
+  "Use Furnace-first construction: accept only Furnace or positively identified prerequisite-chain buildings (Embassy, troop camps and Research Center) when recommended by the game's construction queue. Skip unrelated buildings. Exact next-level requirements still require in-game confirmation."
  ],
  "RESEARCH": [
   "Research",
@@ -535,7 +692,7 @@ const workLabels = {
   "Purchase items using your configured preferences."
  ],
  "LIFE_ESSENCE_CARING": [
-  "Life Essence · Alliance",
+  "Alliance Life Essence",
   "Visit allied Trees of Life from the World map and collect free Life Essence. Works without your own island; up to 3 caring actions daily."
  ],
  "SHOP_MYSTERY": [
@@ -563,8 +720,8 @@ const workLabels = {
   "Process War Academy rewards."
  ],
  "LIFE_ESSENCE": [
-  "Life Essence",
-  "Care for pets and optionally use Pet Skill Scrolls."
+  "Life Essence · My Island",
+  "Collect Life Essence from green-leaf markers on your own island. Optionally claim the verified free weekly scroll and like the island. Requires My Island to be unlocked; separate from Pet Skills and alliance Tree of Life caring."
  ],
  "PET_SKILLS": [
   "Pet Skills",
@@ -655,7 +812,7 @@ const workAliases = {
  "GATHER_BOOST": "gather speed buff boost",
  "HEAL_TROOPS": "heal healing infirmary wounded",
  "TRAINING_TROOPS": "train training infantry marksmen lancers",
- "CITY_UPGRADE_FURNACE": "furnace build upgrade construction",
+ "CITY_UPGRADE_FURNACE": "city buildings generic upgrade construction",
  "CITY_SURVIVORS": "survivors welcome allocate assign workers",
  "ALLIANCE_AUTOJOIN": "rally rallies join alliance autojoin",
  "ALLIANCE_TECH": "contribution technology alliance tech",
@@ -664,7 +821,7 @@ const workAliases = {
  "EVENT_TUNDRA_TRUCK": "tundra truck event",
  "ARENA": "arena challenges chest rewards",
  "INTEL": "lighthouse intel hero journey beast",
- "LIFE_ESSENCE": "life essence pet care",
+ "LIFE_ESSENCE": "life essence my island own island collect green leaf tree essence weekly scroll",
  "FISHING_MINIGAME": "fishing tournament casts",
  "BEAR_TRAP": "bear trap rally event"
 };
@@ -852,7 +1009,9 @@ function renderTaskDetail(){
  if(!t){$('task-detail-content').innerHTML='<div class="work-empty-detail"><span>↗</span><strong>Select a routine</strong><p>Open a routine to view its settings, schedule and latest result.</p></div>';return;}
  const status=workStatus(t),group=workGroups.find(g=>g.id===workGroup(t));
  const settings=taskBehavior(t);
- const booleans=settings.filter(s=>s.type==='Boolean'), values=settings.filter(s=>s.type!=='Boolean');
+ const specialKeys=[taskNativeRepeatKeys[t.id],taskRepeatGapKey(t.id)];
+ const booleans=settings.filter(s=>s.type==='Boolean');
+ const values=settings.filter(s=>s.type!=='Boolean'&&!specialKeys.includes(s.key));
  const optionSection=(title,items)=>items.length?'<div class="work-option-section"><h4>'+esc(title)+'</h4><div class="task-option-grid">'+items.map(s=>optionControl(t,s)).join('')+'</div></div>':'';
  const last=t.lastAttempt?'Last attempt: '+datetime(t.lastAttempt):'No execution recorded';
  const successful=t.lastSuccess?'Last success: '+datetime(t.lastSuccess):'No success recorded';
@@ -863,6 +1022,8 @@ function renderTaskDetail(){
    +'<div class="work-detail-activation"><div><strong>'+(t.id==='ALLIANCE_AUTOJOIN'?'Keep in-game Auto-Join enabled':'Run automatically')+'</strong><small>'+(t.id==='ALLIANCE_AUTOJOIN'?'When the bot runs this task, it starts or checks Auto-Join in the game. Switching this on does not activate it instantly.':'Runs when the bot is active and this routine is due.')+'</small></div><label class="work-main-toggle"><input type="checkbox" data-task-toggle="'+esc(t.id)+'" aria-label="'+(t.id==='ALLIANCE_AUTOJOIN'?'Schedule in-game Auto-Join activation':'Run routine automatically')+'" '+(t.enabled?'checked ':'')+(t.toggleable?'':'disabled ')+(state.taskBusy.has(t.id)?'disabled ':'')+'><span></span></label></div>'
    +'<div class="work-detail-actions"><button type="button" class="primary" data-run-task="'+esc(t.id)+'" '+(!t.enabled?'disabled ':'')+'>▶ Run Now</button><button type="button" class="secondary" data-schedule-task="'+esc(t.id)+'" '+(!t.enabled?'disabled ':'')+'>◷ Schedule</button></div>'
    +'<div class="work-detail-block"><h4>EXECUTION</h4><dl><div><dt>Last attempt</dt><dd>'+esc(t.lastAttempt?datetime(t.lastAttempt):'Never')+'</dd></div><div><dt>Last success</dt><dd>'+esc(t.lastSuccess?datetime(t.lastSuccess):'Never')+'</dd></div><div><dt>Next run</dt><dd>'+esc(t.next?datetime(t.next):'Not scheduled')+'</dd></div></dl>'+(t.outcome==='FAILED'&&t.detail?'<p class="work-error-detail">'+esc(t.detail.slice(0,500))+'</p>':'')+'</div>'
+   +'<div class="work-detail-options work-repeat-section"><div class="work-detail-section-head"><h4>REPEAT & SCHEDULING</h4></div>'
+   +taskSchedulingEditor(t,state.taskSettings)+'</div>'
    +'<div class="work-detail-options" data-task-options="'+esc(t.id)+'"><div class="work-detail-section-head"><h4>BEHAVIOR & OPTIONS</h4><span>'+options+' options</span></div>'
    +(t.id==='ALLIANCE_AUTOJOIN'?'<p class="work-no-options">The game joins rallies automatically after Auto-Join is activated. This routine does not manually join individual rallies. Choose the number of rally queues and whether to use all troops or the game’s specific formation.</p>':'')
    +(settings.length?optionSection('Switches',booleans)+optionSection('Values and Limits',values):'<p class="work-no-options">This routine has no additional options. Use the switch above to enable or disable it.</p>')
@@ -873,11 +1034,28 @@ function clearTaskFilters(){
 }
 
 async function saveTaskOption(key,value,profileId){
+ if(key.startsWith('TASK_REPEAT_GAP_')){
+  const n=Number(value);
+  if(!Number.isSafeInteger(n)||(n!==0&&(n<5||n>10080))) throw new Error('Minimum gap: choose 0 (Automatic) or 5–10080 minutes.');
+ }
+ if(Object.values(taskNativeRepeatKeys).includes(key)){
+  const n=Number(value);
+  if(!Number.isSafeInteger(n)||n<5||n>10080) throw new Error('Check interval: choose 5–10080 minutes.');
+ }
  await api('/api/setting','POST',{profileId,key,value});
  if(profileId===state.profileId){
   const s=state.taskSettings.find(s=>s.key===key);if(s)s.value=value;
  }
  alertUser('Routine option saved');
+}
+async function loadRunLimit(){
+ try{
+  const x=await api('/api/run-limit');
+  $('runtime-enabled').checked=x.enabled;
+  $('runtime-minutes').value=x.maxMinutes;
+  $('runtime-rest-minutes').value=x.restMinutes;
+  $('runtime-status').textContent=x.restUntil?'Rest until '+datetime(x.restUntil)+(x.pendingClose?' · waiting for game to close':''):x.startedAt?'Session running since '+datetime(x.startedAt):'No active session observed';
+ }catch(e){$('runtime-status').textContent='Could not load run limit: '+e.message;}
 }
 async function loadSettings(){
  try {state.settings=await api('/api/settings'+($('settings-profile').value?'?profile='+encodeURIComponent($('settings-profile').value):''));renderSettings(); }
@@ -889,15 +1067,43 @@ function renderSettings(){
  const essentials=new Set(['CURRENT_EMULATOR_STRING','SERVE_EMU_ADB_ENDPOINTS_STRING',
   'AUTO_START_ENABLED_BOOL','AUTO_START_DELAY_MINUTES_INT','IDLE_BEHAVIOR_STRING',
   'STOP_BEHAVIOR_STRING','MAX_IDLE_TIME_INT','BOOL_DEBUG',
-  'LAN_DIAGNOSTICS_ENABLED_BOOL','LAN_DIAGNOSTICS_SCREENSHOTS_BOOL']);
- const arr=state.settings.filter(s=>(advanced||search||essentials.has(s.key))&&
+  'LAN_DIAGNOSTICS_ENABLED_BOOL','LAN_DIAGNOSTICS_SCREENSHOTS_BOOL',
+  'ONLINE_REWARDS_CHECK_INTERVAL_INT','FREE_DAILY_CHESTS_INTERVAL_INT',
+  'SMART_DAILY_OVERVIEW_INTERVAL_INT','GROWTH_REWARDS_CHECK_INTERVAL_INT',
+  'EVENT_MILESTONE_CHECK_INTERVAL_INT','DAILY_MISSION_AUTO_SCHEDULE_BOOL']);
+ // Per-task repeat controls live in Task Manager, not as 40 raw
+ // technical fields on the global Settings page.
+ const arr=state.settings.filter(s=>!s.key.startsWith('TASK_REPEAT_GAP_')&&
+    (advanced||search||essentials.has(s.key))&&
     (!search||s.key.toLowerCase().includes(search))&&(!type||s.type===type));
- $('settings-list').innerHTML=arr.map(s=>{
+ const friendlySettingName=(key)=>{
+  const aliases={
+   ONLINE_REWARDS_CHECK_INTERVAL_INT:'Online Rewards · Check interval (minutes)',
+   FREE_DAILY_CHESTS_INTERVAL_INT:'Free Daily Chests · Check interval (minutes)',
+   SMART_DAILY_OVERVIEW_INTERVAL_INT:'Daily Overview · Check interval (minutes)',
+   GROWTH_REWARDS_CHECK_INTERVAL_INT:'Growth Rewards · Check interval (minutes)',
+   EVENT_MILESTONE_CHECK_INTERVAL_INT:'Event Milestones · Check interval (minutes)',
+   DAILY_MISSION_AUTO_SCHEDULE_BOOL:'Daily Missions · Automatic scheduling',
+   AUTO_START_ENABLED_BOOL:'Start scheduler automatically',
+   AUTO_START_DELAY_MINUTES_INT:'Automatic start delay (minutes)',
+   STOP_BEHAVIOR_STRING:'Action when scheduler stops',
+   IDLE_BEHAVIOR_STRING:'Action while scheduler is idle',
+   MAX_IDLE_TIME_INT:'Maximum idle time',
+   CURRENT_EMULATOR_STRING:'Selected emulator',
+   SERVE_EMU_ADB_ENDPOINTS_STRING:'Serve-Emu ADB connection',
+   LAN_DIAGNOSTICS_ENABLED_BOOL:'Enable LAN diagnostics',
+   LAN_DIAGNOSTICS_SCREENSHOTS_BOOL:'Save diagnostic screenshots',
+   BOOL_DEBUG:'Debug logging'};
+  return aliases[key]||key.replace(/_(BOOL|INT|STRING)$/,'').replace(/_/g,' ').toLowerCase().replace(/\b\w/g,c=>c.toUpperCase());
+ };
+ const categoryFor=(key)=>{if(/EMULATOR|ADB|SERVE_EMU|DEVICE|RESOLUTION/.test(key))return 'Emulator & Connection';if(/SCHEDULE|AUTO_START|IDLE|STOP_BEHAVIOR|INTERVAL|TIMER/.test(key))return 'Scheduling & Runtime';if(/DIAGNOSTIC|DEBUG|LOG|SCREENSHOT|OCR|TEMPLATE/.test(key))return 'Diagnostics & Recognition';if(/ALLIANCE|RESEARCH|HERO|TROOP|CITY|ARENA|MAIL|REWARD|EXPLO|EVENT|FISHING|PET|CHEST|INTEL/.test(key))return 'Routine Behavior';return 'General & Advanced';};
+ const groups=Object.groupBy ? Object.groupBy(arr,s=>categoryFor(s.key)) : arr.reduce((a,s)=>{(a[categoryFor(s.key)]??=[]).push(s);return a;},{});
+ $('settings-list').innerHTML=Object.entries(groups).map(([category,items])=>'<div class="setting-group"><h3>'+esc(category)+' <span>('+items.length+')</span></h3>'+items.map(s=>{
    const id='setting-'+s.key;
    const field=s.type==='Boolean'?'<select data-setting-value="'+esc(s.key)+'"><option value="true" '+(s.value==='true'?'selected':'')+'>On</option><option value="false" '+(s.value==='false'?'selected':'')+'>Off</option></select>':
      '<input data-setting-value="'+esc(s.key)+'" '+(s.secret?'type="password" autocomplete="new-password" placeholder="New value (current value hidden)"':'type="'+(s.type==='Integer'?'number':'text')+'" value="'+esc(s.value)+'"')+' >';
-   return '<div class="setting-row"><label for="'+id+'">'+esc(s.key)+'<small>'+esc(s.type)+(s.secret?' · protected':'')+'</small></label>'+field+'<button class="secondary small" data-save-setting="'+esc(s.key)+'">Save</button></div>';
- }).join('')||'<div class="panel-content text-muted">No settings found.</div>';
+   return '<div class="setting-row"><label for="'+id+'">'+esc(friendlySettingName(s.key))+'<small>'+(advanced?esc(s.key):'')+(s.secret?'Protected setting':'')+'</small></label>'+field+'<button class="secondary small" data-save-setting="'+esc(s.key)+'">Save</button></div>';
+ }).join('')+'</div>').join('')||'<div class="panel-content text-muted">No settings found.</div>';
 }
 async function saveSetting(key){
  const input=[...document.querySelectorAll('[data-setting-value]')].find(i=>i.dataset.settingValue===key);
@@ -906,21 +1112,43 @@ async function saveSetting(key){
  if(input.type==='password')input.value='';
  alertUser('Setting saved: '+key);
 }
+function emulatorManualState(status=state.status, emulator=state.emulator){
+ const queues=Array.isArray(status?.queues)?status.queues:[];
+ const executing=Boolean(status?.executing || queues.some(q=>q.executing));
+ const running=Boolean(status?.running);
+ const paused=running && queues.length>0 && queues.every(q=>q.paused===true);
+ const external=Boolean(emulator?.externalControllerLikelyActive);
+ return {running,executing,paused,external,
+  blocked:!status || executing || (running&&!paused) || external};
+}
 function updateEmulatorInputSafety(){
  const shield=$('emu-input-shield'),frame=$('emu-live');
- if(!shield||!frame)return;
- const busy=Boolean(state.status?.running||state.status?.executing);
- const external=Boolean(state.emulator?.externalControllerLikelyActive);
- const blocked=busy||external;
- shield.hidden=!blocked;
- frame.inert=blocked;
- frame.style.pointerEvents=blocked?'none':'auto';
- frame.tabIndex=blocked?-1:0;
- if(blocked)frame.blur();
- if(blocked){
-  shield.querySelector('strong').textContent=busy?'Bot is controlling the emulator':'Another controller may be active';
-  shield.querySelector('span:last-child').textContent=busy?'Stop automation to use the screen here.':'Manual control is temporarily paused while another session uses Serve-Emu.';
- }
+ const status=$('emu-control-status'),statusText=$('emu-control-status-text');
+ const deviceLabel=$('emu-device-label'),toggle=$('emu-manual-toggle');
+ if(!shield||!frame||!status||!statusText||!deviceLabel||!toggle)return;
+ const mode=emulatorManualState();
+ // Keep video visible regardless of the scheduler; block only input.
+ shield.hidden=!mode.blocked;
+ status.hidden=!(mode.blocked||mode.paused);
+ deviceLabel.hidden=mode.blocked||mode.paused;
+ statusText.textContent=mode.external
+  ?'Another controller is active · manual control paused'
+  :mode.executing
+   ?'A routine is running · manual control paused'
+   :mode.running&&!mode.paused
+    ?'Scheduler active · pause bot to control'
+    :mode.paused
+     ?'Scheduler paused · manual control enabled'
+     :'Engine unavailable · manual control paused';
+ toggle.hidden=!mode.running;
+ toggle.disabled=mode.executing||mode.external;
+ toggle.textContent=mode.paused?'Resume bot':'Pause bot to control';
+ // Native iframe is disabled in favor of the working same-origin live player,
+ // but keep its focus guard for any future native-stream opt-in.
+ frame.inert=mode.blocked;
+ frame.style.pointerEvents=mode.blocked?'none':'auto';
+ frame.tabIndex=mode.blocked?-1:0;
+ if(mode.blocked)frame.blur();
 }
 async function loadDevice(){
  try {
@@ -1114,7 +1342,15 @@ document.addEventListener('dragend',()=>{
  document.querySelectorAll('.is-dragged').forEach(el=>el.classList.remove('is-dragged'));
 });
 document.querySelectorAll('.nav-btn').forEach(btn=>btn.addEventListener('click',()=>setPage(btn.dataset.page)));
+window.addEventListener('popstate',()=>setPage(location.hash.slice(1),false));
+window.addEventListener('hashchange',()=>setPage(location.hash.slice(1),false));
+$('theme-toggle').addEventListener('click',()=>{const next=document.documentElement.dataset.theme==='light'?'dark':'light';document.documentElement.dataset.theme=next;localStorage.setItem('survivalops-theme',next);$('theme-toggle').textContent=next==='light'?'☾ Dark':'☀ Light';});
+const savedTheme=localStorage.getItem('survivalops-theme')||'dark';document.documentElement.dataset.theme=savedTheme;$('theme-toggle').textContent=savedTheme==='light'?'☾ Dark':'☀ Light';
+$('timeline-refresh').addEventListener('click',()=>{timelineLastRendered='';loadStatus().then(loadTimeline);});
+$('runtime-save').addEventListener('click',()=>action(async()=>{await api('/api/run-limit','POST',{enabled:$('runtime-enabled').checked,maxMinutes:Number($('runtime-minutes').value),restMinutes:Number($('runtime-rest-minutes').value)});await loadRunLimit();},'Run and rest schedule saved'));
 $('custom-refresh').addEventListener('click',loadCustom);
+$('timeline-profile').addEventListener('change',()=>{timelineData=null;timelineLastRendered='';loadTimeline();});
+$('timeline-history-order').addEventListener('change',()=>{timelineLastRendered='';renderTimeline();});
 $('statistics-profile').addEventListener('change',loadStatistics);
 $('statistics-refresh').addEventListener('click',loadStatistics);
 $('statistics-reset').addEventListener('click',()=>{
@@ -1171,7 +1407,12 @@ $('custom-task-list').addEventListener('submit',e=>{
  },'Custom task saved');
 });
 $('mobile-menu').addEventListener('click',()=>document.querySelector('.sidebar').classList.toggle('open'));
-$('logout').addEventListener('click',async()=>{try{await api('/api/logout','POST',{});}finally{location.replace('/');}});
+$('emu-manual-toggle').addEventListener('click',()=>action(async()=>{
+ const mode=emulatorManualState();
+ if(mode.executing||mode.external||!mode.running)return;
+ await api('/api/engine','POST',{action:mode.paused?'resume':'pause'});
+ await loadStatus();
+},emulatorManualState().paused?'Bot resumed':'Bot paused for manual control'));
 for(const [name, actionName] of [['start','start'],['pause','pause'],['resume','resume'],['stop','stop']]) {
  $(name).addEventListener('click',()=>action(async()=>{await api('/api/engine','POST',{action:actionName});await loadStatus();await loadProfiles();},'Bot: '+actionName));
 }
@@ -1183,15 +1424,6 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&state.page==='tasks
 $('settings-profile').addEventListener('change',loadSettings);
 for(const id of ['settings-search','settings-type','settings-advanced']) $(id).addEventListener(id==='settings-search'?'input':'change',renderSettings);
 $('profile-new').addEventListener('click',()=>{$('profile-form').reset();$('profile-id').value='';});
-$('password-form').addEventListener('submit',e=>{
- e.preventDefault();
- const current=$('password-current').value,newPassword=$('password-new').value;
- if(newPassword!==$('password-confirm').value){alertUser('New passwords do not match',true);return;}
- action(async()=>{
-  await api('/api/change-password','POST',{current,new:newPassword});
-  location.replace('/');
- });
-});
 $('profile-form').addEventListener('submit',e=>{e.preventDefault();action(async()=>{
  const id=$('profile-id').value;
  const data={name:$('profile-name').value,slot:'0',enabled:$('profile-enabled').checked};
@@ -1221,7 +1453,9 @@ $('schedule-form').addEventListener('submit',e=>{
 
 setInterval(()=>{$('clock').textContent=new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});},1000);
 setInterval(loadStatus,4500);
+// The timeline is a read-only view; changing rows never reloads the emulator.
+setInterval(loadTimeline,5000);
 // The embedded native Serve-Emu browser provides its own continuous WebSocket stream.
 // ADB screenshot capture is now manual fallback only, never an automatic 1.8s loop.
 setInterval(()=>{if(state.page==='tasks')loadTasks();if(state.page==='logs')loadLogs();if(state.page==='qa')loadQa();if(state.page==='statistics')loadStatistics();if(state.page==='emulator')loadDevice();},20000);
-(async()=>{await loadStatus();await loadProfiles();loadTaskStars();if(state.profileId)await loadTasks();loadDevice();})().catch(e=>alertUser(e.message,true));
+(async()=>{setPage(state.page,false);await loadStatus();await loadProfiles();loadTaskStars();loadTimeline();if(state.profileId)await loadTasks();loadDevice();})().catch(e=>alertUser(e.message,true));

@@ -1,7 +1,5 @@
-/* Browser smoke: real authenticated UI, read-only navigation. Requires playwright-core.
- * Login password is read from the local private file, never printed or stored in Git. */
+/* Browser smoke: LAN web console, read-only navigation. Requires playwright-core. */
 const assert=require('node:assert/strict');
-const fs=require('node:fs');
 const os=require('node:os');
 const path=require('node:path');
 const {chromium}=require('playwright-core');
@@ -14,15 +12,10 @@ const {chromium}=require('playwright-core');
   page.on('pageerror',e=>errs.push(String(e)));
   page.on('console',msg=>{if(msg.type()==='error')errs.push('console: '+msg.text())});
   await page.goto(process.env.SURVIVALOPS_WEB_BASE||'https://10.0.0.100:9098/',{waitUntil:'domcontentloaded'});
-  assert.equal(await page.locator('html').getAttribute('lang'),'en','Login page must use English');
-  if(await page.locator('#login-form').count())assert.equal((await page.locator('#login-form label').innerText()).trim(),'Password');
-  const password=fs.readFileSync(path.join(os.homedir(),'.config/survivalops-web/initial-password.txt'),'utf8').trim();
-  if(await page.locator('#login-form').count()){
-    await page.locator('#password').fill(password);
-    await page.locator('#login-form button').click();
-  }
+  assert.equal(await page.locator('html').getAttribute('lang'),'en','Console must use English');
+  assert.equal(await page.locator('#login-form').count(),0,'Console must open directly');
   await page.locator('.nav-btn[data-page="tasks"]').waitFor({timeout:15000});
-  // The post-login navigation can settle after the sidebar is rendered.
+  // Wait for the deferred app script and task API to initialize.
   // Wait until the deferred app script and task API have initialized.
   await page.waitForFunction(()=>typeof state!=='undefined' && state.tasks.length>0,{timeout:15000});
   assert.match(await page.locator('.nav-btn[data-page="tasks"]').innerText(),/Task Manager/);
@@ -95,7 +88,7 @@ const {chromium}=require('playwright-core');
   await page.locator('[data-task-filter="all"]').click();
   const pageLabels={
     dashboard:'Operations Overview',custom:'Saved Custom Tasks',emulator:'Live emulator',
-    statistics:'Execution Statistics',profiles:'Existing Profiles',settings:'Account Security',
+    statistics:'Execution Statistics',profiles:'Existing Profiles',settings:'Settings for',
     logs:'Live Engine Logs',qa:'Task Coach & QA Review'
   };
   for(const [route,label] of Object.entries(pageLabels)){
