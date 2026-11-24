@@ -1,4 +1,4 @@
-const validPages = new Set(['dashboard','timeline','tasks','emulator','statistics','profiles','settings','logs','qa']);
+const validPages = new Set(['dashboard','timeline','tasks','custom','emulator','statistics','profiles','settings','logs','qa']);
 const initialPage = location.hash.slice(1);
 const state = { page: validPages.has(initialPage) ? initialPage : 'dashboard', profiles: [], tasks: [], categories: [], profileId: '', settings: [], taskSettings: [], expandedTasks: new Set(), selectedTaskId: '', taskGroup: 'all', taskFilter: 'all', taskSort: 'logical', taskStars: new Set(), taskBusy: new Set(), taskRevision: 0, status: null, emulator: null, lastError: '' };
 const $ = id => document.getElementById(id);
@@ -22,11 +22,12 @@ function setPage(page, navigate=true) {
   document.body.classList.toggle('is-emulator-page', page === 'emulator');
   document.querySelectorAll('.nav-btn').forEach(btn=>btn.classList.toggle('active',btn.dataset.page===page));
   document.querySelectorAll('.page').forEach(el=>el.classList.toggle('active',el.dataset.view===page));
-  const label = {dashboard:'Overview',timeline:'Task Timeline',tasks:'Task Manager',statistics:'Statistics',emulator:'Emulator',profiles:'Profiles',settings:'Settings',logs:'Logs',qa:'Diagnostics'}[page] || page;
+  const label = {dashboard:'Overview',timeline:'Task Timeline',tasks:'Task Manager',custom:'Custom Tasks',statistics:'Statistics',emulator:'Emulator',profiles:'Profiles',settings:'Settings',logs:'Logs',qa:'Diagnostics'}[page] || page;
   if($('page-title'))$('page-title').textContent = label; if($('breadcrumb'))$('breadcrumb').textContent = label.toUpperCase();
   document.querySelector('.sidebar').classList.remove('open');
   if(page==='timeline'||page==='dashboard') loadTimeline();
   if(page==='tasks') loadTasks();
+  if(page==='custom'){loadCustom();renderBuilder();}
   if(page==='settings'){loadSettings();loadRunLimit();}
   if(page==='emulator') loadDevice();
   if(page==='logs') loadLogs();
@@ -1212,7 +1213,7 @@ async function loadCustom(){
   $('custom-task-list').innerHTML=all.map(t=>{
    const id=esc(t.className);
    return '<form class="custom-row" data-custom-form="'+id+'"><div><strong>'+id+'</strong><small>'+(t.loaded?'Available in Java engine':'Not loaded')+'</small></div><label>Minutes between runs<input type="number" name="offsetMinutes" min="0" max="10080" value="'+esc(t.offsetMinutes)+'"></label><label>Priority<input type="number" name="priority" min="-1000" max="1000" value="'+esc(t.priority)+'"></label><label>Follow-up after hours<input type="number" name="followUpDelayHours" min="1" max="720" value="'+esc(t.followUpDelayHours??8)+'"></label><div class="custom-actions"><span class="pill '+(t.enabled?'good':'')+'">'+(t.enabled?'Enabled':'Disabled')+'</span><button class="secondary small" type="submit" data-custom-action="save" '+(!t.loaded?'disabled':'')+'>Save</button><button class="'+(t.enabled?'danger':'primary')+' small" type="submit" data-custom-action="'+(t.enabled?'disable':'enable')+'" '+(!t.loaded?'disabled':'')+'>'+(t.enabled?'Disable':'Enable')+'</button></div></form>';
-  }).join('')||'<p class="text-muted">No custom tasks imported into this web workspace yet. The 63 built-in routines are in Task Manager.</p>';
+  }).join('')||'<p class="text-muted">No custom tasks imported into this web workspace yet. Built-in routines are in Task Manager.</p>';
  }catch(e){$('custom-task-list').textContent=e.message;}
 }
 async function loadQa(){

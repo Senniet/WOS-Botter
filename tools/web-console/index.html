@@ -10,6 +10,7 @@
       <button class="nav-btn active" data-page="dashboard"><span class="nav-icon">◫</span> Overview</button>
       <button class="nav-btn" data-page="timeline"><span class="nav-icon">◷</span> Task Timeline</button>
       <button class="nav-btn" data-page="tasks"><span class="nav-icon">☷</span> Task Manager</button>
+      <button class="nav-btn" data-page="custom"><span class="nav-icon">✎</span> Custom Tasks</button>
       <button class="nav-btn" data-page="emulator"><span class="nav-icon">▣</span> Emulator</button>
       <button class="nav-btn" data-page="statistics"><span class="nav-icon">▥</span> Statistics</button>
       <button class="nav-btn" data-page="profiles"><span class="nav-icon">♙</span> Profiles</button>
@@ -41,7 +42,7 @@
       </div>
       <div class="split-layout">
         <article class="panel"><div class="panel-heading"><h3>Active Task Queues</h3><span class="muted" id="queue-count">0 queues</span></div><div id="queues" class="panel-content empty-message">No tasks are currently running.</div></article>
-        <article class="panel"><div class="panel-heading"><h3>Workspace</h3></div><div class="quick-links"><button data-go="tasks">☷ <span>Manage Routines <small>Status, settings and execution</small></span>›</button><button data-go="emulator">▣ <span>Live Serve-Emu <small>Continuous WebSocket stream</small></span>›</button><button data-go="qa">◇ <span>Diagnostics <small>Task Coach and screenshots</small></span>›</button></div></article>
+        <article class="panel"><div class="panel-heading"><h3>Workspace</h3></div><div class="quick-links"><button data-go="tasks">☷ <span>Manage Routines <small>Status, settings and execution</small></span>›</button><button data-go="emulator">▣ <span>Live Serve-Emu <small>Continuous live video</small></span>›</button><button data-go="qa">◇ <span>Diagnostics <small>Task Coach and screenshots</small></span>›</button></div></article>
       </div>
       <article class="panel timeline-dashboard-panel"><div class="panel-heading"><h3>Next scheduled routines</h3><button class="secondary small" data-go="timeline" type="button">View full Task Timeline</button></div><div id="dashboard-timeline" class="dashboard-timeline" aria-live="polite">Loading schedule…</div></article>
     </section>
